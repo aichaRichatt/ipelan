@@ -1,19 +1,16 @@
 import { Stack } from "expo-router";
 import React from "react";
 
-export default function _layout() {
+export default function AuthLayout() {
   return (
-    <Stack
-      screenOptions={{
-        headerShown: true,
-      }}
-    >
-      <Stack.Screen
+    <Stack>
+      <Stack.Screen 
         name="login"
-        options={{
-          headerTitle: "Login",
-          headerShown: false,
-        }}
+        options={
+          {
+            headerShown:false,
+          }
+        }
       />
     </Stack>
   );
