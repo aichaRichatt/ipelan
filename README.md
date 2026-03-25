@@ -35,3 +35,5 @@ To learn more about developing your project with Expo, look at the following res
 ## Join the communit
 
 bun install --save react-native-sqlite-storage
+
+npm install --save react-native-sqlite-storage
