@@ -40,19 +40,19 @@ export default function LanguageSelection() {
         >
           <LanguageOption 
             label="Pulaar" 
-            icon="fox" 
+            icon="paw" 
             color="#ff9500" 
             onPress={() => handleLanguageSelect("pulaar")} 
           />
           <LanguageOption 
             label="Soninké" 
-            icon="lion" 
+            icon="cat" 
             color="#4cd964" 
             onPress={() => handleLanguageSelect("soninke")} 
           />
           <LanguageOption 
             label="Wolof" 
-            icon="dolphin" 
+            icon="fish" 
             color="#007aff" 
             onPress={() => handleLanguageSelect("wolof")} 
           />

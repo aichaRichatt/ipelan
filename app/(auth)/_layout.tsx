@@ -2,7 +2,7 @@ import { Stack, useRouter } from "expo-router";
 import React, { useEffect } from "react";
 
 export default function AuthLayout() {
-  const isAuth = false;
+  const isAuth = true;
   const  router=useRouter()
   useEffect(() => {
     if (!isAuth) {

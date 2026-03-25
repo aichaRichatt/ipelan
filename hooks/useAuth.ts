@@ -18,7 +18,7 @@ export function useAuth() {
       }
       
       
-    } catch (err) {
+    } catch (err:any) {
       setError(err.message);
       return  {success:false,"messsaege":err.message}
     }
