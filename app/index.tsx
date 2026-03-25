@@ -8,7 +8,6 @@ import Animated, {
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as SplashScreen from "expo-splash-screen";
 
-// Assets - These should be placed in assets/images by the user
 const LOGO = require("../assets/images/logo_ipelan.png"); 
 const MASCOT = require("../assets/images/mascot_parrot.png"); 
 
@@ -16,11 +15,9 @@ export default function Index() {
   const router = useRouter();
 
   useEffect(() => {
-    // Hide native splash screen immediately
     SplashScreen.hideAsync();
 
     const timer = setTimeout(() => {
-      // Redirect to the new language selection page
       router.push("/(auth)/language-selection");
     }, 2000);
     return () => clearTimeout(timer);
@@ -30,7 +27,6 @@ export default function Index() {
     <SafeAreaView className="flex-1 bg-white">
       <View className="flex-1 px-6 items-center justify-center py-10">
         
-        {/* Top Section: Logo and Title */}
         <Animated.View 
           entering={FadeInUp.delay(200).duration(800)}
           className="items-center mb-10"
@@ -48,7 +44,6 @@ export default function Index() {
           </Text>
         </Animated.View>
 
-        {/* Middle Section: Mascot */}
         <Animated.View 
           entering={FadeIn.delay(500).duration(1000)}
           className="items-center"

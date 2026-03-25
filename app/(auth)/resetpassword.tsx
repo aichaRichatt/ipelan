@@ -1,3 +1,4 @@
+
 import { View, Text,  TextInput, Image, StyleSheet, Alert, ActivityIndicator, Pressable } from "react-native";
 import React, { useState } from "react";
 import { useRouter } from "expo-router";
@@ -7,82 +8,39 @@ import { useLogin } from "../../hooks/useLogin";
 import { useSelector } from "react-redux";
 import { RootState } from "../../services/redux/store";
 
-export default function Login() {
+export default function ResetPassword() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
   
-  const { errors, validateAll } = useLoginValidation();
-  const { login } = useLogin();
+  
   const { isLoading, error: reduxError } = useSelector((state: RootState) => state.auth);
 
-  const handleLogin = async () => {
-    if (validateAll(username, password)) {
-      try {
-        await login(username, password);
-      } catch (err: any) {
-        Alert.alert("Erreur de connexion", err.message);
-      }
-    }
+  const resetPassword = async () => {
+  
   };
 
-  const goToSignup = () => {
-    router.push("/(auth)/signup");
-  };
 
   return (
     <SafeAreaView className="flex-1 bg-white">
       <View style={styles.container}>
         <View className="mb-8 items-center">
-          <Text className="text-3xl font-bold text-primary">Connexion</Text>
-          <Text className="text-gray-500 mt-2">Bienvenue sur Ipelan</Text>
+          <Text className="text-3xl font-bold text-primary">Réinitialiser  mot de passe</Text>
+          <Text className="text-gray-500 mt-2"></Text>
         </View>
 
-        {(reduxError || errors.email || errors.password) && (
+        {(reduxError  ) && (
           <View className="bg-red-100 p-3 rounded-lg mb-4 w-full">
             <Text className="text-red-600 text-center">
-              {reduxError || errors.email || errors.password}
+              {reduxError }
             </Text>
           </View>
         )}
-
-        <View style={styles.sectionStyle}>
-          <Image
-            source={require('../../assets/images/email.png')}
-            style={styles.imageStyle}
-          />
-          <TextInput
-            value={username}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            className="flex-1 h-full"
-            placeholder="Email"
-            underlineColorAndroid="transparent"
-            onChangeText={setUsername}
-          />
-        </View>
-
-        <View style={styles.sectionStyle}>
-          <Image
-            source={require('../../assets/images/loock.png')}
-            style={styles.imageStyle}
-          />
-          <TextInput
-            style={{ flex: 1 }}
-            placeholder="Mot de passe"
-            secureTextEntry
-            underlineColorAndroid="transparent"
-            value={password}
-            onChangeText={setPassword}
-          />
-        </View>
 
         <View className="w-full mt-4">
           {isLoading ? (
             <ActivityIndicator size="large" color="#0000ff" />
           ) : (
             <Pressable 
-              onPress={handleLogin}
+              onPress={resetPassword}
               className="bg-blue-600 p-4 rounded-xl items-center"
             >
               <Text className="text-white font-bold text-lg">Se connecter</Text>
@@ -90,7 +48,7 @@ export default function Login() {
           )}
         </View>
 
-        <Pressable onPress={goToSignup} className="mt-6">
+        <Pressable onPress={()=>router.push("/(auth)/signup" )} className="mt-6">
           <Text className="text-blue-600">Vous n`avez pas de compte ? S`inscrire</Text>
         </Pressable>
       </View>

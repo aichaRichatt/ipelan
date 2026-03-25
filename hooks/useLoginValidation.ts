@@ -1,13 +1,14 @@
 import { useState } from 'react';
 
 export function useLoginValidation() {
-  const [errors, setErrors] = useState<{ username?: string; password?: string }>({});
+  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
 
-  const validateAll = (username: string, password: string) => {
-    const newErrors: { username?: string; password?: string } = {};
+  const validateAll = (email: string, password: string) => {
+    const newErrors: { email?: string; password?: string } = {};
 
-    if (!username || username.length < 3) {
-      newErrors.username = "Le nom d'utilisateur doit avoir au moins 3 caractères";
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!email || !emailRegex.test(email)) {
+      newErrors.email = "Veuillez entrer une adresse email valide";
     }
 
     if (!password || password.length < 6) {

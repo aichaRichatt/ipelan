@@ -1,7 +1,7 @@
 import { moodleFetch, Config } from "./moodleClient";
 
 
-export async function getMoodleToken(username: string, password: string) {
+export async function login(username: string, password: string) {
   return moodleFetch("/login/token.php", {
     username,
     password,
@@ -10,27 +10,37 @@ export async function getMoodleToken(username: string, password: string) {
 }
 
 
-export async function getMoodleProfile(token: string, username: string) {
-  return moodleFetch("/webservice/server.php", {
+export async function getMoodleSiteInfo(token: string) {
+  return moodleFetch("/webservice/rest/server.php", {
     wstoken: token,
-    wsfunction: "core_user_get_users_by_field",
-    moodlewsrestformat: "json",
-    field: "username",
-    values: [username]
+    wsfunction: "core_webservice_get_site_info"
   }, "POST");
 }
 
-export async function signUp(username: string, email: string, password: string, firstname: string, lastname: string) {
+export async function getMoodleProfile(token: string, usernameOrId: string | number, field: string = "username") {
+  const params: any = {
+    wstoken: token,
+    wsfunction: "core_user_get_users_by_field",
+    field: field,
+    values: [usernameOrId]
+  };
+
+  return moodleFetch("/webservice/rest/server.php", params, "POST");
+}
+
+export async function signUp(username: string, email: string, password: string, firstname: string, lastname: string, city: string = "Nouakchott") {
   
-  return moodleFetch("/webservice/server.php", {
+  return moodleFetch("/webservice/rest/server.php", {
+    wstoken: process.env.EXPO_PUBLIC_MOODLE_TOKEN,
     wsfunction: "core_user_create_users",
-    moodlewsrestformat: "json",
     users: [{
       username,
       email,
       password,
       firstname,
-      lastname
+      lastname,
+      city: city,
+      country: "MR"
     }]
   }, "POST");
 }

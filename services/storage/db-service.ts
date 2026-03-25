@@ -11,6 +11,22 @@ export interface UserDB {
   token: string;
 }
 
+export interface CourseDB {
+  id: number;
+  shortname: string;
+  fullname: string;
+  displayname: string;
+  idnumber: string;
+  visible: number;
+  summary: string;
+  summaryformat: number;
+  format: string;
+  showgrades: number;
+  lang: string;
+  enablecompletion: number;
+  completionhasrules: number;
+}
+
 enablePromise(true);
 
 export const getDBConnection = async () => {
@@ -29,7 +45,24 @@ export const createTables = async (db: SQLiteDatabase) => {
         token TEXT NOT NULL
     );`;
 
+  const coursesQuery = `CREATE TABLE IF NOT EXISTS courses(
+        id INTEGER PRIMARY KEY,
+        shortname TEXT,
+        fullname TEXT,
+        displayname TEXT,
+        idnumber TEXT,
+        visible INTEGER,
+        summary TEXT,
+        summaryformat INTEGER,
+        format TEXT,
+        showgrades INTEGER,
+        lang TEXT,
+        enablecompletion INTEGER,
+        completionhasrules INTEGER
+    );`;
+
   await db.executeSql(usersQuery);
+  await db.executeSql(coursesQuery);
 };
 
 export const saveUser = async (db: SQLiteDatabase, user: UserDB) => {
@@ -58,6 +91,45 @@ export const getUser = async (db: SQLiteDatabase, id: number): Promise<UserDB | 
   } catch (error) {
     console.error(error);
     throw Error('Failed to get user');
+  }
+};
+
+export const saveCourses = async (db: SQLiteDatabase, courses: CourseDB[]) => {
+  const insertQuery = `INSERT OR REPLACE INTO courses(id, shortname, fullname, displayname, idnumber, visible, summary, summaryformat, format, showgrades, lang, enablecompletion, completionhasrules) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  
+  for (const course of courses) {
+    await db.executeSql(insertQuery, [
+      course.id,
+      course.shortname,
+      course.fullname,
+      course.displayname,
+      course.idnumber,
+      course.visible,
+      course.summary,
+      course.summaryformat,
+      course.format,
+      course.showgrades,
+      course.lang,
+      course.enablecompletion,
+      course.completionhasrules
+    ]);
+  }
+};
+
+export const getCourses = async (db: SQLiteDatabase): Promise<CourseDB[]> => {
+  try {
+    const courses: CourseDB[] = [];
+    const results = await db.executeSql(`SELECT * FROM courses`);
+    results.forEach(result => {
+      for (let index = 0; index < result.rows.length; index++) {
+        courses.push(result.rows.item(index));
+      }
+    });
+    return courses;
+  } catch (error) {
+    console.error(error);
+    throw Error('Failed to get courses');
   }
 };
 
