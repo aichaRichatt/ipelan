@@ -1,10 +1,10 @@
-import { Stack } from "expo-router";
-import React from "react";
+ import React from "react";
+import { Text, View } from "react-native";
 
 export default function Index() {
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="index" options={{ headerTitle: "Home" }} />
-    </Stack>
+    <View>
+      <Text>Hello from the index page</Text>
+    </View> 
   );
 }
