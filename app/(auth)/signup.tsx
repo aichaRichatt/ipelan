@@ -1,18 +1,19 @@
-import { View, Text, Button, TextInput, Image,StyleSheet, Alert, ActivityIndicator, Pressable } from "react-native";
+
+import { View, Text, Button, TextInput, Image,StyleSheet, Alert, ActivityIndicator } from "react-native";
 import React, { useState } from "react";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../hooks/useAuth";
 import { LoginForm } from "@/types";
 
-export default function Login() {
+export default function SignUp() {
   const router = useRouter();
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const { signIn, loading, error: err } = useAuth();
   
-  function handelSignup(): void {
+  function handelLogin(): void {
     if (!email || !password) setError("Email ou mot de passe incorrecte")
     if (!email.includes("@"  ) || !email.includes(".")) {
       setError("Invalide Email ");
@@ -55,21 +56,7 @@ export default function Login() {
               onChangeText={setEmail}
             />
           </View>
-          <View  style={styles.sectionStyle}>
-                     <Image
-                       source={require('../../assets/images/email.png')}
-                       style={styles.imageStyle}
-                     />
-                     <TextInput
-                       value={email}
-                       autoComplete="email" 
-                       className="flex-1"
-                       placeholder="Email"
-                       underlineColorAndroid="transparent"
-                       onChangeText={setEmail}
-                     />
-                   </View>
-                   
+          
           <View style={styles.sectionStyle} >
             <Image
             source={require('../../assets/images/loock.png')}
@@ -90,9 +77,6 @@ export default function Login() {
           
           <View style={styles.sectionStyle} >
             {loading ? <ActivityIndicator /> :<Button title="Connexion" onPress={() => handelLogin} />}
-          </View>
-          <View>
-            <Pressable onPress={handelSignup}>Vous n'avez pas de compte  </Pressable>
           </View>
         </View>
       </SafeAreaView>

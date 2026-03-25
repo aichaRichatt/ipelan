@@ -1,12 +1,23 @@
-const url: string |undefined = process.env.MOODLE_API_URL
 
-const query = new URLSearchParams({ "wsfunction": "", "wstoken": "dsadsadasdas" })
+export const Config = {
+"baseURL":process.env.MOODLE_API_URL!,
+"service":"moodle_mobile_app",
+}
 
-fetch(`${url}/${query}`,
-  {
-    method: "GET",
-    headers: {
-      "Content-Type":"application/josn",
-    },
-    body: { "e": 3 }.toString(),
-  })
+export async function moodleFetch(endpoint: string,params={}, method= "POST") {
+  const url = `${Config.baseURL}/${endpoint}?${params}`
+  const options = {
+    method,
+    "Content-Type": "application/x-www-form-urlencoded",
+    "body":""
+  };
+  if( method === "POST"){
+    options.body = new URLSearchParams(params).toString();
+  }
+  
+  const response = await fetch(url, options);
+  if (!response) {
+    throw new Error("Reponse du reseau echoue");
+  }
+  return response.json();
+}

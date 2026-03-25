@@ -1,7 +1,14 @@
-import { Stack } from "expo-router";
-import React from "react";
+import { Stack, useRouter } from "expo-router";
+import React, { useEffect } from "react";
 
 export default function AuthLayout() {
+  const isAuth = false;
+  const  router=useRouter()
+  useEffect(() => {
+    if (!isAuth) {
+      router.push("/(auth)/login");
+    }
+  })
   return (
     <Stack>
       <Stack.Screen 
@@ -12,6 +19,10 @@ export default function AuthLayout() {
         name="language-selection"
         options={{ headerShown: false }}
       />
+      <Stack.Screen 
+             name="signup"
+             options={{ headerShown: false }}
+           />
     </Stack>
   );
 }
