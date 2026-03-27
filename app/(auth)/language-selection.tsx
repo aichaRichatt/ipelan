@@ -12,6 +12,7 @@ export default function LanguageSelection() {
   const router = useRouter();
 
   const handleLanguageSelect = (lang: string) => {
+    
     router.push("/(auth)/login");
   };
 
