@@ -1,23 +1,5 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-
-interface UserProfile {
-  id: number;
-  username: string;
-  email: string;
-  fullname: string;
-  ipelan_xp?: number;
-  coins?: number;
-  streak?: number;
-  avatar?: string;
-}
-
-interface AuthState {
-  user: UserProfile | null;
-  token: string | null;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  error: string | null;
-}
+import { IPELANUser, AuthState } from '../../../types';
 
 const initialState: AuthState = {
   user: null,
@@ -35,7 +17,7 @@ const authSlice = createSlice({
       state.isLoading = true;
       state.error = null;
     },
-    loginSuccess: (state, action: PayloadAction<{ user: UserProfile; token: string }>) => {
+    loginSuccess: (state, action: PayloadAction<{ user: IPELANUser; token: string }>) => {
       state.user = action.payload.user;
       state.token = action.payload.token;
       state.isAuthenticated = true;
@@ -53,8 +35,13 @@ const authSlice = createSlice({
       state.isLoading = false;
       state.error = null;
     },
+    updateUser: (state, action: PayloadAction<Partial<IPELANUser>>) => {
+      if (state.user) {
+        state.user = { ...state.user, ...action.payload };
+      }
+    },
   },
 });
 
-export const { loginStart, loginSuccess, loginFailure, logout } = authSlice.actions;
+export const { loginStart, loginSuccess, loginFailure, logout, updateUser } = authSlice.actions;
 export default authSlice.reducer;

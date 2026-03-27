@@ -74,7 +74,7 @@ export interface CompletionData {
  
 
 export type CompletionState = 0 | 1 | 2;
-// 0 = non commence | 1 = complété | 2 = complete avec note
+// 0 = non commence | 1 = complete | 2 = complete avec note
  
 export interface MoodleSection {
   id          : number;

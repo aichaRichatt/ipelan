@@ -19,7 +19,7 @@ export default function Login() {
   const handleLogin = async () => {
     if (validateAll(username, password)) {
       try {
-        await login(username, password);
+         await login(username, password, username, "Ip", "User", "Nktt");
       } catch (err: any) {
         Alert.alert("Erreur de connexion", err.message);
       }
@@ -38,37 +38,40 @@ export default function Login() {
           <Text className="text-gray-500 mt-2">Bienvenue sur Ipelan</Text>
         </View>
 
-        {(reduxError || errors.email || errors.password) && (
+        {(reduxError || errors.username || errors.password) && (
           <View className="bg-red-100 p-3 rounded-lg mb-4 w-full">
             <Text className="text-red-600 text-center">
-              {reduxError || errors.email || errors.password}
+              {reduxError || errors.username || errors.password}
             </Text>
           </View>
         )}
 
-        <View style={styles.sectionStyle}>
+        <View className="flex-row justify-center items-center bg-gray-50 border border-gray-200 h-14 rounded-xl my-2 px-3 w-full">
           <Image
             source={require('../../assets/images/email.png')}
-            style={styles.imageStyle}
+            className="p-3 m-1 h-5 w-5"
+            style={{ resizeMode: 'contain' }}
           />
           <TextInput
             value={username}
             autoCapitalize="none"
             keyboardType="email-address"
-            className="flex-1 h-full"
+            className="flex-1 h-full ml-2"
             placeholder="Email"
             underlineColorAndroid="transparent"
             onChangeText={setUsername}
           />
         </View>
 
-        <View style={styles.sectionStyle}>
+        <View className="flex-row justify-center items-center bg-gray-50 border border-gray-200 h-14 rounded-xl my-2 px-3 w-full">
           <Image
-            source={require('../../assets/images/loock.png')}
-            style={styles.imageStyle}
+            source={require('../../assets/images/lock.png')}
+            className="p-3 m-1 h-5 w-5"
+            style={{ resizeMode: 'contain' }}
           />
           <TextInput
             style={{ flex: 1 }}
+            className="ml-2 h-full"
             placeholder="Mot de passe"
             secureTextEntry
             underlineColorAndroid="transparent"
@@ -76,6 +79,10 @@ export default function Login() {
             onChangeText={setPassword}
           />
         </View>
+
+        <Pressable onPress={() => router.push("/(auth)/resetpassword")} style={{ width: '100%', marginBottom: 15 }}>
+          <Text style={{ color: '#0062FF', textAlign: 'right', fontWeight: '500' }}>Mot de passe oublié ?</Text>
+        </Pressable>
 
         <View className="w-full mt-4">
           {isLoading ? (
@@ -103,27 +110,6 @@ const styles = StyleSheet.create({
     padding: 20,
     flex: 1,
     justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sectionStyle: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f9f9f9',
-    borderWidth: 1,
-    borderColor: '#eee',
-    height: 55,
-    borderRadius: 12,
-    marginVertical: 10,
-    paddingHorizontal: 10,
-    width: '100%',
-  },
-  imageStyle: {
-    padding: 10,
-    margin: 5,
-    height: 20,
-    width: 20,
-    resizeMode: 'contain',
     alignItems: 'center',
   },
 });

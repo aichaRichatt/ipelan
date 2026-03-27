@@ -1,14 +1,16 @@
 import { Stack, useRouter } from "expo-router";
 import React, { useEffect } from "react";
+import { useLogin } from "../../hooks/useLogin";
 
 export default function AuthLayout() {
-  const isAuth = true;
+  const  {login,user,token} = useLogin();
   const  router=useRouter()
   useEffect(() => {
-    if (!isAuth) {
-      router.push("/(auth)/login");
+    if (token && user) {
+      router.push("/(tabs)/(home)" as any);
     }
-  })
+  }, [token, user, router]);
+  
   return (
     <Stack>
       <Stack.Screen 
@@ -22,7 +24,11 @@ export default function AuthLayout() {
       <Stack.Screen 
              name="signup"
              options={{ headerShown: false }}
-           />
+      />
+      <Stack.Screen 
+        name="resetpassword"
+        options={{ headerShown: false }}
+      />
     </Stack>
   );
 }
