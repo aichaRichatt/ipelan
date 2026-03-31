@@ -1,6 +1,6 @@
 export const Config = {
   baseURL: process.env.EXPO_PUBLIC_MOODLE_API_URL!,
-  service: "ipelan_service_test_mobile",
+  service: "ipelan_full",
 };
 
  

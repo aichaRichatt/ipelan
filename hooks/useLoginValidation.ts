@@ -1,14 +1,15 @@
 import { useState } from 'react';
+import { LoginForm, FormErrors } from '../types';
 
 export function useLoginValidation() {
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [errors, setErrors] = useState<FormErrors<LoginForm>>({});
 
-  const validateAll = (email: string, password: string) => {
-    const newErrors: { email?: string; password?: string } = {};
+  const validateAll = (username: string, password: string) => {
+    const newErrors: FormErrors<LoginForm> = {};
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!email || !emailRegex.test(email)) {
-      newErrors.email = "Veuillez entrer une adresse email valide";
+    if (!username || !emailRegex.test(username)) {
+      newErrors.username = "Veuillez entrer une adresse email valide";
     }
 
     if (!password || password.length < 6) {

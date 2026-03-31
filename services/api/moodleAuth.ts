@@ -1,35 +1,103 @@
-import { moodleFetch, Config } from "./moodleClient";
+import { IPELANUser } from "../../types";
 
+const MOODLE_BASE_URL = "https://moodle.richatt.com";
+const USE_MOCK_LOGIN = true; // Set to false for production
+
+async function moodleFetch(endpoint: string, params: Record<string, any>, method: string = "GET") {
+  const url = new URL(`${MOODLE_BASE_URL}${endpoint}`);
+  
+  let body: URLSearchParams | null = null;
+  if (method === "GET") {
+    Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
+  } else {
+    body = new URLSearchParams();
+    Object.keys(params).forEach(key => {
+      if (typeof params[key] === 'object') {
+        const flatten = (obj: any, prefix: string = '') => {
+          Object.keys(obj).forEach(k => {
+            const propName = prefix ? `${prefix}[${k}]` : k;
+            if (typeof obj[k] === 'object' && obj[k] !== null) {
+              flatten(obj[k], propName);
+            } else {
+              body!.append(propName, obj[k]);
+            }
+          });
+          
+        };
+        flatten(params[key], key);
+      } else {
+        console.log(` LOG   Request Param : ${key}=${params[key]}`);
+        body!.append(key, params[key]);
+      }
+    });
+  }
+
+  const response = await fetch(url.toString(), {
+    method,
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: method !== "GET" ? body?.toString() : null,
+  });
+
+  const data = await response.json();
+  console.log(` LOG   Response : ${method} ${url.pathname}`);
+  console.log(` LOG   Response Data:`, JSON.stringify(data).substring(0, 200));
+  
+  if (data.exception) {
+    console.log(` LOG  API Error : ${data.message} (${data.errorcode})`);
+    throw new Error(data.message || "API Exception");
+  }
+  
+  if (data.error) {
+    console.log(` LOG  API Error : ${data.error}`);
+    throw new Error(data.error);
+  }
+  
+  if (data.warnings && data.warnings.length > 0) {
+    console.log(` LOG  API Warning :`, data.warnings);
+  }
+  
+  if (!data || (Array.isArray(data) && data.length < 1)) {
+    console.error(` LOG  API Error : No data returned from API`);
+    throw new Error("No data returned from API. Check Moodle configuration.");
+  }
+  return data;
+}
 
 export async function login(username: string, password: string) {
+  if (USE_MOCK_LOGIN) {
+    console.log("[Mock] Using mock login data");
+    return { token: "mock_token_" + Date.now() };
+  }
+  
   return moodleFetch("/login/token.php", {
     username,
     password,
-    service: Config.service
-  }, "GET");
+    service: "ipelan_full", 
+  });
 }
-
 
 export async function getMoodleSiteInfo(token: string) {
   return moodleFetch("/webservice/rest/server.php", {
     wstoken: token,
-    wsfunction: "core_webservice_get_site_info"
+    wsfunction: "core_webservice_get_site_info",
+    moodlewsrestformat: "json",
   }, "POST");
 }
 
-export async function getMoodleProfile(token: string, usernameOrId: string | number, field: string = "username") {
-  const params: any = {
+export async function getMoodleProfile(token: string, fieldValue: string | number, field: string = "username") {
+  return moodleFetch("/webservice/rest/server.php", {
     wstoken: token,
     wsfunction: "core_user_get_users_by_field",
-    field: field,
-    values: [usernameOrId]
-  };
-
-  return moodleFetch("/webservice/rest/server.php", params, "POST");
+    field,
+    values: [fieldValue],
+    moodlewsrestformat: "json",
+  }, "POST");
 }
 
-export async function signUp(username: string, email: string, password: string, firstname: string, lastname: string, city: string = "Nouakchott") {
-  
+export async function signUp(user: any) {
+  const { username, password, email, firstname, lastname, city } = user;
   return moodleFetch("/webservice/rest/server.php", {
     wstoken: process.env.EXPO_PUBLIC_MOODLE_TOKEN,
     wsfunction: "core_user_create_users",
@@ -39,8 +107,52 @@ export async function signUp(username: string, email: string, password: string, 
       password,
       firstname,
       lastname,
-      city: city,
-      country: "MR"
-    }]
+      city,
+      country: "MR",
+      confirmed: 1
+    }],
+    moodlewsrestformat: "json",
+  }, "POST");
+}
+
+ 
+export async function updateUserProfile(id: number, firstname: string, lastname: string, email: string, city: string = "Nktt") {
+  return moodleFetch("/webservice/rest/server.php", {
+    wstoken: process.env.EXPO_PUBLIC_MOODLE_TOKEN,
+    wsfunction: "core_user_update_users",
+    users: [{
+      id,
+      firstname,
+      lastname,
+      email,
+      city,
+      country: "MR",
+      confirmed: 1,
+      preferences: [
+        { name: 'policyagreed', value: '1' }
+      ]
+    }],
+    moodlewsrestformat: "json"
+  }, "POST");
+}
+
+export async function agreeToSitePolicy(token: string) {
+  return moodleFetch("/webservice/rest/server.php", {
+    wstoken: token,
+    wsfunction: "core_user_agree_site_policy",
+    moodlewsrestformat: "json"
+  }, "POST");
+}
+
+export async function enrolUserInCourse(userId: number, courseId: number = 81) {
+  return moodleFetch("/webservice/rest/server.php", {
+    wstoken: process.env.EXPO_PUBLIC_MOODLE_TOKEN,
+    wsfunction: "enrol_manual_enrol_users",
+    enrolments: [{
+      roleid: 5, // Student role id
+      userid: userId,
+      courseid: courseId
+    }],
+    moodlewsrestformat: "json"
   }, "POST");
 }
