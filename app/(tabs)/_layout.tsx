@@ -4,7 +4,28 @@ import React from "react";
 
 export default function TabsLayout() {
   return (
-    <Tabs  screenOptions={{ tabBarActiveTintColor: '#FF6B00', tabBarStyle: { paddingBottom: 8, paddingTop: 8, height: 65 ,margin:15,borderRadius:20,position: 'absolute', bottom: 0} }}>
+    <Tabs screenOptions={{ 
+      tabBarActiveTintColor: '#FF6B00', 
+      tabBarStyle: { 
+        paddingBottom: 8, 
+        paddingTop: 8, 
+        height: 65, 
+        margin: 15, 
+        borderRadius: 20, 
+        position: 'absolute', 
+        bottom: 0,
+        backgroundColor: 'white',
+        borderTopWidth: 0,
+        elevation: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+      },
+      tabBarShowLabel: true,
+      tabBarHideOnKeyboard: true,
+      headerShown: false,
+    }}>
       <Tabs.Screen 
         name="(home)" 
         options={{ 
@@ -42,6 +63,5 @@ export default function TabsLayout() {
         }} 
       />
     </Tabs>
-    
   );
 }

@@ -67,7 +67,7 @@ export default function ProgressScreen() {
     <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
       {/* Header */}
       <View className="px-5 py-4 flex-row justify-between items-center">
-        <Text className="text-lg font-black tracking-wider uppercase text-gray-800">PROGRESSIN</Text>
+        <Text className="text-lg font-black tracking-wider uppercase text-gray-800">PROGRESSION</Text>
         <Pressable className="p-2" onPress={() => router.push("/(settings)/index")}>
           <Feather name="settings" size={22} color="#374151" />
         </Pressable>

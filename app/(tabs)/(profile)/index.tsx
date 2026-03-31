@@ -30,10 +30,7 @@ export default function ProfileScreen() {
       {/* Header */}
       <View className="px-5 py-4 flex-row justify-between items-center">
         <View className="flex-row items-center">
-          <Pressable className="mr-4" onPress={() => router.back()}>
-            <Feather name="arrow-left" size={24} color="black" />
-          </Pressable>
-          <Text className="text-lg font-black tracking-wider uppercase text-gray-800">MON PROFILE</Text>
+          <Text className="text-lg font-black tracking-wider uppercase text-gray-800">MON PROFIL</Text>
         </View>
         <View className="flex-row items-center">
           <View className="flex-row items-center mr-4">
@@ -88,7 +85,7 @@ export default function ProfileScreen() {
 
         <Pressable 
           className="w-full max-w-[300px] bg-white border border-gray-200 py-4 rounded-xl items-center mb-4"
-          onPress={() => router.push("/(settings)/index")}
+          onPress={() => router.push("/(settings)")}
         >
           <Text className="font-bold text-gray-800 text-[15px]">Paramettre</Text>
           <Pressable

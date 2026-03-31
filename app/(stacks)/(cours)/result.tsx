@@ -5,28 +5,27 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 
 interface ResultScreenProps {
-  score: number;
-  total: number;
-  xpEarned: number;
+  score?: number;
+  total?: number;
+  xpEarned?: number;
   coinsEarned?: number;
   badgeUnlocked?: { name: string; emoji: string };
   activityName?: string;
 }
 
-const MOCK_RESULT: ResultScreenProps = {
-  score: 8,
-  total: 10,
-  xpEarned: 80,
-  coinsEarned: 15,
-  badgeUnlocked: { name: "Quiz Master", emoji: "🏆" },
-  activityName: "Quiz - Salutations",
-};
-
 export default function ResultScreen() {
   const router = useRouter();
-  const result = MOCK_RESULT;
   
-  const percentage = Math.round((result.score / result.total) * 100);
+  const result: ResultScreenProps = {
+    score: 8,
+    total: 10,
+    xpEarned: 80,
+    coinsEarned: 15,
+    badgeUnlocked: { name: "Quiz Master", emoji: "🏆" },
+    activityName: "Quiz - Salutations",
+  };
+  
+  const percentage = Math.round((result.score! / result.total!) * 100);
   
   const getGrade = () => {
     if (percentage >= 90) return { text: "Excellent !", color: "#10B981" };
@@ -107,7 +106,7 @@ export default function ResultScreen() {
                 <Text className="text-gray-700 font-bold text-center">Rejouer</Text>
               </Pressable>
               <Pressable
-                onPress={() => router.push("/(tabs)/(progress)")}
+                onPress={() => router.push("/(tabs)/(progress)" as any)}
                 className="flex-1 bg-[#002366] py-4 rounded-xl ml-2"
               >
                 <Text className="text-white font-bold text-center">Continuer</Text>
@@ -115,7 +114,7 @@ export default function ResultScreen() {
             </View>
             
             <Pressable
-              onPress={() => router.push("/(tabs)/(home)")}
+              onPress={() => router.push("/(tabs)/(home)" as any)}
               className="mt-4 py-2"
             >
               <Text className="text-gray-500 text-center">Retour au parcours</Text>
