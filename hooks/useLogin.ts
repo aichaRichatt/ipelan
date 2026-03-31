@@ -13,6 +13,7 @@ import { RootState } from '../services/redux/store';
 import { useDispatch, useSelector } from 'react-redux';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const USE_MOCK_LOGIN = true; // Sync with moodleAuth.ts
 
 export function useLogin() {
   const dispatch = useDispatch();
@@ -24,15 +25,56 @@ export function useLogin() {
     dispatch(loginStart());
     try {
       console.log("[useLogin] Log In Attempt for:", username);
+      
+      let token: string;
+      let siteInfo: any = null;
+      let moodleUser: any = null;
+      
+      if (USE_MOCK_LOGIN) {
+        console.log("[useLogin] Using MOCK LOGIN MODE");
+        token = "mock_token_" + Date.now();
+        
+        const mockUser: IPELANUser = {
+          id: 1,
+          username: username,
+          firstname: firstName || username.split('@')[0],
+          lastname: lastName || "",
+          email: email || username,
+          fullname: `${firstName || username.split('@')[0]} ${lastName || ""}`.trim(),
+          ipelan_xp: 342,
+          coins: 340,
+          streak: 7,
+          avatar: "",
+          token: token
+        };
+        
+        console.log("[useLogin] Mock user created:", JSON.stringify(mockUser));
+        await saveToken(token);
+        await saveUserData(mockUser);
+        
+        let db = null;
+        try {
+          db = await getDBConnection();
+          if (db) {
+            await createTables(db);
+            await saveUser(db, mockUser as any);
+            console.log("SQLite mock data saved.");
+          }
+        } catch (sqliteError: any) {
+          console.log("sqlite Error:", sqliteError.message || sqliteError);
+        }
+        
+        dispatch(loginSuccess({ user: mockUser, token }));
+        router.replace("/(tabs)/(home)" as any);
+        return { user: mockUser, token };
+      }
+      
       const tokenData = await moodleLogin(username, password);
-      const token = tokenData.token;
+      token = tokenData.token;
 
       if (!token) {
         throw new Error("Impossible de récupérer le jeton Moodle");
       }
-
-      let siteInfo: any = null;
-      let moodleUser: any = null;
 
       const getMoodleUserProfileByAdmin = async (moodleUserId: number) => {
         const adminProfileData = await getMoodleProfile(process.env.EXPO_PUBLIC_MOODLE_TOKEN!, moodleUserId, "id");

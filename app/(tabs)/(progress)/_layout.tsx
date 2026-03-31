@@ -1,9 +1,9 @@
 import { Stack } from "expo-router";
 import React from "react";
 
-export default function HomeLayout() {
+export default function ProgressLayout() {
   return (
-    <Stack screenOptions={{ headerShown: false ,contentStyle: { backgroundColor: 'transparent' }}}>
+    <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" options={{ headerShown: false }} />
     </Stack>
   );

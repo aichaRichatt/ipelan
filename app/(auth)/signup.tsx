@@ -5,7 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useSignup } from "../../hooks/useSignup";
 import { useLogin } from "../../hooks/useLogin";
 import { getDBConnection, getUser, saveUser } from "../../services/storage/db-service";
-import { useSelector, useDispatch } from "react-redux";
+import { useDispatch } from "react-redux";
 import { RootState } from "../../services/redux/store";
 import { updateUser } from "../../services/redux/slices/authSlice";
 import { PolicyModal } from "../../components/PolicyModal";
