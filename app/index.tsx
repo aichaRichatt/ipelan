@@ -9,7 +9,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as SplashScreen from "expo-splash-screen";
 
 const LOGO = require("../assets/images/logo_ipelan.png"); 
-const MASCOT = require("../assets/images/mascot_parrot.png"); 
+const MASCOT = require("../assets/images/mascot_parrot.png");
+
 
 export default function Index() {
   const router = useRouter();
@@ -18,8 +19,11 @@ export default function Index() {
     SplashScreen.hideAsync();
 
     const timer = setTimeout(() => {
-      router.push("/(auth)/language-selection");
-    }, 2000);
+      // Skip auth - go directly to home for UI testing
+      router.replace("/(tabs)/(home)");
+      // Uncomment for real auth:
+      // router.push("/(auth)/onboarding");
+    }, 1500);
     return () => clearTimeout(timer);
   }, [router]);
 

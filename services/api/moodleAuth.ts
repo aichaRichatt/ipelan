@@ -1,6 +1,7 @@
 import { IPELANUser } from "../../types";
 
 const MOODLE_BASE_URL = "https://moodle.richatt.com";
+const USE_MOCK_LOGIN = true; // Set to false for production
 
 async function moodleFetch(endpoint: string, params: Record<string, any>, method: string = "GET") {
   const url = new URL(`${MOODLE_BASE_URL}${endpoint}`);
@@ -21,9 +22,11 @@ async function moodleFetch(endpoint: string, params: Record<string, any>, method
               body!.append(propName, obj[k]);
             }
           });
+          
         };
         flatten(params[key], key);
       } else {
+        console.log(` LOG   Request Param : ${key}=${params[key]}`);
         body!.append(key, params[key]);
       }
     });
@@ -39,13 +42,35 @@ async function moodleFetch(endpoint: string, params: Record<string, any>, method
 
   const data = await response.json();
   console.log(` LOG   Response : ${method} ${url.pathname}`);
+  console.log(` LOG   Response Data:`, JSON.stringify(data).substring(0, 200));
+  
   if (data.exception) {
     console.log(` LOG  API Error : ${data.message} (${data.errorcode})`);
+    throw new Error(data.message || "API Exception");
+  }
+  
+  if (data.error) {
+    console.log(` LOG  API Error : ${data.error}`);
+    throw new Error(data.error);
+  }
+  
+  if (data.warnings && data.warnings.length > 0) {
+    console.log(` LOG  API Warning :`, data.warnings);
+  }
+  
+  if (!data || (Array.isArray(data) && data.length < 1)) {
+    console.error(` LOG  API Error : No data returned from API`);
+    throw new Error("No data returned from API. Check Moodle configuration.");
   }
   return data;
 }
 
 export async function login(username: string, password: string) {
+  if (USE_MOCK_LOGIN) {
+    console.log("[Mock] Using mock login data");
+    return { token: "mock_token_" + Date.now() };
+  }
+  
   return moodleFetch("/login/token.php", {
     username,
     password,

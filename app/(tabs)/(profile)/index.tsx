@@ -1,11 +1,13 @@
-import { View, Text, Pressable, ScrollView, Image, Alert } from "react-native";
+import { View, Text, Pressable, ScrollView, Alert, SafeAreaView as RNSafeAreaView } from "react-native";
 import React from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLogin } from "../../../hooks/useLogin";
 import { AntDesign, Feather } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 
 export default function ProfileScreen() {
-  const { user, logoutUser } = useLogin();
+  const { user, logoutUser, token } = useLogin();
+  const router = useRouter();
 
   const handleLogout = () => {
     Alert.alert(
@@ -22,84 +24,89 @@ export default function ProfileScreen() {
     );
   };
 
-  if (!user) return null;
-
   return (
-    <SafeAreaView className="flex-1 bg-gray-50">
-      <ScrollView className="flex-1 px-4" showsVerticalScrollIndicator={false}>
-        {/* Header - Profile Info */}
-        <View className="items-center mt-8 mb-6">
-          <View className="w-24 h-24 bg-blue-100 rounded-full items-center justify-center mb-4 border-4 border-white shadow-sm">
-            {user.avatar ? (
-              <Image source={{ uri: user.avatar }} className="w-full h-full rounded-full" />
-            ) : (
-              <Text className="text-blue-600 text-3xl font-bold">
-                {user.firstname?.[0]?.toUpperCase() || user.username?.[0]?.toUpperCase()}
-              </Text>
-            )}
+    <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
+      
+      {/* Header */}
+      <View className="px-5 py-4 flex-row justify-between items-center">
+        <View className="flex-row items-center">
+          <Pressable className="mr-4" onPress={() => router.back()}>
+            <Feather name="arrow-left" size={24} color="black" />
+          </Pressable>
+          <Text className="text-lg font-black tracking-wider uppercase text-gray-800">MON PROFILE</Text>
+        </View>
+        <View className="flex-row items-center">
+          <View className="flex-row items-center mr-4">
+            <View className="w-3 h-3 bg-gray-400 rounded-full mr-1"></View>
+            <Text className="font-bold text-xs">{user?.coins ?? 340}</Text>
           </View>
-          <Text className="text-2xl font-bold text-gray-800">{user.firstname || user.username}</Text>
-          <Text className="text-gray-500 mt-1">{user.email}</Text>
+          <Pressable>
+            <Feather name="settings" size={20} color="black" />
+          </Pressable>
+        </View>
+      </View>
+
+      <ScrollView className="flex-1" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120, alignItems: 'center' }}>
+        
+        {/* Profile Card */}
+        <View className="bg-white w-full max-w-[300px] rounded-3xl p-6 mt-8 mb-6 items-center border border-gray-100 shadow-sm" style={{ shadowColor: '#000', shadowOpacity: 0.05, elevation: 1 }}>
+          <View className="w-20 h-20 rounded-full border-2 border-gray-400 items-center justify-center mb-4">
+             <AntDesign name="user" size={40} color="gray" />
+          </View>
+          <Text className="text-lg font-bold text-gray-800 capitalize">{user?.firstname || user?.username || "Amadou"}</Text>
+          <Text className="text-gray-500 text-xs text-center mt-1">{user?.email || "amadou.dialo@exemple.com"}</Text>
         </View>
 
-        {/* Stats row */}
-        <View className="flex-row justify-between bg-white p-4 rounded-2xl shadow-sm mb-6 border border-gray-100">
-          <View className="items-center flex-1 border-r border-gray-100">
-            <View className="bg-yellow-100 p-2 rounded-full mb-2">
-              <Text className="text-lg">🪙</Text>
-            </View>
-            <Text className="text-gray-500 text-xs">Pièces</Text>
-            <Text className="font-bold text-lg text-gray-800">{user.coins || 0}</Text>
+        {/* Stats Grid */}
+        <View className="w-full max-w-[300px] flex-row flex-wrap justify-between mb-8">
+          
+          <View className="bg-white w-[48%] rounded-2xl p-4 items-center border border-gray-100 mb-4 shadow-sm" style={{ shadowColor: '#000', shadowOpacity: 0.02, elevation: 1 }}>
+            <Feather name="star" size={28} color="#F59E0B" className="mb-2" />
+            <Text className="font-bold text-gray-800">{user?.ipelan_xp || 12}</Text>
+            <Text className="text-xs text-gray-500">PX total</Text>
           </View>
           
-          <View className="items-center flex-1 border-r border-gray-100">
-            <View className="bg-orange-100 p-2 rounded-full mb-2">
-              <Text className="text-lg">🔥</Text>
-            </View>
-            <Text className="text-gray-500 text-xs">Série</Text>
-            <Text className="font-bold text-lg text-gray-800">{user.streak || 0} jrs</Text>
+          <View className="bg-white w-[48%] rounded-2xl p-4 items-center border border-gray-100 mb-4 shadow-sm" style={{ shadowColor: '#000', shadowOpacity: 0.02, elevation: 1 }}>
+            <Feather name="award" size={28} color="#10B981" className="mb-2" />
+            <Text className="font-bold text-gray-800">1</Text>
+            <Text className="text-xs text-gray-500">Niveaul</Text>
           </View>
 
-          <View className="items-center flex-1">
-            <View className="bg-blue-100 p-2 rounded-full mb-2">
-              <Text className="text-lg">⭐</Text>
-            </View>
-            <Text className="text-gray-500 text-xs">XP</Text>
-            <Text className="font-bold text-lg text-gray-800">{user.ipelan_xp || 0}</Text>
+          <View className="bg-white w-[48%] rounded-2xl p-4 items-center border border-gray-100 shadow-sm" style={{ shadowColor: '#000', shadowOpacity: 0.02, elevation: 1 }}>
+            <Feather name="star" size={28} color="#F59E0B" className="mb-2" />
+            <Text className="font-bold text-gray-800">{user?.streak || 12}</Text>
+            <Text className="text-xs text-gray-500">PX total</Text>
           </View>
+          
+          <View className="bg-white w-[48%] rounded-2xl p-4 items-center border border-gray-100 shadow-sm" style={{ shadowColor: '#000', shadowOpacity: 0.02, elevation: 1 }}>
+            <Feather name="award" size={28} color="#10B981" className="mb-2" />
+            <Text className="font-bold text-gray-800">1</Text>
+            <Text className="text-xs text-gray-500">Niveaul</Text>
+          </View>
+
         </View>
 
-        {/* Menu Options */}
-        <View className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-6">
-          <MenuOption icon="user" title="Modifier le profil" color="#3b82f6" />
-          <View className="h-[1px] bg-gray-100 ml-12" />
-          <MenuOption icon="settings" title="Paramètres" color="#64748b" />
-          <View className="h-[1px] bg-gray-100 ml-12" />
-          <MenuOption icon="help-circle" title="Aide et support" color="#10b981" />
-        </View>
+        <Pressable 
+          className="w-full max-w-[300px] bg-white border border-gray-200 py-4 rounded-xl items-center mb-4"
+          onPress={() => router.push("/(settings)/index")}
+        >
+          <Text className="font-bold text-gray-800 text-[15px]">Paramettre</Text>
+          <Pressable
+            className=""
+            onPress={() => router.push("/(settings)/index")}
+          >
+            <Feather name="settings" size={20} color="#6B7280" className="mb-2" />
+          </Pressable>
+        </Pressable>
 
-        {/* Logout Button */}
         <Pressable 
           onPress={handleLogout}
-          className="flex-row items-center justify-center bg-red-50 p-4 rounded-2xl border border-red-100 mb-8"
+          className="w-full max-w-[300px] bg-[#FF1C1C] py-4 rounded-xl items-center"
         >
-          <Feather name="log-out" size={20} color="#ef4444" />
-          <Text className="text-red-500 font-bold ml-2 text-lg">Se déconnecter</Text>
+          <Text className="font-bold text-white text-[15px]">Déconnecter</Text>
         </Pressable>
-        
+
       </ScrollView>
     </SafeAreaView>
-  );
-}
-
-function MenuOption({ icon, title, color }: { icon: any, title: string, color: string }) {
-  return (
-    <Pressable className="flex-row items-center p-4 active:bg-gray-50">
-      <View style={{ backgroundColor: `${color}15` }} className="p-2 rounded-xl mr-3">
-        <Feather name={icon} size={20} color={color} />
-      </View>
-      <Text className="flex-1 text-gray-800 font-medium text-base">{title}</Text>
-      <Feather name="chevron-right" size={20} color="#cbd5e1" />
-    </Pressable>
   );
 }
