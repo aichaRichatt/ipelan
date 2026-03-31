@@ -1,7 +1,7 @@
 import { AntDesign, Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
-import { Pressable, Text, TextInput, View, ScrollView } from "react-native";
+import { Pressable, Text, TextInput, View, ScrollView, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function EditProfileScreen() {
@@ -86,6 +86,26 @@ export default function EditProfileScreen() {
             />
           </View>
 
+        </View>
+
+        {/* Save Button */}
+        <View className="mt-6 mb-8">
+          <Pressable
+            onPress={() => {
+              Alert.alert("Succès", "Profil mis à jour avec succès");
+              router.back();
+            }}
+            className="bg-[#002366] rounded-2xl py-4 items-center shadow-lg"
+            style={{
+              shadowColor: "#002366",
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.3,
+              shadowRadius: 8,
+              elevation: 4,
+            }}
+          >
+            <Text className="text-white font-bold text-lg">Sauvegarder</Text>
+          </Pressable>
         </View>
 
       </ScrollView>

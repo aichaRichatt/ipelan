@@ -15,7 +15,7 @@ const DICTATION_WORDS: DictationWord[] = [
   { id: 2, word: "Baadi", hint: "Au revoir" },
   { id: 3, word: "Ndeyni", hint: "Merci" },
   { id: 4, word: "Min yaha", hint: "Comment vas-tu ?" },
-  { id: 5, word: "Alhamdulilah", hint: "Praise to God" },
+  { id: 5, word: "Alhambulilah", hint: "Praise to God" },
 ];
 
 export default function DictationScreen() {

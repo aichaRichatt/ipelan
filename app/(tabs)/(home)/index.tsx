@@ -1,9 +1,9 @@
 import { AntDesign, Feather } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { Pressable, Text, View, ScrollView } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLogin } from "../../../hooks/useLogin";
-import { useRouter } from "expo-router";
 
 interface ModuleData {
   id: string;
@@ -101,7 +101,7 @@ const MOCK_QUICK_ACTIONS: QuickActionData[] = [
     icon: "volume-2",
     bgColor: "bg-green-50",
     iconColor: "#10B981",
-    route: "/(tabs)/(cours)/listening",
+    route: "/(stacks)/(cours)/listening",
   },
   {
     id: "3",
@@ -110,7 +110,7 @@ const MOCK_QUICK_ACTIONS: QuickActionData[] = [
     icon: "edit",
     bgColor: "bg-yellow-50",
     iconColor: "#F59E0B",
-    route: "/(tabs)/(cours)/dictation",
+    route: "/(stacks)/(cours)/dictation",
   },
   {
     id: "4",
@@ -119,7 +119,7 @@ const MOCK_QUICK_ACTIONS: QuickActionData[] = [
     icon: "link",
     bgColor: "bg-purple-50",
     iconColor: "#9333EA",
-    route: "/(tabs)/(cours)/association",
+    route: "/(stacks)/(cours)/association",
   },
 ];
 
@@ -144,16 +144,15 @@ export default function HomeScreen() {
   const [selectedLevelId, setSelectedLevelId] = useState<number | null>(1);
 
   useEffect(() => {
-    // Auth bypassed for UI testing
   }, [token]);
 
   const handleSettingsPress = () => {
-    router.push("/(settings)/index");
+    router.push("/(settings)/index" as any);
   };
 
   const handleModulePress = (module: ModuleData) => {
     if (!module.isLocked) {
-      router.push(`/(tabs)/(cours)/${module.id}`);
+      router.push(`/(stacks)/(cours)/${module.id}` as any);
     }
   };
 
@@ -251,7 +250,7 @@ export default function HomeScreen() {
 
           <View className="mt-8 mb-6">
             <Text className="text-lg font-bold mb-4 text-black">Actions rapides</Text>
-            <View className="flex-row flex-wrap justify-between">
+            {/*<View className="flex-row flex-wrap justify-between">
               {MOCK_QUICK_ACTIONS.map((action) => (
                 <QuickActionCard 
                   key={action.id}
@@ -262,7 +261,7 @@ export default function HomeScreen() {
                   onPress={() => handleQuickActionPress(action)}
                 />
               ))}
-            </View>
+            </View>*/}
           </View>
 
         </View>

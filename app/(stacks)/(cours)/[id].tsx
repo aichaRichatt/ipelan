@@ -71,8 +71,7 @@ export default function ModuleDetailScreen() {
       setModuleData(data);
       setIsLoading(false);
     }, 300);
-  },
-    [id]);
+  }, [id]);
 
   if (isLoading || !moduleData) {
     return (
@@ -100,20 +99,14 @@ export default function ModuleDetailScreen() {
     if (lesson.isLocked) return;
     
     if (lesson.type === "quiz") {
-      router.push("/(quiz)/index");
+      router.push("/(quiz)/index" as any);
     } else if (lesson.type === "exercise") {
-      router.push("/(tabs)/(cours)/association");
+      router.push("/(stacks)/(cours)/association" as any);
     } else if (lesson.type === "audio") {
-      router.push("/(tabs)/(cours)/listening");
+      router.push("/(stacks)/(cours)/listening" as any);
     } else if (lesson.type === "game") {
-      router.push("/(tabs)/(cours)/game");
-    } else if (lesson.type === "reading") {
-      router.push(`/(tabs)/(cours)/lesson/${lesson.id}`);
+      router.push("/(stacks)/(cours)/game" as any);
     }
-  };
-
-  const handleViewPath = () => {
-    router.push(`/(tabs)/(cours)/learning-path?id=${id}`);
   };
 
   return (
@@ -234,22 +227,6 @@ export default function ModuleDetailScreen() {
         </View>
 
         <View className="px-5 mt-6 mb-8">
-          <Pressable
-            onPress={handleViewPath}
-            className="bg-[#002366] rounded-2xl py-4 items-center mb-3"
-            style={{
-              shadowColor: "#F59E0B",
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.3,
-              shadowRadius: 8,
-              elevation: 4,
-            }}
-          >
-            <Text className="text-white font-bold text-lg">
-              Voir le parcours
-            </Text>
-          </Pressable>
-          
           <Pressable
             onPress={() => {
               const nextLesson = moduleData.lessons.find(l => !l.isCompleted && !l.isLocked);

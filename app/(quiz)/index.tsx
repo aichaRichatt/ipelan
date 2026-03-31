@@ -131,6 +131,7 @@ export default function QuizScreen() {
               {/* Score Circle */}
               <View className="w-32 h-32 rounded-full border-8 mb-6 items-center justify-center"
                 style={{ 
+                  
                   borderColor: percentage >= 60 ? '#10B981' : '#EF4444',
                   backgroundColor: `${percentage >= 60 ? '#10B981' : '#EF4444'}10`
                 }}

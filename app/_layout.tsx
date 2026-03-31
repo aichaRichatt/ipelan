@@ -18,7 +18,15 @@ export default function RootLayout() {
 
   return (
     <Provider store={store}>
-      <Stack screenOptions={{ headerShown: false }} >
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="(stacks)" options={{ headerShown: false }} />
+        <Stack.Screen name="(quiz)" options={{ headerShown: false }} />
+        <Stack.Screen name="(settings)/index" options={{ headerShown: false }} />
+        <Stack.Screen name="(settings)/about" options={{ headerShown: false }} />
+        <Stack.Screen name="(settings)/edit-profile" options={{ headerShown: false }} />
+        <Stack.Screen name="(auth)" options={{ headerShown: false }} />
       </Stack>
     </Provider>
   );

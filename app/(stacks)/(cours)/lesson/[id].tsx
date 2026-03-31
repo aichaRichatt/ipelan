@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import React, { useState } from "react";
-import { Pressable, Text, TextInput, View, ScrollView } from "react-native";
+import { Pressable, Text, View, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
@@ -24,7 +24,7 @@ const LESSON_CONTENT: Record<number, LessonContent> = {
       { word: "Ndeyni", translation: "Merci", audio: true },
       { word: "Min yaha", translation: "Comment vas-tu ?", audio: true },
     ],
-    text: "En Pulaar, les salutations sont tres importantes dans la vie quotidienne. Quand tu rencontres quelqu'un, il est poli de dire 'Jaa' pour saluer. Si tu veux dire au revoir, utilise 'Baadi'. N'oublie pas de dire 'Ndeyni' quand quelqu'un fait quelque chose pour toi !",
+    text: "En Pulaar, les salutations sont très importantes dans la vie quotidienne. Quand tu rencontres quelqu'un, il est poli de dire 'Jaa' pour saluer. Si tu veux dire au revoir, utilise 'Baadi'. N'oublie pas de dire 'Ndeyni' quand quelqu'un fait quelque chose pour toi !",
     images: [
       { label: "Deux personnes qui se saluent", color: "#60A5FA" },
       { label: "Une famille Mauritanienne", color: "#34D399" },
@@ -40,9 +40,9 @@ const LESSON_CONTENT: Record<number, LessonContent> = {
       { word: "Yiiro", translation: "Fils/Fille" },
       { word: "Kombo", translation: "Chat" },
     ],
-    text: "Maintenant, apprenons le vocabulaire de base en Pulaar. La mere se dit 'Nde' et le pere se dit 'Bapp'. Les enfants sont appeles 'Yiiro'. Dans les maisons mauritaniennes, on trouve souvent des chats appeles 'Kombo'.",
+    text: "Maintenant, apprenons le vocabulaire de base en Pulaar. La mère se dit 'Nde' et le père se dit 'Bapp'. Les enfants sont appelés 'Yiiro'. Dans les maisons mauritaniennes, on trouve souvent des chats appelés 'Kombo'.",
     images: [
-      { label: "Une mere avec son enfant", color: "#F87171" },
+      { label: "Une mère avec son enfant", color: "#F87171" },
       { label: "Un chat dans une maison", color: "#FBBF24" },
     ],
   },
@@ -57,7 +57,6 @@ export default function LessonScreen() {
   const [showTranslation, setShowTranslation] = useState<Record<number, boolean>>({});
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false);
   const [isPlaying, setIsPlaying] = useState<Record<number, boolean>>({});
-  const [scrolledPast, setScrolledPast] = useState(false);
 
   const handlePlayAudio = (index: number) => {
     setIsPlaying(prev => ({ ...prev, [index]: true }));
@@ -79,7 +78,7 @@ export default function LessonScreen() {
   };
 
   const handleContinue = () => {
-    router.push("/(quiz)/index");
+    router.push("/(quiz)/index" as any);
   };
 
   return (
@@ -127,7 +126,7 @@ export default function LessonScreen() {
                   >
                     {item.audio ? (
                       isPlaying[index] ? (
-                        <View className="w-4 h-4 bg-[#60A5FA] rounded-full animate-pulse" />
+                        <View className="w-4 h-4 bg-[#60A5FA] rounded-full" />
                       ) : (
                         <Feather name="volume-2" size={18} color="#60A5FA" />
                       )

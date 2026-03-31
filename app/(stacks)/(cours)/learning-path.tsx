@@ -29,7 +29,7 @@ const MOCK_MODULE: Record<string, ModuleData> = {
   "1": {
     id: 1,
     title: "Salutations",
-    description: "Dans ce module, tu apprendras les salutations de base en Pulaar. Tu découvriras comment dire bonjour, au revoir, et outras expresiones courantes utilisées quotidiennement.",
+    description: "Dans ce module, tu apprendras les salutations de base en Pulaar.",
     language: "Pulaar",
     level: "Fondamental",
     totalLessons: 5,
@@ -76,7 +76,7 @@ export default function LearningPathScreen() {
 
   const handleLessonPress = (lesson: Lesson) => {
     if (lesson.isLocked) return;
-    router.push(`/(tabs)/(cours)/lesson/${lesson.id}`);
+    router.push(`/(stacks)/(cours)/lesson/${lesson.id}` as any);
   };
 
   const handleContinue = () => {
