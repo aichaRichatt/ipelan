@@ -61,7 +61,6 @@ export default function QuizScreen() {
   const [answers, setAnswers] = useState<number[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [showResult, setShowResult] = useState(false);
-  const [showFeedback, setShowFeedback] = useState(false);
 
   const question = QUIZ_DATA[currentQuestion];
   const progress = ((currentQuestion + 1) / QUIZ_DATA.length) * 100;
@@ -81,14 +80,12 @@ export default function QuizScreen() {
       setScore(prev => prev + 1);
     }
     
-    setShowFeedback(true);
   };
 
   const handleNext = () => {
     if (currentQuestion < QUIZ_DATA.length - 1) {
       setCurrentQuestion(prev => prev + 1);
       setSelectedAnswer(null);
-      setShowFeedback(false);
     } else {
       setShowResult(true);
     }
@@ -187,7 +184,6 @@ export default function QuizScreen() {
                     setScore(0);
                     setAnswers([]);
                     setShowResult(false);
-                    setShowFeedback(false);
                   }}
                   className="flex-1 bg-[#4a90e2] py-4 rounded-xl ml-2"
                 >
@@ -288,8 +284,8 @@ export default function QuizScreen() {
             {question.options.map((option, index) => {
               const isSelected = selectedAnswer === index;
               const isCorrect = index === question.correctIndex;
-              const showCorrect = showFeedback && isCorrect;
-              const showWrong = showFeedback && isSelected && !isCorrect;
+              const showCorrect = isCorrect;
+              const showWrong = isSelected && !isCorrect;
 
               let bgColor = "bg-white";
               let borderColor = "border-gray-200";
@@ -341,53 +337,11 @@ export default function QuizScreen() {
             })}
           </View>
 
-          {/* Feedback */}
-          {showFeedback && (
-            <View className={`mt-4 rounded-xl p-4 ${
-              selectedAnswer === question.correctIndex ? 'bg-green-50' : 'bg-red-50'
-            }`}>
-              <View className="flex-row items-center">
-                <Feather 
-                  name={selectedAnswer === question.correctIndex ? "check-circle" : "x-circle"} 
-                  size={24} 
-                  color={selectedAnswer === question.correctIndex ? "#10B981" : "#EF4444"} 
-                />
-                <Text className={`ml-3 font-bold ${
-                  selectedAnswer === question.correctIndex ? 'text-green-700' : 'text-red-700'
-                }`}>
-                  {selectedAnswer === question.correctIndex ? "Bravo ! C'est correct !" : "Incorrect. La bonne réponse était :"}
-                </Text>
-              </View>
-              {selectedAnswer !== question.correctIndex && (
-                <Text className="text-green-700 font-bold mt-1 ml-9">
-                  {question.options[question.correctIndex]}
-                </Text>
-              )}
-            </View>
-          )}
+          
         </View>
       </ScrollView>
 
-      {/* Next Button */}
-      {showFeedback && (
-        <View className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-5 py-4">
-          <Pressable
-            onPress={handleNext}
-            className="bg-[#F59E0B] rounded-2xl py-4 items-center"
-            style={{
-              shadowColor: "#F59E0B",
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.3,
-              shadowRadius: 8,
-              elevation: 4,
-            }}
-          >
-            <Text className="text-white font-bold text-lg">
-              {currentQuestion < QUIZ_DATA.length - 1 ? "Question suivante" : "Voir les résultats"}
-            </Text>
-          </Pressable>
-        </View>
-      )}
+      
     </SafeAreaView>
   );
 }

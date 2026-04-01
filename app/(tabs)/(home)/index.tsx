@@ -1,7 +1,7 @@
-import { AntDesign, Feather } from "@expo/vector-icons";
+import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View, Image } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLogin } from "../../../hooks/useLogin";
 
@@ -17,6 +17,7 @@ interface ModuleData {
   icon: string;
   iconColor: string;
   iconBg: string;
+  levelId: number; 
 }
 
 interface QuickActionData {
@@ -34,14 +35,15 @@ const MOCK_MODULES: ModuleData[] = [
     id: "1",
     moduleName: "Module 1",
     title: "Salutations",
-    description: "Apprendre à saluer en Pulaar",
-    xp: 12,
+    description: "Apprende à saluer en Pulaar",
+    xp: 30,
     isLocked: false,
     lessonsCount: 5,
-    completedLessons: 2,
+    completedLessons: 5,
     icon: "smile",
-    iconColor: "#92400E",
-    iconBg: "bg-orange-100",
+    iconColor: "#10B981",
+    iconBg: "bg-green-100",
+    levelId: 1,
   },
   {
     id: "2",
@@ -51,10 +53,11 @@ const MOCK_MODULES: ModuleData[] = [
     xp: 30,
     isLocked: false,
     lessonsCount: 4,
-    completedLessons: 0,
+    completedLessons: 1,
     icon: "users",
-    iconColor: "#059669",
-    iconBg: "bg-green-100",
+    iconColor: "#6366F1",
+    iconBg: "bg-indigo-100",
+    levelId: 1,
   },
   {
     id: "3",
@@ -66,8 +69,9 @@ const MOCK_MODULES: ModuleData[] = [
     lessonsCount: 6,
     completedLessons: 0,
     icon: "hash",
-    iconColor: "#DC2626",
-    iconBg: "bg-red-100",
+    iconColor: "#F59E0B",
+    iconBg: "bg-amber-100",
+    levelId: 2,
   },
   {
     id: "4",
@@ -79,8 +83,9 @@ const MOCK_MODULES: ModuleData[] = [
     lessonsCount: 5,
     completedLessons: 0,
     icon: "droplet",
-    iconColor: "#7C3AED",
-    iconBg: "bg-purple-100",
+    iconColor: "#EC4899",
+    iconBg: "bg-pink-100",
+    levelId: 3,
   },
 ];
 
@@ -96,9 +101,9 @@ const MOCK_QUICK_ACTIONS: QuickActionData[] = [
   },
   {
     id: "2",
-    title: "Audio",
+    title: "Oral",
     subtitle: "Écoute et apprends",
-    icon: "volume-2",
+    icon: "headphones",
     bgColor: "bg-green-50",
     iconColor: "#10B981",
     route: "/(stacks)/(cours)/listening",
@@ -107,8 +112,8 @@ const MOCK_QUICK_ACTIONS: QuickActionData[] = [
     id: "3",
     title: "Dictée",
     subtitle: "Écris ce que tu entends",
-    icon: "edit",
-    bgColor: "bg-yellow-50",
+    icon: "edit-3",
+    bgColor: "bg-amber-50",
     iconColor: "#F59E0B",
     route: "/(stacks)/(cours)/dictation",
   },
@@ -130,21 +135,18 @@ const getIconComponent = (iconName: string, size: number, color: string) => {
     case "hash": return <Feather name="hash" size={size} color={color} />;
     case "droplet": return <Feather name="droplet" size={size} color={color} />;
     case "edit-2": return <Feather name="edit-2" size={size} color={color} />;
-    case "volume-2": return <Feather name="volume-2" size={size} color={color} />;
-    case "edit": return <Feather name="edit" size={size} color={color} />;
+    case "headphones": return <Feather name="headphones" size={size} color={color} />;
+    case "edit-3": return <Feather name="edit-3" size={size} color={color} />;
     case "link": return <Feather name="link" size={size} color={color} />;
-    case "book": return <Feather name="book" size={size} color={color} />;
     default: return <Feather name="book" size={size} color={color} />;
   }
 };
+const DefaultProfileImage = require('../../../assets/images/defaultprofile.png');
 
 export default function HomeScreen() {
   const { user: loggedUser, token } = useLogin();
   const router = useRouter();
-  const [selectedLevelId, setSelectedLevelId] = useState<number | null>(1);
-
-  useEffect(() => {
-  }, [token]);
+  const [selectedLevelId, setSelectedLevelId] = useState<number>(1);
 
   const handleSettingsPress = () => {
     router.push("/(settings)/index" as any);
@@ -156,65 +158,151 @@ export default function HomeScreen() {
     }
   };
 
-  const handleQuickActionPress = (action: QuickActionData) => {
-    router.push(action.route as any);
-  };
+  const filteredModules = MOCK_MODULES.filter(m => m.levelId === selectedLevelId);
 
   return (  
     <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
       <ScrollView 
         showsVerticalScrollIndicator={false} 
+        contentContainerStyle={{ paddingBottom: 100 }}
       >
-        <View className="px-5 py-2 mt-2 ">
+        <View className="px-5 pt-4">
           
           <View className="flex-row justify-between items-center mb-6">
             <View className="flex-row items-center">
-              <View className="bg-gray-800 rounded-full p-2 mr-3">
-                <AntDesign name="user" size={24} color="white" />
-              </View>
-              <View>
-                <Text className="text-gray-500 text-xs font-semibold tracking-wider uppercase">
-                  BIENVENUE,
+              <Pressable onPress={() => router.push("/(tabs)/(profile)")}>
+                <View className="w-12 h-12 rounded-full border-2 border-[#002366] p-0.5 overflow-hidden">
+                  <Image 
+                    source={loggedUser?.image ? { uri: loggedUser?.image } : DefaultProfileImage} 
+                    className="w-full h-full rounded-full"
+                  />
+                </View>
+              </Pressable>
+              <View className="ml-3">
+                <Text className="text-gray-500 text-xs font-semibold uppercase tracking-wider">
+                  Àndu,
                 </Text>
-                <Text className="text-lg font-bold text-gray-900 uppercase">
-                  {loggedUser?.firstname || loggedUser?.username || "AMADOU"}
+                <Text className="text-lg font-bold text-gray-900">
+                  {loggedUser?.firstname || loggedUser?.username || "Ahmadou"}
                 </Text>
               </View>
             </View>
 
-            <View className="flex-row items-center">
-              <View className="flex-row items-center mr-4">
-                <View className="w-3 h-3 bg-yellow-400 rounded-full mr-1"></View>
-                <Text className="font-bold text-xs">{loggedUser?.coins ?? 340}</Text>
+            <View className="flex-row items-center space-x-3">
+              <View className="flex-row items-center bg-white px-2 py-1 rounded-full border border-gray-100 shadow-sm">
+                <Text className="text-sm mr-1">🔥</Text>
+                <Text className="font-bold text-xs text-[#EF4444]">{loggedUser?.streak ?? 5}</Text>
               </View>
-              <Pressable onPress={handleSettingsPress} className="p-2">
-                <Feather name="settings" size={22} color="#374151" />
+              <View className="flex-row items-center bg-white px-2 py-1 rounded-full border border-gray-100 shadow-sm">
+                <Ionicons name="medal" size={14} color="#8B5CF6" />
+                <Text className="font-bold text-xs text-[#8B5CF6] ml-1">3</Text>
+              </View>
+              <Pressable onPress={() => router.push("/(settings)")} className="p-2 bg-white rounded-full border border-gray-100 shadow-sm">
+                <Feather name="settings" size={18} color="#374151" />
               </Pressable>
             </View>
           </View>
 
-          <MainCard 
-            title="PULAAR — FONDAMENTAL" 
-            progress={68} 
-            completedText="68% Complété" 
-            moduleText="5/8 Modules"
-          />
+          <View className="flex-row flex-wrap justify-between mb-8">
+            <StatsCard 
+              label="XP Total" 
+              value={`${loggedUser?.ipelan_xp ?? 1240}`} 
+              icon={<AntDesign name="star" size={16} color="#F59E0B" />}
+              bgColor="bg-orange-50"
+              textColor="text-orange-600"
+            />
+            <StatsCard 
+              label="Jours Série" 
+              value={`${loggedUser?.streak ?? 5}`} 
+              icon={<Ionicons name="flame" size={16} color="#EF4444" />}
+              bgColor="bg-red-50"
+              textColor="text-red-600"
+            />
+            <StatsCard 
+              label="Badges" 
+              value="3" 
+              icon={<Ionicons name="medal" size={16} color="#8B5CF6" />}
+              bgColor="bg-purple-50"
+              textColor="text-purple-600"
+            />
+            <StatsCard 
+              label="Leçons" 
+              value="12" 
+              icon={<Feather name="book-open" size={16} color="#10B981" />}
+              bgColor="bg-green-50"
+              textColor="text-green-600"
+            />
+          </View>
 
-          <View className="mt-8 mb-4">
-            <Text className="text-lg font-bold mb-4 text-black">Niveau</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <Pressable 
+            onPress={() => router.push("/(stacks)/(cours)/learning-path" as any)}
+            className="mb-8"
+          >
+            <View 
+              className="bg-[#002366] rounded-3xl p-5 overflow-hidden"
+              style={{
+                shadowColor: "#002366",
+                shadowOffset: { width: 0, height: 10 },
+                shadowOpacity: 0.2,
+                shadowRadius: 15,
+                elevation: 8,
+              }}
+            >
+              <View className="flex-row justify-between items-start mb-4">
+                <View>
+                  <Text className="text-white/70 text-xs font-semibold uppercase tracking-wider mb-1">
+                    Reprendre l'activité
+                  </Text>
+                  <Text className="text-white text-xl font-bold">
+                    La famille en Pulaar
+                  </Text>
+                </View>
+                <View className="bg-white/20 p-2 rounded-xl">
+                  <Ionicons name="play" size={24} color="white" />
+                </View>
+              </View>
+              
+              <View className="mb-4">
+                <View className="flex-row justify-between items-center mb-1.5">
+                  <Text className="text-white/80 text-xs">Progression</Text>
+                  <Text className="text-white text-xs font-bold">60%</Text>
+                </View>
+                <View className="h-2 bg-white/20 rounded-full overflow-hidden">
+                  <View className="h-full bg-orange-400 rounded-full w-[60%]" />
+                </View>
+              </View>
+
+              <View className="flex-row justify-between items-center">
+                <View className="flex-row -space-x-2">
+                </View>
+                <View className="bg-white px-4 py-2 rounded-full">
+                  <Text className="text-[#002366] font-bold text-xs">Continuer</Text>
+                </View>
+              </View>
+            </View>
+          </Pressable>
+
+          <View className="mb-6">
+            <View className="flex-row justify-between items-center mb-4">
+              <Text className="text-xl font-bold text-gray-900">Modules</Text>
+              <Pressable onPress={() => router.push("/(tabs)/(cours)/index" as any)}>
+                <Text className="text-blue-600 font-semibold text-xs">Voir tout</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-4">
               <View className="flex-row space-x-2">
                 {['Fondamental', 'Intermédiaire', 'Avancé'].map((level, index) => (
                   <Pressable
                     key={level}
                     onPress={() => setSelectedLevelId(index + 1)}
-                    className={`px-4 py-2 rounded-full ${
+                    className={`px-5 py-2.5 rounded-2xl ${
                       selectedLevelId === index + 1 
                         ? 'bg-[#002366]' 
-                        : 'bg-white border border-gray-200'
-                    }`}
+                        : 'bg-white border border-gray-100'
+                    } shadow-sm`}
                   >
-                    <Text className={`font-semibold text-sm ${
+                    <Text className={`font-bold text-sm ${
                       selectedLevelId === index + 1 
                         ? 'text-white' 
                         : 'text-gray-700'
@@ -225,44 +313,51 @@ export default function HomeScreen() {
                 ))}
               </View>
             </ScrollView>
-          </View>
-
-          <View className="mt-2">
-            <View className="flex-row justify-between items-center mb-4">
-              <Text className="text-lg font-bold text-black">Cours disponibles</Text>
-            </View>
             
-            {MOCK_MODULES.map((module) => (
-              <ModuleCard 
-                key={module.id}
-                moduleName={module.moduleName}
-                title={module.title}
-                description={module.description}
-                xp={module.xp}
-                isLocked={module.isLocked}
-                icon={getIconComponent(module.icon, 20, module.iconColor)}
-                iconBgColor={module.iconBg}
-                onPress={() => handleModulePress(module)}
-                lessonInfo={`${module.completedLessons}/${module.lessonsCount} leçons`}
-              />
-            ))}
+            <View>
+              {filteredModules.length > 0 ? (
+                filteredModules.map((module) => (
+                  <HomeModuleCard 
+                    key={module.id}
+                    module={module}
+                    onPress={() => handleModulePress(module)}
+                  />
+                ))
+              ) : (
+                <View className="bg-white p-8 rounded-3xl border border-dashed border-gray-200 items-center">
+                  <Feather name="lock" size={32} color="#D1D5DB" />
+                  <Text className="text-gray-400 text-sm mt-2 font-medium">Bientôt disponible</Text>
+                </View>
+              )}
+            </View>
           </View>
 
-          <View className="mt-8 mb-6">
-            <Text className="text-lg font-bold mb-4 text-black">Actions rapides</Text>
-            {/*<View className="flex-row flex-wrap justify-between">
+          {/*<View className="mt-4 mb-4">
+            <Text className="text-xl font-bold text-gray-900 mb-4">Activités éclairs</Text>
+            <View className="flex-row flex-wrap justify-between">
               {MOCK_QUICK_ACTIONS.map((action) => (
                 <QuickActionCard 
                   key={action.id}
-                  title={action.title}
-                  subtitle={action.subtitle}
+                  action={action}
                   icon={getIconComponent(action.icon, 24, action.iconColor)}
-                  bgColor={action.bgColor}
-                  onPress={() => handleQuickActionPress(action)}
+                  onPress={() => router.push(action.route as any)}
                 />
               ))}
-            </View>*/}
-          </View>
+            </View>
+          </View>*/}
+
+          {/*  Streak Highlight (si streak >= 3) */}
+          {/*{(loggedUser?.streak ?? 5) >= 3 && (
+            <View className="mt-4 bg-orange-100/50 p-4 rounded-2xl border border-orange-200 flex-row items-center">
+              <View className="w-12 h-12 bg-orange-400 rounded-full items-center justify-center mr-4">
+                <Ionicons name="flame" size={24} color="white" />
+              </View>
+              <View className="flex-1">
+                <Text className="text-orange-900 font-bold">Incroyable !</Text>
+                <Text className="text-orange-700 text-xs">Tu as une série de {loggedUser?.streak ?? 5} jours. Continue comme ça !</Text>
+              </View>
+            </View>
+          )}*/}
 
         </View>
       </ScrollView>
@@ -270,130 +365,94 @@ export default function HomeScreen() {
   );
 }
 
-function MainCard({ 
-  progress = 68, 
-  title = "PULAAR — FONDAMENTAL",
-  completedText = "68% Complété",
-  moduleText = "5/8 Modules"
-}: { 
-  progress?: number, 
-  title?: string,
-  completedText?: string,
-  moduleText?: string
+function StatsCard({ label, value, icon, bgColor, textColor }: { 
+  label: string;
+  value: string;
+  icon: React.ReactNode;
+  bgColor: string;
+  textColor: string;
 }) {
   return (
-    <View className="bg-[#FAF9F6] p-4 rounded-xl border border-gray-200 shadow-sm">
-      <Text className="text-gray-600 mb-1 text-sm font-medium">Progression Actuelle</Text>
-      <Text className="text-base font-bold mb-3 text-gray-900 tracking-wide">{title}</Text>
-      
-      <View style={{ height: 6, borderRadius: 3, backgroundColor: '#E5E7EB', overflow: 'hidden', marginBottom: 8 }}>
-        <View
-          style={{
-            width: `${progress}%`,
-            height: 6,
-            borderRadius: 3,
-            backgroundColor: '#F59E0B',
-          }}
-        />
+    <View className={`w-[48%] ${bgColor} p-4 rounded-2xl mb-3 border border-gray-100 shadow-sm`}>
+      <View className="flex-row justify-between items-center mb-1">
+        <View className="p-1.5 rounded-lg bg-white shadow-sm">
+          {icon}
+        </View>
+        <Text className={`text-base font-bold ${textColor}`}>{value}</Text>
       </View>
-      
-      <View className="flex-row justify-between items-center">
-        <Text className="text-xs text-gray-700 font-medium">{completedText}</Text>
-        <Text className="text-xs text-gray-500">{moduleText}</Text>
-      </View>
+      <Text className="text-gray-500 text-[10px] font-bold uppercase tracking-tight">{label}</Text>
     </View>
   );
 }
 
-interface ModuleCardProps {
-  title: string;
-  description?: string;
-  moduleName?: string;
-  xp?: number;
-  isLocked?: boolean;
-  icon?: React.ReactNode;
-  iconBgColor?: string;
-  onPress?: () => void;
-  lessonInfo?: string;
-}
+function HomeModuleCard({ module, onPress }: { 
+  module: ModuleData;
+  onPress: () => void;
+}) {
+  const progress = Math.round((module.completedLessons / module.lessonsCount) * 100);
+  const isCompleted = progress === 100;
 
-function ModuleCard({
-  title, 
-  description, 
-  moduleName,
-  xp, 
-  isLocked = false,
-  icon,
-  iconBgColor = "bg-orange-50",
-  onPress,
-  lessonInfo
-}: ModuleCardProps) {
   return (
     <Pressable 
-      onPress={!isLocked ? onPress : undefined}
-      className={`flex-row justify-between items-center bg-white p-4 rounded-2xl mb-3 border border-gray-200 ${isLocked ? 'opacity-80' : ''}`}
-      style={{
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.05,
-        shadowRadius: 2,
-        elevation: 1,
-      }}
+      onPress={onPress}
+      className={`bg-white p-4 rounded-2xl mb-3 border border-gray-100 shadow-sm ${module.isLocked ? 'opacity-60' : ''}`}
     >
-      <View className="flex-row items-center flex-1">
-        <View className={`${isLocked ? 'bg-gray-100 border border-gray-200' : iconBgColor} w-12 h-12 rounded-full items-center justify-center mr-4`}>
-          {isLocked ? (
-            <Feather name="lock" size={20} color="#9CA3AF" />
+      <View className="flex-row items-center mb-3">
+        <View className={`${module.isLocked ? 'bg-gray-100' : module.iconBg} w-10 h-10 rounded-xl items-center justify-center mr-3`}>
+          {module.isLocked ? (
+            <Feather name="lock" size={18} color="#9CA3AF" />
           ) : (
-            icon || <Feather name="book" size={20} color="#92400E" />
+            getIconComponent(module.icon, 20, module.iconColor)
           )}
         </View>
         <View className="flex-1">
-          <View className="flex-row items-center mb-0.5">
-            <Text className="text-[#002366] text-xs font-bold mr-2">{moduleName}</Text>
-            {!isLocked && lessonInfo && (
-              <Text className="text-green-600 text-xs font-medium">{lessonInfo}</Text>
+          <View className="flex-row items-center justify-between">
+            <Text className="text-gray-900 font-bold text-sm" numberOfLines={1}>{module.title}</Text>
+            {isCompleted ? (
+              <View className="bg-green-100 p-1 rounded-full">
+                <Ionicons name="checkmark" size={12} color="#059669" />
+              </View>
+            ) : (
+              <Text className="text-orange-500 font-bold text-[10px]">+{module.xp} XP</Text>
             )}
           </View>
-          <Text className="text-gray-900 font-bold text-[15px] mb-0.5" numberOfLines={1}>{title}</Text>
-          {description && <Text className="text-gray-500 text-xs" numberOfLines={1}>{description}</Text>}
+          <Text className="text-gray-500 text-[10px]" numberOfLines={1}>{module.description}</Text>
         </View>
       </View>
-      {xp !== undefined && (
-        <View className="ml-2 items-end">
-          <Text className="text-[#F59E0B] text-xs font-bold">{xp} XP</Text>
+
+      {!module.isLocked && (
+        <View>
+          <View className="flex-row justify-between items-center mb-1">
+            <Text className="text-gray-400 text-[9px] font-medium">{module.completedLessons}/{module.lessonsCount} leçons</Text>
+            <Text className="text-gray-600 text-[9px] font-bold">{progress}%</Text>
+          </View>
+          <View className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <View 
+              className={`h-full rounded-full ${isCompleted ? 'bg-green-500' : 'bg-blue-500'}`} 
+              style={{ width: `${progress}%` }} 
+            />
+          </View>
         </View>
       )}
     </Pressable>
   );
 }
 
-interface QuickActionCardProps {
-  title: string;
-  subtitle: string;
+function QuickActionCard({ action, icon, onPress }: { 
+  action: QuickActionData;
   icon: React.ReactNode;
-  bgColor: string;
   onPress: () => void;
-}
-
-function QuickActionCard({ title, subtitle, icon, bgColor, onPress }: QuickActionCardProps) {
+}) {
   return (
     <Pressable 
       onPress={onPress}
-      className={`w-[48%] ${bgColor} rounded-2xl p-4 mb-3`}
-      style={{
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.05,
-        shadowRadius: 2,
-        elevation: 1,
-      }}
+      className={`w-[48%] ${action.bgColor} rounded-3xl p-4 mb-3 border border-gray-100 shadow-sm`}
     >
-      <View className="mb-2">
+      <View className="w-10 h-10 rounded-2xl bg-white items-center justify-center mb-3 shadow-sm">
         {icon}
       </View>
-      <Text className="font-bold text-gray-900 text-sm">{title}</Text>
-      <Text className="text-gray-500 text-xs mt-0.5">{subtitle}</Text>
+      <Text className="font-bold text-gray-900 text-sm">{action.title}</Text>
+      <Text className="text-gray-500 text-[10px] mt-0.5" numberOfLines={1}>{action.subtitle}</Text>
     </Pressable>
   );
 }

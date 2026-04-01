@@ -210,10 +210,10 @@ export default function LearningPathScreen() {
         </View>
       </ScrollView>
 
-      <View className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-5 py-4">
+      <View className="absolute bottom-3 left-0 right-0 bg-[transparent]  m-2">
         <Pressable
           onPress={handleContinue}
-          className="bg-[#F59E0B] rounded-2xl py-4 items-center"
+          className="bg-[#0961F5] rounded-2xl py-4 items-center mt-3 " 
           style={{
             shadowColor: "#F59E0B",
             shadowOffset: { width: 0, height: 4 },
@@ -222,7 +222,7 @@ export default function LearningPathScreen() {
             elevation: 4,
           }}
         >
-          <Text className="text-white font-bold text-lg">
+          <Text className="text-white font-bold text-lg ">
             {currentLesson ? `Commencer "${currentLesson.title}"` : "Aucune leçon disponible"}
           </Text>
         </Pressable>

@@ -81,22 +81,6 @@ export default function ResultScreen() {
               </View>
             )}
 
-            <View className="bg-gray-50 rounded-2xl p-4 w-full mb-6">
-              <View className="flex-row items-center mb-2">
-                <View className="w-10 h-10 rounded-full bg-blue-100 items-center justify-center mr-3">
-                  <Feather name="smartphone" size={20} color="#4a90e2" />
-                </View>
-                <Text className="text-gray-900 font-bold">Feedback IA</Text>
-              </View>
-              <Text className="text-gray-600 text-sm leading-relaxed">
-                {percentage >= 80 
-                  ? "Excellent travail ! Tu maîtrises bien les salutations en Pulaar. Continue à pratiquer régulièrement pour progresser encore plus !"
-                  : percentage >= 50
-                    ? "Bon début ! Révise les mots de salutation et réessaie l'exercice pour améliorer ton score."
-                    : "Ne te décourage pas ! Lis attentivement les leçons précédentes et réessaie. Tu vas progresser !"
-                }
-              </Text>
-            </View>
 
             <View className="flex-row w-full">
               <Pressable
@@ -114,7 +98,7 @@ export default function ResultScreen() {
             </View>
             
             <Pressable
-              onPress={() => router.push("/(tabs)/(home)" as any)}
+              onPress={() => router.push("/(tabs)/(cours)" as any)}
               className="mt-4 py-2"
             >
               <Text className="text-gray-500 text-center">Retour au parcours</Text>

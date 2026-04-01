@@ -40,13 +40,6 @@ const BADGES: Badge[] = [
   { id: 6, name: "Champion", emoji: "👑", description: "500 XP gagnés", isEarned: false },
 ];
 
-const RECENT_ACTIVITIES: Activity[] = [
-  { id: 1, title: "Quiz - Salutations", type: "quiz", date: "Aujourd'hui", xp: 20, score: "9/10" },
-  { id: 2, title: "Dictée audio", type: "dictation", date: "Hier", xp: 15, score: "2/3" },
-  { id: 3, title: "Association", type: "exercise", date: "Hier", xp: 20, score: "5/5" },
-  { id: 4, title: "Compréhension orale", type: "listening", date: "Il y a 2 jours", xp: 10, score: "3/3" },
-];
-
 const TOP_LEADERBOARD: LeaderboardEntry[] = [
   { rank: 1, name: "Amadou D.", xp: 1250, avatar: "A", isCurrentUser: false },
   { rank: 2, name: "Fatima S.", xp: 1180, avatar: "F", isCurrentUser: false },
@@ -65,7 +58,6 @@ export default function ProgressScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
-      {/* Header */}
       <View className="px-5 py-4 flex-row justify-between items-center">
         <Text className="text-lg font-black tracking-wider uppercase text-gray-800">PROGRESSION</Text>
         <Pressable className="p-2" onPress={() => router.push("/(settings)/index")}>
@@ -75,7 +67,6 @@ export default function ProgressScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} >
         
-        {/* User Stats Card */}
         <View className="px-5 mb-6">
           <View className="bg-white rounded-3xl p-6 border border-gray-200" style={{
             shadowColor: "#000",
@@ -92,7 +83,7 @@ export default function ProgressScreen() {
               </View>
               <View className="flex-1">
                 <Text className="text-xl font-bold text-gray-900">
-                  {user?.firstname || "Apprenant"}
+                  {user?.firstname || "Ahmadou" || user?.username}
                 </Text>
                 <Text className="text-gray-500 text-sm">Niveau Pulaar Fondamental</Text>
               </View>
@@ -130,7 +121,6 @@ export default function ProgressScreen() {
           </View>
         </View>
 
-        {/* Classement Section */}
         <View className="px-5 mb-6">
           <View className="flex-row justify-between items-center mb-4">
             <Text className="text-lg font-bold text-gray-900">Classement</Text>
@@ -143,9 +133,7 @@ export default function ProgressScreen() {
           </View>
           
           <View className="bg-white rounded-3xl p-4 border border-gray-200">
-            {/* Top 3 Podium */}
             <View className="flex-row justify-center items-end mb-4 pb-2">
-              {/* 2nd Place */}
               {topThree[1] && (
                 <View className="items-center mx-2">
                   <View className={`w-12 h-12 rounded-full items-center justify-center mb-2 ${
@@ -162,7 +150,6 @@ export default function ProgressScreen() {
                 </View>
               )}
               
-              {/* 1st Place */}
               {topThree[0] && (
                 <View className="items-center mx-2 z-10">
                   <Text className="text-lg mb-1">👑</Text>
@@ -180,7 +167,6 @@ export default function ProgressScreen() {
                 </View>
               )}
               
-              {/* 3rd Place */}
               {topThree[2] && (
                 <View className="items-center mx-2">
                   <View className={`w-12 h-12 rounded-full items-center justify-center mb-2 ${
@@ -198,7 +184,6 @@ export default function ProgressScreen() {
               )}
             </View>
             
-            {/* Rest of Leaderboard */}
             {TOP_LEADERBOARD.slice(3).map((entry) => (
               <View 
                 key={entry.rank}
@@ -232,7 +217,6 @@ export default function ProgressScreen() {
           </View>
         </View>
 
-        {/* Badges Section */}
         <View className="px-5 mb-6">
           <View className="flex-row justify-between items-center mb-4">
             <Text className="text-lg font-bold text-gray-900">Badges</Text>
@@ -270,7 +254,6 @@ export default function ProgressScreen() {
           </ScrollView>
         </View>
 
-        {/* Progress Overview */}
         <View className="px-5 mb-6">
           <Text className="text-lg font-bold text-gray-900 mb-4">Aperçu</Text>
           
@@ -305,57 +288,7 @@ export default function ProgressScreen() {
           </View>
         </View>
 
-        {/* Recent Activity */}
-        <View className="px-5 mb-6">
-          <Text className="text-lg font-bold text-gray-900 mb-4">Activité récente</Text>
-          
-          {RECENT_ACTIVITIES.map(activity => (
-            <View 
-              key={activity.id}
-              className="bg-white rounded-2xl p-4 mb-3 border border-gray-200 flex-row items-center"
-              style={{
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.05,
-                shadowRadius: 2,
-                elevation: 1,
-              }}
-            >
-              <View className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${
-                activity.type === 'quiz' ? 'bg-red-100' :
-                activity.type === 'dictation' ? 'bg-yellow-100' :
-                activity.type === 'exercise' ? 'bg-green-100' :
-                'bg-blue-100'
-              }`}>
-                <Feather 
-                  name={
-                    activity.type === 'quiz' ? 'edit-2' :
-                    activity.type === 'dictation' ? 'edit' :
-                    activity.type === 'exercise' ? 'link' :
-                    'headphones'
-                  }
-                  size={18}
-                  color={
-                    activity.type === 'quiz' ? '#EF4444' :
-                    activity.type === 'dictation' ? '#F59E0B' :
-                    activity.type === 'exercise' ? '#10B981' :
-                    '#4a90e2'
-                  }
-                />
-              </View>
-              
-              <View className="flex-1">
-                <Text className="font-medium text-gray-900 text-sm">{activity.title}</Text>
-                <Text className="text-xs text-gray-500">{activity.date}</Text>
-              </View>
-              
-              <View className="items-end">
-                <Text className="font-bold text-[#F59E0B] text-sm">+{activity.xp} XP</Text>
-                <Text className="text-xs text-gray-500">{activity.score}</Text>
-              </View>
-            </View>
-          ))}
-        </View>
+       
 
       </ScrollView>
     </SafeAreaView>

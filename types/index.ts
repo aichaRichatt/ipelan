@@ -76,6 +76,7 @@ export interface MoodleUser {
 export interface IPELANUser {
   id: number;
   username: string;
+  image?: string;
   firstname?: string;
   lastname?: string;
   fullname: string;

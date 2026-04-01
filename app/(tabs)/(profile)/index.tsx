@@ -33,11 +33,10 @@ export default function ProfileScreen() {
           <Text className="text-lg font-black tracking-wider uppercase text-gray-800">MON PROFIL</Text>
         </View>
         <View className="flex-row items-center">
-          <View className="flex-row items-center mr-4">
-            <View className="w-3 h-3 bg-gray-400 rounded-full mr-1"></View>
-            <Text className="font-bold text-xs">{user?.coins ?? 340}</Text>
-          </View>
-          <Pressable>
+       
+          <Pressable
+            onPress={() => router.push("/(settings)" as any)}
+          >
             <Feather name="settings" size={20} color="black" />
           </Pressable>
         </View>
@@ -92,7 +91,6 @@ export default function ProfileScreen() {
             className=""
             onPress={() => router.push("/(settings)/index")}
           >
-            <Feather name="settings" size={20} color="#6B7280" className="mb-2" />
           </Pressable>
         </Pressable>
 
