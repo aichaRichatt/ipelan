@@ -232,7 +232,7 @@ export default function ModuleDetailScreen() {
               const nextLesson = moduleData.lessons.find(l => !l.isCompleted && !l.isLocked);
               if (nextLesson) handleLessonPress(nextLesson);
             }}
-            className="bg-[#F59E0B] rounded-2xl py-4 items-center"
+            className="bg-[#0961F5] rounded-2xl py-4 items-center"
             style={{
               shadowColor: "#F59E0B",
               shadowOffset: { width: 0, height: 4 },

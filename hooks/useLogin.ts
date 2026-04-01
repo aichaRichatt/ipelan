@@ -45,7 +45,7 @@ export function useLogin() {
           coins: 340,
           streak: 7,
           avatar: "",
-          token: token
+          token: token,
         };
         
         console.log("[useLogin] Mock user created:", JSON.stringify(mockUser));

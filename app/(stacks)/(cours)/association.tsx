@@ -6,7 +6,7 @@ import { useRouter } from "expo-router";
 
 interface MatchItem {
   id: number;
-  word: string;
+  word?: string;
   translation: string;
 }
 
