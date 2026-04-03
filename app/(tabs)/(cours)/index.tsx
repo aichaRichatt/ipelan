@@ -122,12 +122,12 @@ const LEVEL_SECTIONS: LevelSection[] = [
 
 const getIconName = (icon: string): string => {
   const iconMap: Record<string, string> = {
-    handshake: "handshake",
-    users: "people",
+    handshake: "users",
+    users: "users",
     hash: "hash",
-    droplet: "water",
+    droplet: "droplet",
     coffee: "coffee",
-    paw: "paw",
+    paw: "star",
   };
   return iconMap[icon] || "book";
 };
@@ -258,7 +258,64 @@ export default function CoursScreen() {
           </Text>
         </View>
 
+        <View className="px-5 mb-8">
+          <Pressable 
+            onPress={() => router.push("/(quiz)/index" as any)}
+            className="bg-[#002366] rounded-3xl p-5 flex-row items-center justify-between"
+            style={{
+              shadowColor: "#002366",
+              shadowOffset: { width: 0, height: 8 },
+              shadowOpacity: 0.2,
+              shadowRadius: 12,
+              elevation: 6,
+            }}
+          >
+            <View className="flex-1">
+              <Text className="text-white text-lg font-bold mb-1">Quiz Rapide</Text>
+              <Text className="text-white/70 text-xs">Évalue tes connaissances du jour</Text>
+            </View>
+            <View className="bg-white/20 p-3 rounded-2xl">
+              <Ionicons name="flash" size={24} color="white" />
+            </View>
+          </Pressable>
+        </View>
+
+        <View className="px-5 mb-8">
+          <Text className="text-lg font-bold text-gray-900 mb-4">Activités Récentes</Text>
+          <View className="flex-row flex-wrap justify-between">
+            <ActivityIconCard 
+              title="Oral" 
+              icon="headphones" 
+              color="#10B981" 
+              bgColor="bg-green-50" 
+              onPress={() => router.push("/(stacks)/(cours)/listening" as any)} 
+            />
+            <ActivityIconCard 
+              title="Dictée" 
+              icon="edit-3" 
+              color="#F59E0B" 
+              bgColor="bg-amber-50" 
+              onPress={() => router.push("/(stacks)/(cours)/dictation" as any)} 
+            />
+            <ActivityIconCard 
+              title="Association" 
+              icon="link" 
+              color="#9333EA" 
+              bgColor="bg-purple-50" 
+              onPress={() => router.push("/(stacks)/(cours)/association" as any)} 
+            />
+            <ActivityIconCard 
+              title="Ordre" 
+              icon="layers" 
+              color="#4a90e2" 
+              bgColor="bg-blue-50" 
+              onPress={() => router.push("/(stacks)/(cours)/game" as any)} 
+            />
+          </View>
+        </View>
+
         <View className="px-5">
+          <Text className="text-lg font-bold text-gray-900 mb-4">Parcours d'Apprentissage</Text>
           {LEVEL_SECTIONS.map(renderLevelSection)}
         </View>
 
@@ -266,5 +323,24 @@ export default function CoursScreen() {
 
       </ScrollView>
     </SafeAreaView>
+  );
+}
+function ActivityIconCard({ title, icon, color, bgColor, onPress }: {
+  title: string;
+  icon: string;
+  color: string;
+  bgColor: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable 
+      onPress={onPress}
+      className={`w-[23%] ${bgColor} items-center p-3 rounded-2xl mb-2`}
+    >
+      <View className="bg-white p-2 rounded-xl mb-2 shadow-sm">
+        <Feather name={icon as any} size={20} color={color} />
+      </View>
+      <Text className="text-[10px] font-bold text-gray-700">{title}</Text>
+    </Pressable>
   );
 }

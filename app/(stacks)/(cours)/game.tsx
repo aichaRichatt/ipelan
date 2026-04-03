@@ -68,8 +68,9 @@ export default function GameScreen() {
         }
       }, 1500);
     } else {
-      setWrongAttempts(wrongAttempts + 1);
-      if (wrongAttempts >= 2) {
+      const newAttempts = wrongAttempts + 1;
+      setWrongAttempts(newAttempts);
+      if (newAttempts >= 3) {
         setShowAnswer(true);
       }
       setTimeout(() => {

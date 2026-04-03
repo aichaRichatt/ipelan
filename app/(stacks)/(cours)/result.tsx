@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import React from "react";
 import { Pressable, Text, View, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 
 interface ResultScreenProps {
   score?: number;
@@ -11,10 +11,13 @@ interface ResultScreenProps {
   coinsEarned?: number;
   badgeUnlocked?: { name: string; emoji: string };
   activityName?: string;
+  returnRoute?: string;
+  restartRoute?: string;
 }
 
 export default function ResultScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ returnRoute?: string; restartRoute?: string }>();
   
   const result: ResultScreenProps = {
     score: 8,
@@ -23,6 +26,8 @@ export default function ResultScreen() {
     coinsEarned: 15,
     badgeUnlocked: { name: "Quiz Master", emoji: "🏆" },
     activityName: "Quiz - Salutations",
+    returnRoute: params.returnRoute || "/(tabs)/(cours)",
+    restartRoute: params.restartRoute || "/(quiz)/index",
   };
   
   const percentage = Math.round((result.score! / result.total!) * 100);
@@ -84,7 +89,7 @@ export default function ResultScreen() {
 
             <View className="flex-row w-full">
               <Pressable
-                onPress={() => router.back()}
+                onPress={() => router.replace(result.restartRoute as any)}
                 className="flex-1 bg-gray-200 py-4 rounded-xl mr-2"
               >
                 <Text className="text-gray-700 font-bold text-center">Rejouer</Text>
@@ -98,7 +103,7 @@ export default function ResultScreen() {
             </View>
             
             <Pressable
-              onPress={() => router.push("/(tabs)/(cours)" as any)}
+              onPress={() => router.push(result.returnRoute as any)}
               className="mt-4 py-2"
             >
               <Text className="text-gray-500 text-center">Retour au parcours</Text>

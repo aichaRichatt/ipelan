@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, ActivityIndicator, Pressable, TextInput, Image, Dimensions } from "react-native";
+import { View, Text, StyleSheet, ActivityIndicator, Pressable, TextInput, Image, Dimensions, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -20,17 +20,24 @@ export default function ResetPassword() {
     if (step === 1) {
       if (!email) return;
       setLoading(true);
-      setTimeout(() => {
+      try {
+        // TODO: Connect to Moodle API for password reset
+        // await requestPasswordReset(email);
+        setTimeout(() => {
+          setLoading(false);
+          setStep(2);
+        }, 1000);
+      } catch (error) {
         setLoading(false);
-        setStep(2);
-      }, 1000);
+        Alert.alert('Erreur', 'Impossible d\'envoyer le lien de réinitialisation');
+      }
     } else if (step === 2) {
       if (!password || password !== confirmPassword) return;
       setLoading(true);
       setTimeout(() => {
         setLoading(false);
         setStep(3);
-      }, 1000);
+      }, 1500);
     } else if (step === 3) {
       router.replace("/(auth)/login");
     }
@@ -111,7 +118,7 @@ export default function ResetPassword() {
           style={styles.successImage}
           resizeMode="contain"
         />
-        <Text style={styles.successTitle}>Congratulations</Text>
+        <Text style={styles.successTitle}>Félicitations</Text>
         <Text style={styles.successText}>
           Votre compte est prêt à être utilisé. Vous serez redirigé vers la page d`accueil dans quelques secondes.
         </Text>

@@ -78,7 +78,7 @@ export default function LessonScreen() {
   };
 
   const handleContinue = () => {
-    router.push("/(quiz)/index" as any);
+    router.push("/(quiz)" as any);
   };
 
   return (

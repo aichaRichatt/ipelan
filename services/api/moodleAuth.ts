@@ -1,7 +1,7 @@
 import { IPELANUser } from "../../types";
 
 const MOODLE_BASE_URL = "https://moodle.richatt.com";
-const USE_MOCK_LOGIN = true; // Set to false for production
+const USE_MOCK_LOGIN = false; // Set to false for production
 
 async function moodleFetch(endpoint: string, params: Record<string, any>, method: string = "GET") {
   const url = new URL(`${MOODLE_BASE_URL}${endpoint}`);

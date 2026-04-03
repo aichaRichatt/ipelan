@@ -15,7 +15,6 @@ export default function AboutScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
-      {/* Header */}
       <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
         <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
           <Feather name="arrow-left" size={24} color="black" />
@@ -25,7 +24,6 @@ export default function AboutScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}>
         
-        {/* Logo and Title */}
         <View className="items-center py-8 mb-4">
           <View className="w-24 h-24 rounded-3xl bg-[#002366] items-center justify-center mb-4">
             <Text className="text-white text-3xl font-black">IP</Text>
@@ -37,7 +35,6 @@ export default function AboutScreen() {
           </View>
         </View>
 
-        {/* Description */}
         <View className="bg-white rounded-3xl p-6 mb-4 border border-gray-200">
           <Text className="text-lg font-bold text-gray-900 mb-3">Qu'est-ce qu'IPELAN ?</Text>
           <Text className="text-gray-600 leading-relaxed mb-4">

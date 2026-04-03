@@ -1,8 +1,9 @@
 import { AntDesign, Feather } from "@expo/vector-icons";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Pressable, Text, TextInput, View, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { audioService } from "../../../services/audio/audioService";
 
 interface DictationWord {
   id: number;
@@ -31,9 +32,20 @@ export default function DictationScreen() {
   const currentWord = DICTATION_WORDS[currentWordIndex];
   const progress = ((currentWordIndex + 1) / DICTATION_WORDS.length) * 100;
 
-  const handlePlayAudio = () => {
+  useEffect(() => {
+    return () => {
+      audioService.stop();
+    };
+  }, []);
+
+  const handlePlayAudio = async () => {
     setIsPlaying(true);
-    setTimeout(() => setIsPlaying(false), 2000);
+    try {
+      await audioService.playAndAutoStop(2000);
+      setIsPlaying(false);
+    } catch (error) {
+      setIsPlaying(false);
+    }
   };
 
   const checkAnswer = () => {

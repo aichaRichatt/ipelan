@@ -1,8 +1,9 @@
 import { AntDesign, Feather } from "@expo/vector-icons";
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Pressable, Text, View, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { audioService } from "../../../services/audio/audioService";
 
 interface ListeningExercise {
   id: number;
@@ -30,9 +31,27 @@ export default function ListeningScreen() {
   const exercise = EXERCISES[currentExercise];
   const progress = ((currentExercise + 1) / EXERCISES.length) * 100;
 
-  const handlePlayAudio = () => {
+  const wrongOption = useMemo(() => {
+    const wrongOptions = EXERCISES
+      .filter((_, i) => i !== currentExercise)
+      .map(e => e.translation);
+    return wrongOptions[Math.floor(Math.random() * wrongOptions.length)];
+  }, [currentExercise]);
+
+  useEffect(() => {
+    return () => {
+      audioService.stop();
+    };
+  }, []);
+
+  const handlePlayAudio = async () => {
     setIsPlaying(true);
-    setTimeout(() => setIsPlaying(false), 2000);
+    try {
+      await audioService.playAndAutoStop(2000);
+      setIsPlaying(false);
+    } catch (error) {
+      setIsPlaying(false);
+    }
   };
 
   const handleAnswer = (isCorrect: boolean) => {
@@ -202,7 +221,7 @@ export default function ListeningScreen() {
             className="bg-white border-2 border-gray-200 rounded-2xl p-4 mb-3 w-[48%]"
           >
             <Text className="text-center font-bold text-gray-900">
-              {currentExercise < EXERCISES.length - 1 ? EXERCISES[currentExercise + 1]?.translation : "Réponse"}
+              {wrongOption}
             </Text>
             <Text className="text-center text-gray-400 text-xs mt-1">Option B</Text>
           </Pressable>

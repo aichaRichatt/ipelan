@@ -197,7 +197,7 @@ export default function HomeScreen() {
                 <Ionicons name="medal" size={14} color="#8B5CF6" />
                 <Text className="font-bold text-xs text-[#8B5CF6] ml-1">3</Text>
               </View>
-              <Pressable onPress={() => router.push("/(settings)")} className="p-2 bg-white rounded-full border border-gray-100 shadow-sm">
+              <Pressable onPress={handleSettingsPress} className="p-2 bg-white rounded-full border border-gray-100 shadow-sm">
                 <Feather name="settings" size={18} color="#374151" />
               </Pressable>
             </View>
@@ -285,7 +285,7 @@ export default function HomeScreen() {
           <View className="mb-6">
             <View className="flex-row justify-between items-center mb-4">
               <Text className="text-xl font-bold text-gray-900">Modules</Text>
-              <Pressable onPress={() => router.push("/(tabs)/(cours)/index" as any)}>
+              <Pressable onPress={() => router.push("/(tabs)/(cours)" as any)}>
                 <Text className="text-blue-600 font-semibold text-xs">Voir tout</Text>
               </Pressable>
             </View>

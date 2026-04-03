@@ -2,7 +2,7 @@ import { View, Text, Pressable, ScrollView, Alert, SafeAreaView as RNSafeAreaVie
 import React from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLogin } from "../../../hooks/useLogin";
-import { AntDesign, Feather } from "@expo/vector-icons";
+import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 
 export default function ProfileScreen() {
@@ -54,51 +54,47 @@ export default function ProfileScreen() {
         </View>
 
         {/* Stats Grid */}
-        <View className="w-full max-w-[300px] flex-row flex-wrap justify-between mb-8">
+        <View className="w-full flex-row flex-wrap justify-between mb-8">
           
           <View className="bg-white w-[48%] rounded-2xl p-4 items-center border border-gray-100 mb-4 shadow-sm" style={{ shadowColor: '#000', shadowOpacity: 0.02, elevation: 1 }}>
             <Feather name="star" size={28} color="#F59E0B" className="mb-2" />
-            <Text className="font-bold text-gray-800">{user?.ipelan_xp || 12}</Text>
-            <Text className="text-xs text-gray-500">PX total</Text>
+            <Text className="font-bold text-gray-800 text-lg">{user?.ipelan_xp || 0}</Text>
+            <Text className="text-xs text-gray-500 font-bold uppercase tracking-tighter">XP TOTAL</Text>
           </View>
           
           <View className="bg-white w-[48%] rounded-2xl p-4 items-center border border-gray-100 mb-4 shadow-sm" style={{ shadowColor: '#000', shadowOpacity: 0.02, elevation: 1 }}>
             <Feather name="award" size={28} color="#10B981" className="mb-2" />
-            <Text className="font-bold text-gray-800">1</Text>
-            <Text className="text-xs text-gray-500">Niveaul</Text>
+            <Text className="font-bold text-gray-800 text-lg">1</Text>
+            <Text className="text-xs text-gray-500 font-bold uppercase tracking-tighter">NIVEAU</Text>
           </View>
 
           <View className="bg-white w-[48%] rounded-2xl p-4 items-center border border-gray-100 shadow-sm" style={{ shadowColor: '#000', shadowOpacity: 0.02, elevation: 1 }}>
-            <Feather name="star" size={28} color="#F59E0B" className="mb-2" />
-            <Text className="font-bold text-gray-800">{user?.streak || 12}</Text>
-            <Text className="text-xs text-gray-500">PX total</Text>
+            <Ionicons name="flame" size={28} color="#EF4444" className="mb-2" />
+            <Text className="font-bold text-gray-800 text-lg">{user?.streak || 0}</Text>
+            <Text className="text-xs text-gray-500 font-bold uppercase tracking-tighter">SÉRIE</Text>
           </View>
           
           <View className="bg-white w-[48%] rounded-2xl p-4 items-center border border-gray-100 shadow-sm" style={{ shadowColor: '#000', shadowOpacity: 0.02, elevation: 1 }}>
-            <Feather name="award" size={28} color="#10B981" className="mb-2" />
-            <Text className="font-bold text-gray-800">1</Text>
-            <Text className="text-xs text-gray-500">Niveaul</Text>
+            <Ionicons name="medal" size={28} color="#8B5CF6" className="mb-2" />
+            <Text className="font-bold text-gray-800 text-lg">3</Text>
+            <Text className="text-xs text-gray-500 font-bold uppercase tracking-tighter">BADGES</Text>
           </View>
 
         </View>
 
         <Pressable 
-          className="w-full max-w-[300px] bg-white border border-gray-200 py-4 rounded-xl items-center mb-4"
+          className="w-full bg-white border border-gray-200 py-4 rounded-xl items-center mb-4 flex-row justify-center"
           onPress={() => router.push("/(settings)")}
         >
-          <Text className="font-bold text-gray-800 text-[15px]">Paramettre</Text>
-          <Pressable
-            className=""
-            onPress={() => router.push("/(settings)/index")}
-          >
-          </Pressable>
+          <Feather name="settings" size={18} color="#374151" className="mr-2" />
+          <Text className="font-bold text-gray-700 text-[15px]">Paramètres</Text>
         </Pressable>
 
         <Pressable 
           onPress={handleLogout}
-          className="w-full max-w-[300px] bg-[#FF1C1C] py-4 rounded-xl items-center"
+          className="w-full bg-[#FF1C1C]/10 border border-[#FF1C1C]/20 py-4 rounded-xl items-center"
         >
-          <Text className="font-bold text-white text-[15px]">Déconnecter</Text>
+          <Text className="font-bold text-[#FF1C1C] text-[15px]">Se déconnecter</Text>
         </Pressable>
 
       </ScrollView>
