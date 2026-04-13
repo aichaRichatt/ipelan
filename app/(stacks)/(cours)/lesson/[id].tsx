@@ -17,7 +17,6 @@ export default function LessonScreen() {
   const [baseUrl, setBaseUrl] = useState<string>('');
   const [spine, setSpine] = useState<string[]>([]);
   const [currentChapter, setCurrentChapter] = useState(0);
-  const [showChapterList, setShowChapterList] = useState(false);
 
   const loadChapter = useCallback(async (chapterIndex: number) => {
     if (spine.length === 0) return;

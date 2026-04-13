@@ -52,3 +52,10 @@ rules.md
 rules.md
 dev.txt
 extracted_epub
+
+.vscode 
+.idea
+android/
+assets/storage/
+
+scripts/
