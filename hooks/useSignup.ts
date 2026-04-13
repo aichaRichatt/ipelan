@@ -17,17 +17,19 @@ export function useSignup() {
     try {
       const result = await moodleSignUp({ username, email, password, firstname, lastname, city });
       
-       if (result && Array.isArray(result) && result.length > 0) {
+      console.log("Signup API response:", JSON.stringify(result));
+      
+      if (result && result.success === true) {
+        setSuccess(true);
+        return { id: result.id || 0, username, email, success: true };
+      }
+      
+      if (result && Array.isArray(result) && result.length > 0) {
         setSuccess(true);
         return result[0];
       } 
-      
-     if (result && result.success === true) {
-         setSuccess(true);
-         return { id: result.id || 0, username, email };
-      }
 
-      throw new Error(result.error || result.message || "Failed to create user");
+      throw new Error(result?.error || result?.message || "Failed to create user");
     } catch (err: any) {
       setError(err.message || "An error occurred during signup");
       throw err;

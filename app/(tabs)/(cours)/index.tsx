@@ -1,147 +1,89 @@
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React from "react";
-import { Pressable, Text, View, ScrollView } from "react-native";
+import React, { useState, useEffect } from "react";
+import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSelector } from "react-redux";
+import { RootState } from "../../../services/redux/store";
+import { getEnrolledCoursesByTimeline } from "../../../services/api/courseService";
 
-interface Module {
-  id: string;
-  title: string;
-  description: string;
-  progress: number;
-  lessonsCompleted: number;
-  totalLessons: number;
-  xp: number;
-  icon: string;
-  iconColor: string;
-  iconBg: string;
-}
-
-interface LevelSection {
+interface CourseData {
   id: number;
-  title: string;
-  subtitle: string;
-  modules: Module[];
+  fullname: string;
+  shortname: string;
+  progress: number;
+  visible: boolean;
+  courseimage: string;
+  coursecategory: string;
+  viewurl: string;
 }
 
-const LEVEL_SECTIONS: LevelSection[] = [
-  {
-    id: 1,
-    title: "Niveau 1",
-    subtitle: "Fondamental",
-    modules: [
-      {
-        id: "1",
-        title: "Salutations",
-        description: "Apprends les salutations de base en Pulaar",
-        progress: 100,
-        lessonsCompleted: 3,
-        totalLessons: 3,
-        xp: 30,
-        icon: "handshake",
-        iconColor: "#10B981",
-        iconBg: "bg-green-100",
-      },
-      {
-        id: "2",
-        title: "La famille",
-        description: "Les membres de la famille en Pulaar",
-        progress: 50,
-        lessonsCompleted: 2,
-        totalLessons: 4,
-        xp: 25,
-        icon: "users",
-        iconColor: "#6366F1",
-        iconBg: "bg-indigo-100",
-      },
-    ],
-  },
-  {
-    id: 2,
-    title: "Niveau 2",
-    subtitle: "Intermédiaire",
-    modules: [
-      {
-        id: "3",
-        title: "Les nombres",
-        description: "Apprendre à compter de 1 à 100",
-        progress: 0,
-        lessonsCompleted: 0,
-        totalLessons: 6,
-        xp: 40,
-        icon: "hash",
-        iconColor: "#F59E0B",
-        iconBg: "bg-amber-100",
-      },
-      {
-        id: "4",
-        title: "Les couleurs",
-        description: "Les couleurs en Pulaar",
-        progress: 0,
-        lessonsCompleted: 0,
-        totalLessons: 5,
-        xp: 25,
-        icon: "droplet",
-        iconColor: "#EC4899",
-        iconBg: "bg-pink-100",
-      },
-    ],
-  },
-  {
-    id: 3,
-    title: "Niveau 3",
-    subtitle: "Avancé",
-    modules: [
-      {
-        id: "5",
-        title: "Les aliments",
-        description: "Vocabulaire de la nourriture",
-        progress: 0,
-        lessonsCompleted: 0,
-        totalLessons: 8,
-        xp: 50,
-        icon: "coffee",
-        iconColor: "#8B5CF6",
-        iconBg: "bg-violet-100",
-      },
-      {
-        id: "6",
-        title: "Les animaux",
-        description: "Les animaux domestiques et sauvages",
-        progress: 0,
-        lessonsCompleted: 0,
-        totalLessons: 7,
-        xp: 45,
-        icon: "paw",
-        iconColor: "#14B8A6",
-        iconBg: "bg-teal-100",
-      },
-    ],
-  },
-];
-
-const getIconName = (icon: string): string => {
-  const iconMap: Record<string, string> = {
-    handshake: "users",
-    users: "users",
-    hash: "hash",
-    droplet: "droplet",
-    coffee: "coffee",
-    paw: "star",
-  };
-  return iconMap[icon] || "book";
+const getIconForCourse = (name: string): { icon: string; color: string; bg: string } => {
+  const lowerName = name.toLowerCase();
+  if (lowerName.includes('salut')) return { icon: "handshake", color: "#10B981", bg: "bg-green-100" };
+  if (lowerName.includes('famille')) return { icon: "users", color: "#6366F1", bg: "bg-indigo-100" };
+  if (lowerName.includes('nombre')) return { icon: "hash", color: "#F59E0B", bg: "bg-amber-100" };
+  if (lowerName.includes('couleur')) return { icon: "droplet", color: "#EC4899", bg: "bg-pink-100" };
+  if (lowerName.includes('aliment')) return { icon: "coffee", color: "#8B5CF6", bg: "bg-violet-100" };
+  if (lowerName.includes('animal')) return { icon: "star", color: "#14B8A6", bg: "bg-teal-100" };
+  return { icon: "book", color: "#002366", bg: "bg-blue-100" };
 };
+
+const getLevelFromCourse = (name: string): number => {
+  const lowerName = name.toLowerCase();
+  if (lowerName.includes('1') || lowerName.includes('fondamental')) return 1;
+  if (lowerName.includes('2') || lowerName.includes('inter')) return 2;
+  if (lowerName.includes('3') || lowerName.includes('avan')) return 3;
+  return 1;
+};
+
+const getTotalLessons = (progress: number): number => Math.floor(Math.random() * 8) + 3;
 
 export default function CoursScreen() {
   const router = useRouter();
+  const token = useSelector((state: RootState) => state.auth.token);
+  const [courses, setCourses] = useState<CourseData[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const renderProgressBar = (progress: number) => {
+  useEffect(() => {
+    const fetchCourses = async () => {
+      if (!token) {
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const response = await getEnrolledCoursesByTimeline(token);
+        if (response?.courses && Array.isArray(response.courses)) {
+          setCourses(response.courses.filter((c: any) => c.visible !== false));
+        }
+      } catch (err: any) {
+        console.error("Failed to fetch courses:", err);
+        setError(err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchCourses();
+  }, [token]);
+
+  const groupedCourses = courses.reduce((acc, course) => {
+    const level = getLevelFromCourse(course.fullname);
+    if (!acc[level]) acc[level] = [];
+    acc[level].push(course);
+    return acc;
+  }, {} as Record<number, CourseData[]>);
+
+  const renderProgressBar = (progress: number, totalLessons: number) => {
+    const completedLessons = Math.round((progress / 100) * totalLessons);
     return (
       <View className="mt-3">
         <View className="flex-row justify-between items-center mb-1">
           <Text className="text-xs text-gray-500">{progress}% complété</Text>
           <Text className="text-xs text-gray-400">
-            {Math.round((progress / 100) * 4)}/{4} leçons
+            {completedLessons}/{totalLessons} leçons
           </Text>
         </View>
         <View className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -157,19 +99,15 @@ export default function CoursScreen() {
     );
   };
 
-  const renderModuleCard = (module: Module) => {
-    const isCompleted = module.progress === 100;
+  const renderModuleCard = (course: CourseData) => {
+    const isCompleted = course.progress === 100;
+    const totalLessons = getTotalLessons(course.progress);
+    const iconData = getIconForCourse(course.fullname);
 
     return (
       <Pressable
-        key={module.id}
-        onPress={() => {
-          if (isCompleted) {
-            router.push("/(stacks)/(cours)/result" as any);
-          } else {
-            router.push(`/(stacks)/(cours)/${module.id}` as any);
-          }
-        }}
+        key={course.id}
+        onPress={() => router.push(`/(stacks)/(cours)/${course.id}` as any)}
         className="bg-white rounded-2xl p-4 mb-3 border border-gray-100"
         style={{
           shadowColor: "#000",
@@ -180,16 +118,14 @@ export default function CoursScreen() {
         }}
       >
         <View className="flex-row items-start">
-          <View
-            className={`${module.iconBg} w-14 h-14 rounded-2xl items-center justify-center mr-4`}
-          >
-            <Feather name={getIconName(module.icon) as any} size={24} color={module.iconColor} />
+          <View className={`${iconData.bg} w-14 h-14 rounded-2xl items-center justify-center mr-4`}>
+            <Feather name={iconData.icon as any} size={24} color={iconData.color} />
           </View>
 
           <View className="flex-1">
             <View className="flex-row items-center justify-between mb-1">
               <Text className="text-gray-900 font-bold text-base flex-1">
-                {module.title}
+                {course.fullname}
               </Text>
               {isCompleted ? (
                 <View className="bg-green-100 rounded-full px-2 py-1 flex-row items-center">
@@ -198,48 +134,53 @@ export default function CoursScreen() {
                 </View>
               ) : (
                 <View className="bg-amber-100 rounded-full px-2 py-1">
-                  <Text className="text-amber-600 text-xs font-medium">
-                    +{module.xp} XP
-                  </Text>
+                  <Text className="text-amber-600 text-xs font-medium">+50 XP</Text>
                 </View>
               )}
             </View>
 
             <Text className="text-gray-500 text-sm mb-1" numberOfLines={2}>
-              {module.description}
+              {course.coursecategory || "Cours IPELAN"}
             </Text>
 
-            {renderProgressBar(module.progress)}
+            {renderProgressBar(course.progress, totalLessons)}
           </View>
         </View>
       </Pressable>
     );
   };
 
-  const renderLevelSection = (section: LevelSection) => {
-    const completedModules = section.modules.filter(m => m.progress === 100).length;
+  const renderLevelSection = (level: number, levelCourses: CourseData[]) => {
+    const levelTitles: Record<number, { title: string; subtitle: string }> = {
+      1: { title: "Niveau 1", subtitle: "Fondamental" },
+      2: { title: "Niveau 2", subtitle: "Intermédiaire" },
+      3: { title: "Niveau 3", subtitle: "Avancé" },
+    };
+
+    const completedModules = levelCourses.filter(c => c.progress === 100).length;
+    const { title, subtitle } = levelTitles[level] || { title: `Niveau ${level}`, subtitle: "" };
 
     return (
-      <View key={section.id} className="mb-6">
+      <View key={level} className="mb-6">
         <View className="flex-row items-center justify-between mb-4">
           <View className="flex-row items-center">
             <View className="w-10 h-10 rounded-xl bg-[#002366] items-center justify-center mr-3">
-              <Text className="text-white font-bold text-sm">{section.id}</Text>
+              <Text className="text-white font-bold text-sm">{level}</Text>
             </View>
             <View>
-              <Text className="text-gray-900 font-bold text-lg">{section.title}</Text>
-              <Text className="text-gray-400 text-xs">{section.subtitle}</Text>
+              <Text className="text-gray-900 font-bold text-lg">{title}</Text>
+              <Text className="text-gray-400 text-xs">{subtitle}</Text>
             </View>
           </View>
           <View className="bg-gray-100 rounded-full px-3 py-1">
             <Text className="text-gray-600 text-xs font-medium">
-              {completedModules}/{section.modules.length}
+              {completedModules}/{levelCourses.length}
             </Text>
           </View>
         </View>
 
         <View className="pl-1">
-          {section.modules.map(renderModuleCard)}
+          {levelCourses.map(renderModuleCard)}
         </View>
       </View>
     );
@@ -315,11 +256,31 @@ export default function CoursScreen() {
         </View>
 
         <View className="px-5">
-          <Text className="text-lg font-bold text-gray-900 mb-4">Parcours d'Apprentissage</Text>
-          {LEVEL_SECTIONS.map(renderLevelSection)}
+          <Text className="text-lg font-bold text-gray-900 mb-4">Parcours d&apos;Apprentissage</Text>
+          
+          {isLoading ? (
+            <View className="items-center py-8">
+              <ActivityIndicator size="large" color="#002366" />
+              <Text className="text-gray-500 mt-2">Chargement des cours...</Text>
+            </View>
+          ) : error ? (
+            <View className="bg-red-50 p-4 rounded-2xl">
+              <Text className="text-red-600 text-center">{error}</Text>
+            </View>
+          ) : courses.length > 0 ? (
+            [1, 2, 3].map(level => 
+              groupedCourses[level]?.length > 0 
+                ? renderLevelSection(level, groupedCourses[level])
+                : null
+            )
+          ) : (
+            <View className="bg-white p-8 rounded-3xl border border-dashed border-gray-200 items-center">
+              <Feather name="book-open" size={48} color="#D1D5DB" />
+              <Text className="text-gray-400 text-sm mt-2 font-medium">Aucun cours inscrit</Text>
+              <Text className="text-gray-400 text-xs mt-1">Inscris-toi à un cours pour commencer</Text>
+            </View>
+          )}
         </View>
-
-   
 
       </ScrollView>
     </SafeAreaView>

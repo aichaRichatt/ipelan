@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Text, Pressable } from "react-native";
 import { useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import Animated, { 
   FadeInDown, 
   FadeInUp,
@@ -8,12 +9,19 @@ import Animated, {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { FontAwesome5 } from "@expo/vector-icons";
 
+const LANGUAGE_STORAGE_KEY = '@ipelan_language';
+
 export default function LanguageSelection() {
   const router = useRouter();
 
-  const handleLanguageSelect = (lang: string) => {
-    
-    router.push("/(auth)/login");
+  const handleLanguageSelect = async (lang: string) => {
+    try {
+      await AsyncStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
+      console.log("Langue sauvegardée:", lang);
+    } catch (e) {
+      console.warn("Erreur sauvegarde langue:", e);
+    }
+    router.replace("/(auth)/grade-selection");
   };
 
   return (

@@ -1,50 +1,65 @@
-import { AntDesign, Feather } from "@expo/vector-icons";
-import React from "react";
-import { Pressable, Text, View, ScrollView } from "react-native";
+import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
+import React, { useState, useEffect } from "react";
+import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useLogin } from "../../../hooks/useLogin";
-import { MOCK_BADGES, MOCK_LEADERBOARD, MOCK_USER_PROGRESS } from "@/data/mock";
+import { useSelector } from "react-redux";
+import { RootState } from "../../../services/redux/store";
+import { getEnrolledCoursesByTimeline } from "../../../services/api/courseService";
 
-interface Badge {
-  id: string;
-  name: string;
-  emoji: string;
-  description: string;
-  tier: 'bronze' | 'silver' | 'gold' | 'platinum';
-  isEarned: boolean;
-  earnedDate?: string;
+interface UserCourse {
+  id: number;
+  fullname: string;
+  progress: number;
+  visible: boolean;
 }
-
-interface LeaderboardEntry {
-  rank: number;
-  username: string;
-  avatar: string;
-  xp: number;
-  streak: number;
-  level: number;
-  isCurrentUser: boolean;
-}
-
-const BADGES: Badge[] = MOCK_BADGES.map(b => ({
-  id: b.id,
-  name: b.name,
-  emoji: b.emoji,
-  description: b.description,
-  tier: b.tier,
-  isEarned: b.isEarned,
-  earnedDate: b.earnedAt,
-}));
-
-const TOP_LEADERBOARD: LeaderboardEntry[] = MOCK_LEADERBOARD.slice(0, 5);
 
 export default function ProgressScreen() {
   const router = useRouter();
   const { user } = useLogin();
+  const token = useSelector((state: RootState) => state.auth.token);
+  const [courses, setCourses] = useState<UserCourse[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const earnedBadges = BADGES.filter(b => b.isEarned).length;
-  const currentUserRank = TOP_LEADERBOARD.find(e => e.isCurrentUser);
-  const topThree = TOP_LEADERBOARD.slice(0, 3);
+  useEffect(() => {
+    const fetchCourses = async () => {
+      if (!token) {
+        setIsLoading(false);
+        return;
+      }
+      try {
+        const response = await getEnrolledCoursesByTimeline(token);
+        if (response?.courses) {
+          setCourses(response.courses.filter((c: any) => c.visible !== false));
+        }
+      } catch (error) {
+        console.error("Failed to fetch courses:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchCourses();
+  }, [token]);
+
+  const totalLessons = courses.length * 5;
+  const completedLessons = Math.floor(courses.reduce((sum, c) => sum + (c.progress / 100), 0) * 5);
+  const completedCourses = courses.filter(c => c.progress === 100).length;
+  const inProgressCourses = courses.filter(c => c.progress > 0 && c.progress < 100).length;
+
+  const userXP = user?.ipelan_xp || 0;
+  const userStreak = user?.streak || 0;
+  const userCoins = user?.coins || 0;
+
+  const getLevelFromXP = (xp: number): { level: number; title: string } => {
+    if (xp < 100) return { level: 1, title: "Débutant" };
+    if (xp < 300) return { level: 2, title: "Apprenant" };
+    if (xp < 600) return { level: 3, title: "Intermédiaire" };
+    if (xp < 1000) return { level: 4, title: "Avancé" };
+    return { level: 5, title: "Expert" };
+  };
+
+  const { level, title } = getLevelFromXP(userXP);
 
   return (
     <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
@@ -55,7 +70,7 @@ export default function ProgressScreen() {
         </Pressable>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} >
+      <ScrollView showsVerticalScrollIndicator={false}>
         
         <View className="px-5 mb-6">
           <View className="bg-white rounded-3xl p-6 border border-gray-200" style={{
@@ -68,14 +83,14 @@ export default function ProgressScreen() {
             <View className="flex-row items-center mb-6">
               <View className="w-16 h-16 rounded-full bg-[#002366] items-center justify-center mr-4">
                 <Text className="text-white text-2xl font-bold">
-                  {user?.firstname?.charAt(0) || 'A'}
+                  {user?.firstname?.charAt(0) || user?.username?.charAt(0) || 'U'}
                 </Text>
               </View>
               <View className="flex-1">
                 <Text className="text-xl font-bold text-gray-900">
-                  {user?.firstname || "Ahmadou" || user?.username}
+                  {user?.fullname || user?.username || "Utilisateur"}
                 </Text>
-                <Text className="text-gray-500 text-sm">Niveau Pulaar Fondamental</Text>
+                <Text className="text-gray-500 text-sm">Niveau {level} - {title}</Text>
               </View>
             </View>
 
@@ -84,7 +99,7 @@ export default function ProgressScreen() {
                 <View className="w-12 h-12 rounded-full bg-yellow-100 items-center justify-center mb-2">
                   <Feather name="star" size={24} color="#F59E0B" />
                 </View>
-                <Text className="text-xl font-bold text-gray-900">{user?.ipelan_xp || 342}</Text>
+                <Text className="text-xl font-bold text-gray-900">{userXP}</Text>
                 <Text className="text-xs text-gray-500">XP Total</Text>
               </View>
               
@@ -92,9 +107,9 @@ export default function ProgressScreen() {
               
               <View className="items-center flex-1">
                 <View className="w-12 h-12 rounded-full bg-green-100 items-center justify-center mb-2">
-                  <Feather name="award" size={24} color="#10B981" />
+                  <AntDesign name="trophy" size={24} color="#10B981" />
                 </View>
-                <Text className="text-xl font-bold text-gray-900">3</Text>
+                <Text className="text-xl font-bold text-gray-900">{level}</Text>
                 <Text className="text-xs text-gray-500">Niveau</Text>
               </View>
               
@@ -104,7 +119,7 @@ export default function ProgressScreen() {
                 <View className="w-12 h-12 rounded-full bg-orange-100 items-center justify-center mb-2">
                   <Text className="text-xl">🔥</Text>
                 </View>
-                <Text className="text-xl font-bold text-gray-900">{user?.streak || 7}</Text>
+                <Text className="text-xl font-bold text-gray-900">{userStreak}</Text>
                 <Text className="text-xs text-gray-500">Jours</Text>
               </View>
             </View>
@@ -112,114 +127,88 @@ export default function ProgressScreen() {
         </View>
 
         <View className="px-5 mb-6">
-          <View className="flex-row justify-between items-center mb-4">
-            <Text className="text-lg font-bold text-gray-900">Classement</Text>
-            <View className="flex-row items-center">
-              <View className="bg-[#F59E0B] rounded-full px-3 py-1 mr-2">
-                <Text className="text-white text-xs font-bold">#{currentUserRank?.rank || '-'}</Text>
-              </View>
-              <Text className="text-gray-500 text-xs">Ta position</Text>
-            </View>
-          </View>
+          <Text className="text-lg font-bold text-gray-900 mb-4">Statistiques des Cours</Text>
           
           <View className="bg-white rounded-3xl p-4 border border-gray-200">
-            <View className="flex-row justify-center items-end mb-4 pb-2">
-              {topThree[1] && (
-                <View className="items-center mx-2">
-                  <View className={`w-12 h-12 rounded-full items-center justify-center mb-2 ${
-                    topThree[1].isCurrentUser ? 'bg-[#F59E0B]' : 'bg-gray-300'
-                  }`}>
-                    <Text className={`font-bold ${topThree[1].isCurrentUser ? 'text-white' : 'text-gray-600'}`}>
-                      {topThree[1].avatar}
-                    </Text>
-                  </View>
-                  <Text className="text-xs font-bold text-gray-700">{topThree[1].username}</Text>
-                  <Text className="text-xs text-gray-500">{topThree[1].xp} XP</Text>
-                  <View className="w-16 h-16 bg-[#D1D5DB] rounded-t-xl" />
-                  <Text className="font-bold text-gray-600">2</Text>
-                </View>
-              )}
-              
-              {topThree[0] && (
-                <View className="items-center mx-2 z-10">
-                  <Text className="text-lg mb-1">👑</Text>
-                  <View className={`w-14 h-14 rounded-full items-center justify-center mb-2 ${
-                    topThree[0].isCurrentUser ? 'bg-[#F59E0B]' : 'bg-yellow-400'
-                  }`}>
-                    <Text className={`font-bold text-lg ${topThree[0].isCurrentUser ? 'text-white' : 'text-yellow-900'}`}>
-                      {topThree[0].avatar}
-                    </Text>
-                  </View>
-                  <Text className="text-xs font-bold text-gray-900">{topThree[0].username}</Text>
-                  <Text className="text-xs text-gray-500">{topThree[0].xp} XP</Text>
-                  <View className="w-20 h-20 bg-[#FBBF24] rounded-t-3xl" />
-                  <Text className="font-bold text-yellow-700 text-lg">1</Text>
-                </View>
-              )}
-              
-              {topThree[2] && (
-                <View className="items-center mx-2">
-                  <View className={`w-12 h-12 rounded-full items-center justify-center mb-2 ${
-                    topThree[2].isCurrentUser ? 'bg-[#F59E0B]' : 'bg-orange-200'
-                  }`}>
-                    <Text className={`font-bold ${topThree[2].isCurrentUser ? 'text-white' : 'text-orange-700'}`}>
-                      {topThree[2].avatar}
-                    </Text>
-                  </View>
-                  <Text className="text-xs font-bold text-gray-700">{topThree[2].username}</Text>
-                  <Text className="text-xs text-gray-500">{topThree[2].xp} XP</Text>
-                  <View className="w-16 h-12 bg-[#E5E7EB] rounded-t-xl" />
-                  <Text className="font-bold text-gray-500">3</Text>
-                </View>
-              )}
-            </View>
-            
-            {TOP_LEADERBOARD.slice(3).map((entry) => (
-              <View 
-                key={entry.rank}
-                className={`flex-row items-center py-3 px-2 rounded-xl mb-1 ${
-                  entry.isCurrentUser ? 'bg-[#F59E0B]/10 border border-[#F59E0B]/30' : ''
-                }`}
-              >
-                <View className={`w-8 h-8 rounded-full items-center justify-center mr-3 ${
-                  entry.isCurrentUser ? 'bg-[#F59E0B]' : 'bg-gray-100'
-                }`}>
-                  <Text className={`font-bold text-sm ${entry.isCurrentUser ? 'text-white' : 'text-gray-600'}`}>
-                    {entry.rank}
-                  </Text>
-                </View>
-                <View className={`w-8 h-8 rounded-full items-center justify-center mr-3 ${
-                  entry.isCurrentUser ? 'bg-[#F59E0B]/20' : 'bg-gray-100'
-                }`}>
-                  <Text className={`font-bold text-sm ${entry.isCurrentUser ? 'text-[#F59E0B]' : 'text-gray-500'}`}>
-                    {entry.avatar}
-                  </Text>
-                </View>
-                <Text className={`flex-1 font-medium ${entry.isCurrentUser ? 'text-[#F59E0B]' : 'text-gray-900'}`}>
-                  {entry.username}
-                  {entry.isCurrentUser && ' (Toi)'}
-                </Text>
-                <Text className={`font-bold ${entry.isCurrentUser ? 'text-[#F59E0B]' : 'text-gray-500'}`}>
-                  {entry.xp} XP
-                </Text>
+            {isLoading ? (
+              <View className="items-center py-4">
+                <ActivityIndicator size="small" color="#002366" />
               </View>
-            ))}
+            ) : (
+              <>
+                <View className="flex-row justify-center items-end mb-4 pb-2">
+                  <View className="items-center mx-2">
+                    <View className="w-12 h-12 rounded-full bg-gray-200 items-center justify-center mb-2">
+                      <Feather name="book" size={20} color="#6B7280" />
+                    </View>
+                    <Text className="text-xs font-bold text-gray-700">Total</Text>
+                    <Text className="text-lg font-bold text-gray-900">{courses.length}</Text>
+                    <Text className="text-xs text-gray-500">cours</Text>
+                    <View className="w-12 h-8 bg-gray-300 rounded-t-md" />
+                  </View>
+                  
+                  <View className="items-center mx-2 z-10">
+                    <Text className="text-lg mb-1">✨</Text>
+                    <View className="w-14 h-14 rounded-full bg-green-100 items-center justify-center mb-2">
+                      <AntDesign name="check" size={24} color="#10B981" />
+                    </View>
+                    <Text className="text-xs font-bold text-gray-900">Terminé</Text>
+                    <Text className="text-lg font-bold text-green-600">{completedCourses}</Text>
+                    <View className="w-14 h-10 bg-green-300 rounded-t-md" />
+                  </View>
+                  
+                  <View className="items-center mx-2">
+                    <View className="w-12 h-12 rounded-full bg-blue-100 items-center justify-center mb-2">
+                      <Ionicons name="play" size={20} color="#4a90e2" />
+                    </View>
+                    <Text className="text-xs font-bold text-gray-700">En cours</Text>
+                    <Text className="text-lg font-bold text-blue-600">{inProgressCourses}</Text>
+                    <View className="w-12 h-6 bg-blue-200 rounded-t-md" />
+                  </View>
+                </View>
+
+                <View className="border-t border-gray-100 pt-4 mt-2">
+                  <View className="flex-row justify-between items-center mb-2">
+                    <Text className="text-sm font-medium text-gray-700">Progression globale</Text>
+                    <Text className="text-sm font-bold text-gray-900">
+                      {courses.length > 0 
+                        ? Math.round(courses.reduce((sum, c) => sum + c.progress, 0) / courses.length)
+                        : 0}%
+                    </Text>
+                  </View>
+                  <View className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                    <View 
+                      className="h-full bg-[#4a90e2] rounded-full" 
+                      style={{ 
+                        width: `${courses.length > 0 
+                          ? courses.reduce((sum, c) => sum + c.progress, 0) / courses.length
+                          : 0}%` 
+                      }} 
+                    />
+                  </View>
+                </View>
+              </>
+            )}
           </View>
         </View>
 
         <View className="px-5 mb-6">
-          <View className="flex-row justify-between items-center mb-4">
-            <Text className="text-lg font-bold text-gray-900">Badges</Text>
-            <Text className="text-sm text-gray-500">{earnedBadges}/{BADGES.length}</Text>
-          </View>
+          <Text className="text-lg font-bold text-gray-900 mb-4">Badges & Récompenses</Text>
           
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View className="flex-row">
-              {BADGES.map(badge => (
+              {[
+                { id: '1', emoji: '🎯', name: 'Premier cours', earned: courses.length > 0 },
+                { id: '2', emoji: '📖', name: 'Lecteur assidu', earned: completedLessons >= 5 },
+                { id: '3', emoji: '🔥', name: 'Série de 7 jours', earned: userStreak >= 7 },
+                { id: '4', emoji: '⭐', name: '100 XP', earned: userXP >= 100 },
+                { id: '5', emoji: '🏆', name: 'Cours terminé', earned: completedCourses >= 1 },
+                { id: '6', emoji: '🎓', name: 'Expert', earned: userXP >= 500 },
+              ].map(badge => (
                 <View 
                   key={badge.id}
                   className={`rounded-2xl p-4 mr-3 items-center w-24 ${
-                    badge.isEarned ? 'bg-white border border-gray-200' : 'bg-gray-100 opacity-50'
+                    badge.earned ? 'bg-white border border-gray-200' : 'bg-gray-100 opacity-50'
                   }`}
                   style={{
                     shadowColor: "#000",
@@ -230,8 +219,10 @@ export default function ProgressScreen() {
                   }}
                 >
                   <Text className="text-3xl mb-2">{badge.emoji}</Text>
-                  <Text className="text-xs font-bold text-gray-900 text-center">{badge.name}</Text>
-                  {badge.isEarned ? (
+                  <Text className="text-xs font-bold text-gray-900 text-center" numberOfLines={2}>
+                    {badge.name}
+                  </Text>
+                  {badge.earned ? (
                     <View className="mt-1">
                       <Feather name="check-circle" size={12} color="#10B981" />
                     </View>
@@ -250,35 +241,42 @@ export default function ProgressScreen() {
           <View className="bg-white rounded-2xl p-4 border border-gray-200 mb-3">
             <View className="flex-row justify-between items-center mb-2">
               <Text className="text-sm font-medium text-gray-700">Leçons complétées</Text>
-              <Text className="text-sm font-bold text-gray-900">24/45</Text>
+              <Text className="text-sm font-bold text-gray-900">{completedLessons}/{totalLessons}</Text>
             </View>
             <View className="h-2 bg-gray-200 rounded-full overflow-hidden">
-              <View className="h-full bg-[#4a90e2] rounded-full" style={{ width: '53%' }} />
+              <View 
+                className="h-full bg-[#4a90e2] rounded-full" 
+                style={{ width: `${totalLessons > 0 ? (completedLessons / totalLessons) * 100 : 0}%` }} 
+              />
             </View>
           </View>
 
           <View className="bg-white rounded-2xl p-4 border border-gray-200 mb-3">
             <View className="flex-row justify-between items-center mb-2">
-              <Text className="text-sm font-medium text-gray-700">Quiz réussis</Text>
-              <Text className="text-sm font-bold text-gray-900">12/15</Text>
+              <Text className="text-sm font-medium text-gray-700">Cours terminés</Text>
+              <Text className="text-sm font-bold text-gray-900">{completedCourses}/{courses.length || 1}</Text>
             </View>
             <View className="h-2 bg-gray-200 rounded-full overflow-hidden">
-              <View className="h-full bg-[#10B981] rounded-full" style={{ width: '80%' }} />
+              <View 
+                className="h-full bg-[#10B981] rounded-full" 
+                style={{ width: `${courses.length > 0 ? (completedCourses / courses.length) * 100 : 0}%` }} 
+              />
             </View>
           </View>
 
           <View className="bg-white rounded-2xl p-4 border border-gray-200">
             <View className="flex-row justify-between items-center mb-2">
-              <Text className="text-sm font-medium text-gray-700">Temps d'apprentissage</Text>
-              <Text className="text-sm font-bold text-gray-900">4h 32min</Text>
+              <View className="flex-row items-center">
+                <Text className="text-sm font-medium text-gray-700">Pièces d&apos;or</Text>
+                <Text className="ml-1">🪙</Text>
+              </View>
+              <Text className="text-sm font-bold text-yellow-600">{userCoins}</Text>
             </View>
             <View className="h-2 bg-gray-200 rounded-full overflow-hidden">
-              <View className="h-full bg-[#F59E0B] rounded-full" style={{ width: '35%' }} />
+              <View className="h-full bg-yellow-400 rounded-full" style={{ width: `${Math.min((userCoins / 500) * 100, 100)}%` }} />
             </View>
           </View>
         </View>
-
-       
 
       </ScrollView>
     </SafeAreaView>

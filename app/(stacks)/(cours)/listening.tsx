@@ -1,41 +1,99 @@
-import { AntDesign, Feather } from "@expo/vector-icons";
-import React, { useState, useEffect, useMemo } from "react";
-import { Pressable, Text, View, ScrollView } from "react-native";
+import { Feather } from "@expo/vector-icons";
+import React, { useState, useEffect } from "react";
+import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { audioService } from "../../../services/audio/audioService";
-import { MOCK_LISTENING_EXERCISES } from "@/data/mock";
+import { useSelector } from "react-redux";
+import { RootState } from "@/services/redux/store";
+import { getEnrolledCoursesByTimeline, getCourseSections } from "@/services/api/courseService";
 
 interface ListeningExercise {
-  id: string;
+  id: number;
   word: string;
   translation: string;
   audioUrl?: string;
-  isCorrect: boolean | null;
+  courseName: string;
 }
-
-const EXERCISES: ListeningExercise[] = MOCK_LISTENING_EXERCISES.slice(0, 5).map(e => ({
-  ...e,
-  isCorrect: null,
-}));
 
 export default function ListeningScreen() {
   const router = useRouter();
+  const token = useSelector((state: RootState) => state.auth.token);
+  
+  const [exercises, setExercises] = useState<ListeningExercise[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [currentExercise, setCurrentExercise] = useState(0);
   const [score, setScore] = useState(0);
   const [answers, setAnswers] = useState<boolean[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [showResult, setShowResult] = useState(false);
 
-  const exercise = EXERCISES[currentExercise];
-  const progress = ((currentExercise + 1) / EXERCISES.length) * 100;
+  useEffect(() => {
+    const fetchListeningData = async () => {
+      if (!token) {
+        setIsLoading(false);
+        return;
+      }
 
-  const wrongOption = useMemo(() => {
-    const wrongOptions = EXERCISES
-      .filter((_, i) => i !== currentExercise)
-      .map(e => e.translation);
-    return wrongOptions[Math.floor(Math.random() * wrongOptions.length)];
-  }, [currentExercise]);
+      try {
+        const coursesResponse = await getEnrolledCoursesByTimeline(token);
+        const courses = coursesResponse?.courses || [];
+        
+        const generatedExercises: ListeningExercise[] = [];
+        
+        for (const course of courses.slice(0, 2)) {
+          try {
+            const sectionsResponse = await getCourseSections(token, course.id);
+            if (Array.isArray(sectionsResponse)) {
+              const modules = sectionsResponse.flatMap((s: any) => s.modules || []);
+              
+              modules.slice(0, 3).forEach((mod: any, idx: number) => {
+                generatedExercises.push({
+                  id: generatedExercises.length + 1,
+                  word: `${mod.name || `Leçon ${idx + 1}`}`,
+                  translation: course.fullname,
+                  courseName: course.fullname,
+                });
+              });
+            }
+          } catch (e) {
+            console.log("Error fetching sections", e);
+          }
+        }
+
+        if (generatedExercises.length === 0) {
+          setExercises(generateDefaultExercises());
+        } else {
+          setExercises(generatedExercises.slice(0, 5));
+        }
+      } catch (error) {
+        console.error("Failed to fetch data:", error);
+        setExercises(generateDefaultExercises());
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchListeningData();
+  }, [token]);
+
+  const generateDefaultExercises = (): ListeningExercise[] => [
+    { id: 1, word: "Mbour", translation: "Ville", courseName: "Pulaar" },
+    { id: 2, word: "Ndma", translation: "Jour", courseName: "Pulaar" },
+    { id: 3, word: "Baba", translation: "Père", courseName: "Pulaar" },
+    { id: 4, word: "Yalla", translation: "Dieu", courseName: "Pulaar" },
+    { id: 5, word: "Jamm", translation: "Paix", courseName: "Pulaar" },
+  ];
+
+  const exercise = exercises[currentExercise];
+  const progress = exercises.length > 0 ? ((currentExercise + 1) / exercises.length) * 100 : 0;
+
+  const getWrongTranslation = () => {
+    const alternatives = ["Maison", "Eau", "Pain", "Ami", " Ecole", "Livre", "Main", "Pied"];
+    return alternatives[Math.floor(Math.random() * alternatives.length)];
+  };
+
+  const wrongOption = exercise ? getWrongTranslation() : "";
 
   useEffect(() => {
     return () => {
@@ -61,7 +119,7 @@ export default function ListeningScreen() {
       setScore(prev => prev + 1);
     }
 
-    if (currentExercise < EXERCISES.length - 1) {
+    if (currentExercise < exercises.length - 1) {
       setTimeout(() => {
         setCurrentExercise(prev => prev + 1);
       }, 1000);
@@ -71,7 +129,7 @@ export default function ListeningScreen() {
   };
 
   const getScoreEmoji = () => {
-    const percentage = (score / EXERCISES.length) * 100;
+    const percentage = (score / (exercises.length || 1)) * 100;
     if (percentage === 100) return "🏆";
     if (percentage >= 80) return "🌟";
     if (percentage >= 60) return "👏";
@@ -79,8 +137,19 @@ export default function ListeningScreen() {
     return "📚";
   };
 
+  if (isLoading) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color="#002366" />
+          <Text className="text-gray-500 mt-4">Chargement...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (showResult) {
-    const percentage = Math.round((score / EXERCISES.length) * 100);
+    const percentage = exercises.length > 0 ? Math.round((score / exercises.length) * 100) : 0;
     
     return (
       <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top', 'bottom']}>
@@ -92,7 +161,7 @@ export default function ListeningScreen() {
                 {percentage >= 60 ? "Bravo !" : "Continue tes efforts !"}
               </Text>
               <Text className="text-gray-500 text-center mb-6">
-                Tu as obtenu {score} bonnes réponses sur {EXERCISES.length}
+                Tu as obtenu {score} bonnes réponses sur {exercises.length}
               </Text>
               
               <View className="w-32 h-32 rounded-full border-8 mb-6 items-center justify-center"
@@ -137,6 +206,20 @@ export default function ListeningScreen() {
     );
   }
 
+  if (!exercise) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
+        <View className="flex-1 items-center justify-center">
+          <Feather name="music" size={64} color="#D1D5DB" />
+          <Text className="text-gray-500 mt-4">Aucun exercice disponible</Text>
+          <Pressable onPress={() => router.back()} className="mt-6 bg-[#002366] px-6 py-3 rounded-xl">
+            <Text className="text-white font-bold">Retour</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
       <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
@@ -146,7 +229,7 @@ export default function ListeningScreen() {
         <View className="flex-1">
           <Text className="text-lg font-bold text-gray-900">Compréhension orale</Text>
           <Text className="text-gray-500 text-xs">
-            Exercice {currentExercise + 1}/{EXERCISES.length}
+            Exercice {currentExercise + 1}/{exercises.length}
           </Text>
         </View>
         <View className="bg-[#F59E0B] px-3 py-1 rounded-full">
@@ -197,7 +280,7 @@ export default function ListeningScreen() {
           <Text className="text-center text-gray-600 font-medium text-lg mt-4 mb-2">
             &ldquo;{exercise.word}&rdquo;
           </Text>
-          <Text className="text-center text-gray-400 text-sm">Mot à traduire</Text>
+          <Text className="text-center text-gray-400 text-sm">{exercise.courseName}</Text>
         </View>
 
         <Text className="text-lg font-bold text-gray-900 mb-4 text-center">
@@ -212,7 +295,7 @@ export default function ListeningScreen() {
             <Text className="text-center font-bold text-gray-900 text-lg">
               {exercise.translation}
             </Text>
-            <Text className="text-center text-gray-400 text-xs mt-1">Option A</Text>
+            <Text className="text-center text-green-500 text-xs mt-1">✓ Correct</Text>
           </Pressable>
           
           <Pressable
@@ -222,7 +305,7 @@ export default function ListeningScreen() {
             <Text className="text-center font-bold text-gray-900">
               {wrongOption}
             </Text>
-            <Text className="text-center text-gray-400 text-xs mt-1">Option B</Text>
+            <Text className="text-center text-gray-400 text-xs mt-1">Incorrect</Text>
           </Pressable>
         </View>
       </ScrollView>

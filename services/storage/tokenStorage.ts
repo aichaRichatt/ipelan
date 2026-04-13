@@ -58,5 +58,10 @@ export const removeUserData = async (): Promise<void> => {
 
 export const hasValidToken = async (): Promise<boolean> => {
   const token = await getToken();
-  return token !== null && token.length > 0;
+  
+  if (!token || token.length < 10) {
+    return false;
+  }
+  
+  return true;
 };

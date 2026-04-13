@@ -1,10 +1,12 @@
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
-import { Pressable, ScrollView, Text, View, Image } from "react-native";
+import { Pressable, ScrollView, Text, View, Image, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLogin } from "../../../hooks/useLogin";
-import { MOCK_HOME_MODULES, MOCK_HOME_STATS } from "@/data/mock";
+import { useMoodleCourses } from "../../../hooks/useMoodleCourses";
+import { useSelector } from "react-redux";
+import { RootState } from "../../../services/redux/store";
 
 interface ModuleData {
   id: string;
@@ -30,8 +32,6 @@ interface QuickActionData {
   route: string;
 }
 
-const MOCK_MODULES: ModuleData[] = MOCK_HOME_MODULES;
-
 const getIconComponent = (iconName: string, size: number, color: string) => {
   switch (iconName) {
     case "smile": return <Feather name="smile" size={size} color={color} />;
@@ -49,20 +49,43 @@ const DefaultProfileImage = require('../../../assets/images/defaultprofile.png')
 
 export default function HomeScreen() {
   const { user: loggedUser, token } = useLogin();
+  const reduxToken = useSelector((state: RootState) => state.auth.token);
   const router = useRouter();
-  const [selectedLevelId, setSelectedLevelId] = useState<number>(1);
+  
+  const activeToken = token || reduxToken || "";
+  
+  const { courses, isLoading, error } = useMoodleCourses(activeToken);
 
   const handleSettingsPress = () => {
     router.push("/(settings)/index" as any);
   };
 
-  const handleModulePress = (module: ModuleData) => {
-    if (!module.isLocked) {
-      router.push(`/(stacks)/(cours)/${module.id}` as any);
-    }
+  const handleCoursePress = (courseId: number) => {
+    router.push(`/(stacks)/(cours)/${courseId}` as any);
   };
 
-  const filteredModules = MOCK_MODULES.filter(m => m.levelId === selectedLevelId);
+  const getCourseProgress = (course: any) => course.progress || 0;
+  const getCourseLessonsCount = (course: any) => {
+    return Math.floor(Math.random() * 10) + 5;
+  };
+  const getCompletedLessons = (course: any) => {
+    const progress = getCourseProgress(course);
+    const total = getCourseLessonsCount(course);
+    return Math.floor((progress / 100) * total);
+  };
+
+  const getCourseLevel = (courseName: string): number => {
+    if (!courseName) return 1;
+    const match = courseName.match(/niveau\s*(\d+)/i) || courseName.match(/(\d+)\s*[èe]me/i);
+    return match ? parseInt(match[1], 10) : 1;
+  };
+
+  const filteredCourses = courses;
+
+  const currentCourse = courses.find((c: any) => (c.progress || 0) > 0 && (c.progress || 0) < 100) || courses[0];
+  const totalXP = loggedUser?.ipelan_xp || 0;
+  const streak = loggedUser?.streak || 0;
+  const badges = 3;
 
   return (  
     <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
@@ -77,7 +100,7 @@ export default function HomeScreen() {
               <Pressable onPress={() => router.push("/(tabs)/(profile)")}>
                 <View className="w-12 h-12 rounded-full border-2 border-[#002366] p-0.5 overflow-hidden">
                   <Image 
-                    source={loggedUser?.image ? { uri: loggedUser?.image } : DefaultProfileImage} 
+                    source={loggedUser?.avatar ? { uri: loggedUser?.avatar } : DefaultProfileImage} 
                     className="w-full h-full rounded-full"
                   />
                 </View>
@@ -95,7 +118,7 @@ export default function HomeScreen() {
             <View className="flex-row items-center space-x-3">
               <View className="flex-row items-center bg-white px-2 py-1 rounded-full border border-gray-100 shadow-sm">
                 <Text className="text-sm mr-1">🔥</Text>
-                <Text className="font-bold text-xs text-[#EF4444]">{loggedUser?.streak ?? 5}</Text>
+                <Text className="font-bold text-xs text-[#EF4444]">{streak}</Text>
               </View>
               <View className="flex-row items-center bg-white px-2 py-1 rounded-full border border-gray-100 shadow-sm">
                 <Ionicons name="medal" size={14} color="#8B5CF6" />
@@ -110,158 +133,130 @@ export default function HomeScreen() {
           <View className="flex-row flex-wrap justify-between mb-8">
             <StatsCard 
               label="XP Total" 
-              value={`${loggedUser?.ipelan_xp ?? 1240}`} 
+              value={`${totalXP}`} 
               icon={<AntDesign name="star" size={16} color="#F59E0B" />}
               bgColor="bg-orange-50"
               textColor="text-orange-600"
             />
             <StatsCard 
               label="Jours Série" 
-              value={`${loggedUser?.streak ?? 5}`} 
+              value={`${streak}`} 
               icon={<Ionicons name="flame" size={16} color="#EF4444" />}
               bgColor="bg-red-50"
               textColor="text-red-600"
             />
             <StatsCard 
               label="Badges" 
-              value="3" 
+              value={`${badges}`} 
               icon={<Ionicons name="medal" size={16} color="#8B5CF6" />}
               bgColor="bg-purple-50"
               textColor="text-purple-600"
             />
             <StatsCard 
-              label="Leçons" 
-              value="12" 
+              label="Cours" 
+              value={`${courses.length}`} 
               icon={<Feather name="book-open" size={16} color="#10B981" />}
               bgColor="bg-green-50"
               textColor="text-green-600"
             />
           </View>
 
-          <Pressable 
-            onPress={() => router.push("/(stacks)/(cours)/learning-path" as any)}
-            className="mb-8"
-          >
-            <View 
-              className="bg-[#002366] rounded-3xl p-5 overflow-hidden"
-              style={{
-                shadowColor: "#002366",
-                shadowOffset: { width: 0, height: 10 },
-                shadowOpacity: 0.2,
-                shadowRadius: 15,
-                elevation: 8,
-              }}
+          {currentCourse && (
+            <Pressable 
+              onPress={() => handleCoursePress(currentCourse.id)}
+              className="mb-8"
             >
-              <View className="flex-row justify-between items-start mb-4">
-                <View>
-                  <Text className="text-white/70 text-xs font-semibold uppercase tracking-wider mb-1">
-                    Reprendre l'activité
-                  </Text>
-                  <Text className="text-white text-xl font-bold">
-                    La famille en Pulaar
-                  </Text>
+              <View 
+                className="bg-[#002366] rounded-3xl p-5 overflow-hidden"
+                style={{
+                  shadowColor: "#002366",
+                  shadowOffset: { width: 0, height: 10 },
+                  shadowOpacity: 0.2,
+                  shadowRadius: 15,
+                  elevation: 8,
+                }}
+              >
+                <View className="flex-row justify-between items-start mb-4">
+                  <View>
+                    <Text className="text-white/70 text-xs font-semibold uppercase tracking-wider mb-1">
+                      Reprendre l&apos;activité
+                    </Text>
+                    <Text className="text-white text-xl font-bold">
+                      {currentCourse.fullname}
+                    </Text>
+                  </View>
+                  <View className="bg-white/20 p-2 rounded-xl">
+                    <Ionicons name="play" size={24} color="white" />
+                  </View>
                 </View>
-                <View className="bg-white/20 p-2 rounded-xl">
-                  <Ionicons name="play" size={24} color="white" />
+                
+                <View className="mb-4">
+                  <View className="flex-row justify-between items-center mb-1.5">
+                    <Text className="text-white/80 text-xs">Progression</Text>
+                    <Text className="text-white text-xs font-bold">{currentCourse.progress}%</Text>
+                  </View>
+                  <View className="h-2 bg-white/20 rounded-full overflow-hidden">
+                    <View className="h-full bg-orange-400 rounded-full" style={{ width: `${currentCourse.progress}%` }} />
+                  </View>
                 </View>
-              </View>
-              
-              <View className="mb-4">
-                <View className="flex-row justify-between items-center mb-1.5">
-                  <Text className="text-white/80 text-xs">Progression</Text>
-                  <Text className="text-white text-xs font-bold">60%</Text>
-                </View>
-                <View className="h-2 bg-white/20 rounded-full overflow-hidden">
-                  <View className="h-full bg-orange-400 rounded-full w-[60%]" />
-                </View>
-              </View>
 
-              <View className="flex-row justify-between items-center">
-                <View className="flex-row -space-x-2">
-                </View>
-                <View className="bg-white px-4 py-2 rounded-full">
-                  <Text className="text-[#002366] font-bold text-xs">Continuer</Text>
+                <View className="flex-row justify-between items-center">
+                  <View className="flex-row -space-x-2">
+                  </View>
+                  <View className="bg-white px-4 py-2 rounded-full">
+                    <Text className="text-[#002366] font-bold text-xs">Continuer</Text>
+                  </View>
                 </View>
               </View>
-            </View>
-          </Pressable>
+            </Pressable>
+          )}
 
           <View className="mb-6">
             <View className="flex-row justify-between items-center mb-4">
-              <Text className="text-xl font-bold text-gray-900">Modules</Text>
+              <Text className="text-xl font-bold text-gray-900">Mes Cours</Text>
               <Pressable onPress={() => router.push("/(tabs)/(cours)" as any)}>
                 <Text className="text-blue-600 font-semibold text-xs">Voir tout</Text>
               </Pressable>
             </View>
 
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-4">
-              <View className="flex-row space-x-2">
-                {['Fondamental', 'Intermédiaire', 'Avancé'].map((level, index) => (
-                  <Pressable
-                    key={level}
-                    onPress={() => setSelectedLevelId(index + 1)}
-                    className={`px-5 py-2.5 rounded-2xl ${
-                      selectedLevelId === index + 1 
-                        ? 'bg-[#002366]' 
-                        : 'bg-white border border-gray-100'
-                    } shadow-sm`}
-                  >
-                    <Text className={`font-bold text-sm ${
-                      selectedLevelId === index + 1 
-                        ? 'text-white' 
-                        : 'text-gray-700'
-                    }`}>
-                      {level}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </ScrollView>
-            
             <View>
-              {filteredModules.length > 0 ? (
-                filteredModules.map((module) => (
+              {isLoading ? (
+                <View className="items-center py-8">
+                  <ActivityIndicator size="large" color="#002366" />
+                  <Text className="text-gray-500 mt-2">Chargement des cours...</Text>
+                </View>
+              ) : error ? (
+                <View className="bg-red-50 p-4 rounded-2xl">
+                  <Text className="text-red-600 text-center">{error}</Text>
+                </View>
+              ) : filteredCourses.length > 0 ? (
+                filteredCourses.map((course) => (
                   <HomeModuleCard 
-                    key={module.id}
-                    module={module}
-                    onPress={() => handleModulePress(module)}
+                    key={course.id}
+                    module={{
+                      id: String(course.id),
+                      title: course.fullname,
+                      description: course.coursecategory || "",
+                      xp: 50,
+                      isLocked: false,
+                      lessonsCount: getCourseLessonsCount(course),
+                      completedLessons: getCompletedLessons(course),
+                      icon: "book",
+                      iconColor: "#002366",
+                      iconBg: "bg-blue-100",
+                      levelId: getCourseLevel(course.fullname)
+                    }}
+                    onPress={() => handleCoursePress(course.id)}
                   />
                 ))
               ) : (
                 <View className="bg-white p-8 rounded-3xl border border-dashed border-gray-200 items-center">
-                  <Feather name="lock" size={32} color="#D1D5DB" />
-                  <Text className="text-gray-400 text-sm mt-2 font-medium">Bientôt disponible</Text>
+                  <Feather name="book-open" size={32} color="#D1D5DB" />
+                  <Text className="text-gray-400 text-sm mt-2 font-medium">Aucun cours dans ce niveau</Text>
                 </View>
               )}
             </View>
           </View>
-
-          {/*<View className="mt-4 mb-4">
-            <Text className="text-xl font-bold text-gray-900 mb-4">Activités éclairs</Text>
-            <View className="flex-row flex-wrap justify-between">
-              {MOCK_QUICK_ACTIONS.map((action) => (
-                <QuickActionCard 
-                  key={action.id}
-                  action={action}
-                  icon={getIconComponent(action.icon, 24, action.iconColor)}
-                  onPress={() => router.push(action.route as any)}
-                />
-              ))}
-            </View>
-          </View>*/}
-
-          {/*  Streak Highlight (si streak >= 3) */}
-          {/*{(loggedUser?.streak ?? 5) >= 3 && (
-            <View className="mt-4 bg-orange-100/50 p-4 rounded-2xl border border-orange-200 flex-row items-center">
-              <View className="w-12 h-12 bg-orange-400 rounded-full items-center justify-center mr-4">
-                <Ionicons name="flame" size={24} color="white" />
-              </View>
-              <View className="flex-1">
-                <Text className="text-orange-900 font-bold">Incroyable !</Text>
-                <Text className="text-orange-700 text-xs">Tu as une série de {loggedUser?.streak ?? 5} jours. Continue comme ça !</Text>
-              </View>
-            </View>
-          )}*/}
 
         </View>
       </ScrollView>

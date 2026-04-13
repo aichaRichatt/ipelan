@@ -39,10 +39,10 @@ export default function GradeSelectionScreen() {
     setIsLoading(true);
     try {
       await AsyncStorage.setItem(STORAGE_KEY, selectedGrade.toString());
-      router.push("/(auth)/login" as any);
+      router.replace("/(auth)/login" as any);
     } catch (error) {
       console.error('Failed to save grade:', error);
-      router.push("/(auth)/login" as any);
+      router.replace("/(auth)/login" as any);
     } finally {
       setIsLoading(false);
     }

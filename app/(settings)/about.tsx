@@ -19,7 +19,7 @@ export default function AboutScreen() {
         <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
           <Feather name="arrow-left" size={24} color="black" />
         </Pressable>
-        <Text className="text-lg font-bold text-gray-900">À propos d'IPELAN</Text>
+        <Text className="text-lg font-bold text-gray-900">À propos d&apos;IPELAN</Text>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}>
@@ -36,15 +36,15 @@ export default function AboutScreen() {
         </View>
 
         <View className="bg-white rounded-3xl p-6 mb-4 border border-gray-200">
-          <Text className="text-lg font-bold text-gray-900 mb-3">Qu'est-ce qu'IPELAN ?</Text>
+          <Text className="text-lg font-bold text-gray-900 mb-3">Qu&apos;est-ce qu&apos;IPELAN ?</Text>
           <Text className="text-gray-600 leading-relaxed mb-4">
             IPELAN est une application éducative mobile conçue pour enseigner les langues nationales de Mauritanie : le Pulaar, le Soninké et le Wolof.
           </Text>
           <Text className="text-gray-600 leading-relaxed mb-4">
-            Destinée aux élèves du cycle fondamental, l'application propose des activités interactives, des quiz et des exercices adaptés aux enfants.
+            Destinée aux élèves du cycle fondamental, l&apos;application propose des activités interactives, des quiz et des exercices adaptés aux enfants.
           </Text>
           <Text className="text-gray-600 leading-relaxed">
-            L'application fonctionne hors-ligne, permettant aux élèves d'apprendre même sans connexion internet.
+            L&apos;application fonctionne hors-ligne, permettant aux élèves d&apos;apprendre même sans connexion internet.
           </Text>
         </View>
 
@@ -89,7 +89,7 @@ export default function AboutScreen() {
         <View className="bg-white rounded-3xl p-6 mb-4 border border-gray-200">
           <Text className="text-lg font-bold text-gray-900 mb-3">Crédits</Text>
           <Text className="text-gray-600 text-sm leading-relaxed">
-            Application développée pour l'éducation en Mauritanie.
+            Application développée pour l&apos;éducation en Mauritanie.
           </Text>
           <Text className="text-gray-600 text-sm leading-relaxed mt-2">
             © 2026 IPELAN. Tous droits réservés.
@@ -111,7 +111,7 @@ export default function AboutScreen() {
         {/* Legal */}
         <View className="mb-8">
           <Pressable className="py-3">
-            <Text className="text-gray-600">Conditions d'utilisation</Text>
+            <Text className="text-gray-600">Conditions d&apos;utilisation</Text>
           </Pressable>
           <Pressable className="py-3">
             <Text className="text-gray-600">Politique de confidentialité</Text>

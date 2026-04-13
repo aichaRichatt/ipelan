@@ -50,11 +50,11 @@ export default function OnboardingScreen() {
   };
 
   const handleFinish = () => {
-    router.push("/(auth)/language-selection");
+    router.replace("/(auth)/language-selection");
   };
 
   const handleSkip = () => {
-    router.push("/(auth)/language-selection");
+    router.replace("/(auth)/language-selection");
   };
 
   const slide = SLIDES[currentSlide];
@@ -122,7 +122,7 @@ export default function OnboardingScreen() {
         {currentSlide < SLIDES.length - 1 && (
           <Pressable onPress={handleFinish} className="mt-4 py-3">
             <Text className="text-gray-400 text-center font-medium">
-              Je n'ai pas besoin d'aide
+              Je n&apos;ai pas besoin d&apos;aide
             </Text>
           </Pressable>
         )}

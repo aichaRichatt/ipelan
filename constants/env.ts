@@ -5,19 +5,18 @@ export const ENV = {
   IS_PROD: !DEV_MODE,
   
   API: {
-    MOODLE_URL: process.env.EXPO_PUBLIC_MOODLE_API_URL || 'https://ipelan.mr',
+    MOODLE_URL: process.env.EXPO_PUBLIC_MOODLE_API_URL || 'https://moodle.richatt.com',
     API_TIMEOUT: 30000,
   },
   
   AUTH: {
-    USE_MOCK: DEV_MODE,
     TOKEN_KEY: 'ipelan_auth_token',
     USER_KEY: 'ipelan_user_data',
   },
   
   CONTENT: {
-    EPUB_BASE_URL: process.env.EXPO_PUBLIC_EPUB_BASE_URL || 'https://ipelan.mr/archives',
-    AUDIO_BASE_URL: process.env.EXPO_PUBLIC_AUDIO_BASE_URL || 'https://ipelan.mr/audio',
+    EPUB_BASE_URL: process.env.EXPO_PUBLIC_EPUB_BASE_URL || 'https://moodle.richatt.com',
+    AUDIO_BASE_URL: process.env.EXPO_PUBLIC_AUDIO_BASE_URL || 'https://moodle.richatt.com',
     DOWNLOAD_WIFI_ONLY: true,
     MAX_STORAGE_MB: 500,
   },
@@ -47,8 +46,6 @@ export const ENV = {
     SHOW_DEV_BANNER: DEV_MODE,
   },
 } as const;
-
-export const isMockMode = (): boolean => ENV.AUTH.USE_MOCK;
 
 export const isDevMode = (): boolean => ENV.IS_DEV;
 

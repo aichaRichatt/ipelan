@@ -12,8 +12,9 @@ import { IPELANUser, LoginForm } from '../types';
 import { RootState } from '../services/redux/store';
 import { useDispatch, useSelector } from 'react-redux';
 
+const IS_DEV = process.env.NODE_ENV === "development";
+
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-const USE_MOCK_LOGIN = true; // Sync with moodleAuth.ts
 
 export function useLogin() {
   const dispatch = useDispatch();
@@ -24,50 +25,11 @@ export function useLogin() {
   const login = async (username: string, password: string, email?: string, firstName?: string, lastName?: string, city?: string) => {
     dispatch(loginStart());
     try {
-      console.log("[useLogin] Log In Attempt for:", username);
+      if (IS_DEV) console.log("[useLogin] Log In Attempt for:", username);
       
       let token: string;
       let siteInfo: any = null;
       let moodleUser: any = null;
-      
-      if (USE_MOCK_LOGIN) {
-        console.log("[useLogin] Using MOCK LOGIN MODE");
-        token = "mock_token_" + Date.now();
-        
-        const mockUser: IPELANUser = {
-          id: 1,
-          username: username,
-          firstname: firstName || username.split('@')[0],
-          lastname: lastName || "",
-          email: email || username,
-          fullname: `${firstName || username.split('@')[0]} ${lastName || ""}`.trim(),
-          ipelan_xp: 342,
-          coins: 340,
-          streak: 7,
-          avatar: "",
-          token: token,
-        };
-        
-        console.log("[useLogin] Mock user created:", JSON.stringify(mockUser));
-        await saveToken(token);
-        await saveUserData(mockUser);
-        
-        let db = null;
-        try {
-          db = await getDBConnection();
-          if (db) {
-            await createTables(db);
-            await saveUser(db, mockUser as any);
-            console.log("SQLite mock data saved.");
-          }
-        } catch (sqliteError: any) {
-          console.log("sqlite Error:", sqliteError.message || sqliteError);
-        }
-        
-        dispatch(loginSuccess({ user: mockUser, token }));
-        router.replace("/(tabs)/(home)" as any);
-        return { user: mockUser, token };
-      }
       
       const tokenData = await moodleLogin(username, password);
       token = tokenData.token;
@@ -81,74 +43,68 @@ export function useLogin() {
         return adminProfileData?.[0] || (adminProfileData?.users && adminProfileData.users[0]);
       };
 
-       try {
-        console.log("[useLogin] Getting site info for token...");
+      try {
         siteInfo = await getMoodleSiteInfo(token);
-        console.log("[useLogin] Site info raw:", JSON.stringify(siteInfo));
       } catch (siteErr: any) {
-         console.warn("[useLogin] Site info fetch failed:", siteErr.message);
+        if (IS_DEV) console.warn("[useLogin] Site info fetch failed:", siteErr.message);
       }
 
-       if (siteInfo?.userid) {
+      if (siteInfo?.userid) {
         try {
-          console.log("[useLogin] Attempting to fetch extended profile for userid:", siteInfo.userid);
           const profileData = await getMoodleProfile(token, siteInfo.userid, "id");
           moodleUser = profileData[0] || (profileData.users && profileData.users[0]);
         } catch (e: any) {
-          console.log("[useLogin] Student profile fetch failed:", e.message);
+          if (IS_DEV) console.warn("[useLogin] Student profile fetch failed");
         }
       }
 
-       if (!moodleUser && siteInfo?.userid && process.env.EXPO_PUBLIC_MOODLE_TOKEN) {
+      if (!moodleUser && siteInfo?.userid && process.env.EXPO_PUBLIC_MOODLE_TOKEN) {
         try {
-          console.log("[useLogin] Retrying profile fetch with Admin token for ID:", siteInfo.userid);
           moodleUser = await getMoodleUserProfileByAdmin(siteInfo.userid);
-          console.log("[useLogin] Admin profile recovered:", !!moodleUser);
         } catch (adminErr: any) {
-          console.warn("[useLogin] Admin fallback for profile also failed:", adminErr.message);
+          if (IS_DEV) console.warn("[useLogin] Admin fallback for profile failed");
         }
       }
 
       const moodleId = siteInfo?.userid || moodleUser?.id || 0;
-      
-       if (moodleId > 0 && (!moodleUser?.email || moodleUser?.auth === 'none' || siteInfo?.policyagreed === 0)) {
-        console.log("[useLogin] Profile incomplete, policy not agreed or missing mail. Attempting AUTO-REPAIR...");
-        try {
-          const repairEmail = email || moodleUser?.email || (siteInfo?.username?.includes('@') ? siteInfo.username : `${siteInfo?.username || 'user'}@ipelan.com`);
-          await updateUserProfile(
-            Number(moodleId),
-            firstName || moodleUser?.firstname || siteInfo?.firstname || "Ip",
-            lastName || moodleUser?.lastname || siteInfo?.lastname || "User",
-            repairEmail,
-            city || moodleUser?.city || siteInfo?.city || "Nktt"
-          );
-          console.log("[useLogin] AUTO-REPAIR successful for ID:", moodleId);
-          
-           try {
-            console.log("[useLogin] Forcing enrollment in Course 81 for ID:", moodleId);
-            await enrolUserInCourse(Number(moodleId), 81);
-          } catch (enrolErr) {
-            console.warn("[useLogin] Course enrollment failed (check Admin permissions):", enrolErr);
+        
+      if (moodleId > 0) {
+        const needProfileUpdate = !moodleUser?.firstname || !moodleUser?.lastname || moodleUser?.auth === 'none';
+        const needPolicyAccept = siteInfo?.policyagreed === 0;
+        
+        if (needProfileUpdate || needPolicyAccept) {
+          try {
+            const currentProfile = await getMoodleUserProfileByAdmin(Number(moodleId));
+            const current = currentProfile?.[0] || currentProfile?.users?.[0] || {};
+            
+            const nameFromEmail = siteInfo?.username?.split('@')[0] || "User";
+            const newFirstName = current?.firstname || firstName || siteInfo?.firstname || nameFromEmail;
+            const newLastName = current?.lastname || lastName || siteInfo?.lastname || "";
+            
+            await updateUserProfile(Number(moodleId), newFirstName, newLastName);
+            
+            await sleep(1500);
+            siteInfo = await getMoodleSiteInfo(token);
+          } catch (repairErr: any) {
+            if (IS_DEV) console.warn("[useLogin] Profile update failed");
           }
-
-           console.log("[useLogin] Waiting 1.5s for Moodle sync...");
-          await sleep(1500);
-
-           siteInfo = await getMoodleSiteInfo(token);
-          moodleUser = await getMoodleUserProfileByAdmin(Number(moodleId));
-        } catch (repairErr: any) {
-          console.warn("[useLogin] AUTO-REPAIR failed:", repairErr.message);
         }
       }
-
-       if (siteInfo && siteInfo.policyagreed === 0) {
-        console.log("[useLogin] Site policy STILL not agreed. Final attempt via student token...");
+        
+      if (siteInfo && siteInfo.policyagreed === 0) {
         try {
-          await agreeToSitePolicy(token);
+          await agreeToSitePolicy(token, Number(moodleId));
+          await sleep(1000);
           siteInfo = await getMoodleSiteInfo(token);
         } catch (agreeErr: any) {
-          console.warn("[useLogin] Manual AUTO-AGREE fallback ignored:", agreeErr.message);
+          if (IS_DEV) console.warn("[useLogin] Policy agree failed");
         }
+      }
+       
+      try {
+        await enrolUserInCourse(Number(moodleId), 81);
+      } catch (enrolErr: any) {
+        if (IS_DEV) console.warn("[useLogin] Course enrollment failed");
       }
 
       const fName = (moodleUser?.firstname || siteInfo?.firstname || "").trim();
@@ -173,17 +129,13 @@ export function useLogin() {
         token: token
       };
 
-      console.log("[useLogin] Final user object to save:", JSON.stringify(user));
       await saveToken(token);
       await saveUserData(user);
 
-      console.log("intialiser sqlite");
-      let db = null;
       try {
-        db = await getDBConnection();
+        const db = await getDBConnection();
         if (db) {
           await createTables(db);
-          console.log("Saving user to SQLite:", JSON.stringify(user));
           const dbUser = {
             id: user.id,
             username: user.username,
@@ -195,15 +147,13 @@ export function useLogin() {
             token: user.token || token
           };
           await saveUser(db, dbUser as any);
-          console.log("SQLite data saved.");
         }
       } catch (sqliteError: any) {
-         console.log("sqlite Error detail:", sqliteError.message || sqliteError);
+        if (IS_DEV) console.warn("[useLogin] SQLite error:", sqliteError.message);
       }
 
       dispatch(loginSuccess({ user, token }));
-      console.log("Login success dispatched, navigating...");
-
+      await sleep(500);
       router.replace("/(tabs)/(home)" as any);
       return { user, token };
 
@@ -220,7 +170,7 @@ export function useLogin() {
       dispatch(logout());
       router.replace("/(auth)/login");
     } catch (error) {
-      console.error("Erreur lors de la déconnexion", error);
+      if (IS_DEV) console.error("Erreur lors de la déconnexion", error);
     }
   };
 

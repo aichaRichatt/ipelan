@@ -1,10 +1,12 @@
-import { AntDesign, Feather } from "@expo/vector-icons";
+import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import React, { useState, useEffect } from "react";
-import { Pressable, Text, View, ScrollView } from "react-native";
+import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { audioService } from "../../services/audio/audioService";
-import { MOCK_QUIZ_QUESTIONS } from "@/data/mock";
+import { useSelector } from "react-redux";
+import { RootState } from "../../services/redux/store";
+import { getEnrolledCoursesByTimeline, getCourseSections } from "../../services/api/courseService";
 
 interface QuizQuestion {
   id: number;
@@ -15,13 +17,12 @@ interface QuizQuestion {
   correctIndex: number;
 }
 
-const QUIZ_DATA: QuizQuestion[] = MOCK_QUIZ_QUESTIONS.slice(0, 5).map((q, i) => ({
-  ...q,
-  id: i + 1,
-}));
-
 export default function QuizScreen() {
   const router = useRouter();
+  const token = useSelector((state: RootState) => state.auth.token);
+  
+  const [questions, setQuestions] = useState<QuizQuestion[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [score, setScore] = useState(0);
@@ -29,8 +30,92 @@ export default function QuizScreen() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [showResult, setShowResult] = useState(false);
 
-  const question = QUIZ_DATA[currentQuestion];
-  const progress = ((currentQuestion + 1) / QUIZ_DATA.length) * 100;
+  useEffect(() => {
+    const fetchQuizData = async () => {
+      if (!token) {
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const coursesResponse = await getEnrolledCoursesByTimeline(token);
+        const courses = coursesResponse?.courses || [];
+        
+        const allModules: any[] = [];
+        
+        for (const course of courses.slice(0, 3)) {
+          try {
+            const sectionsResponse = await getCourseSections(token, course.id);
+            if (Array.isArray(sectionsResponse)) {
+              for (const section of sectionsResponse) {
+                if (section.modules) {
+                  allModules.push(...section.modules);
+                }
+              }
+            }
+          } catch (e) {
+            console.log("Error fetching sections for course", course.id);
+          }
+        }
+
+        const quizQuestions: QuizQuestion[] = generateQuizQuestions(allModules, courses);
+        setQuestions(quizQuestions);
+      } catch (error) {
+        console.error("Failed to fetch quiz data:", error);
+        setQuestions(generateDefaultQuestions());
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchQuizData();
+  }, [token]);
+
+  const generateQuizQuestions = (modules: any[], courses: any[]): QuizQuestion[] => {
+    const questionTemplates = [
+      { template: (c: string) => ({ question: `Quel est le contenu principal du cours "${c}"?`, options: ["Chapitre 1", "Chapitre 2", "Chapitre 3", "Chapitre 4"], correct: 0 }), type: "text-mcq" as const },
+      { template: (c: string) => ({ question: `As-tu terminé le cours "${c}"?`, options: ["Oui", "Non", "En cours", "Pas commencé"], correct: 2 }), type: "text-mcq" as const },
+      { template: (c: string) => ({ question: `Quelle activité dans "${c}"?`, options: ["Lecture", "Quiz", "Exercice", "Vidéo"], correct: 0 }), type: "text-mcq" as const },
+      { template: (c: string) => ({ question: `Le cours "${c}" est-il difficile?`, options: ["Très facile", "Facile", "Moyen", "Difficile"], correct: 1 }), type: "text-mcq" as const },
+    ];
+
+    const questions: QuizQuestion[] = [];
+    const usedCourses = new Set<string>();
+
+    courses.forEach((course, idx) => {
+      if (questions.length >= 5) return;
+      if (usedCourses.has(course.fullname)) return;
+      
+      usedCourses.add(course.fullname);
+      const template = questionTemplates[idx % questionTemplates.length];
+      const q = template.template(course.fullname);
+      
+      questions.push({
+        id: questions.length + 1,
+        type: template.type,
+        question: q.question,
+        options: shuffleOptions(q.options, q.correct),
+        correctIndex: 0,
+      });
+    });
+
+    return questions.length > 0 ? questions : generateDefaultQuestions();
+  };
+
+  const generateDefaultQuestions = (): QuizQuestion[] => [
+    { id: 1, type: "text-mcq", question: "Quel niveau as-tu choisi?", options: ["Fondamental", "Intermédiaire", "Avancé", "Tous"], correctIndex: 0 },
+    { id: 2, type: "text-mcq", question: "Quelle langue souhaites-tu apprendre?", options: ["Pulaar", "Soninké", "Wolof", "Toutes"], correctIndex: 0 },
+    { id: 3, type: "text-mcq", question: "Comment évalues-tu ton niveau?", options: ["Débutant", "Intermédiaire", "Avancé", "Expert"], correctIndex: 0 },
+    { id: 4, type: "text-mcq", question: "Quelle activité préfères-tu?", options: ["Lecture", "Quiz", "Audio", "Exercices"], correctIndex: 0 },
+    { id: 5, type: "text-mcq", question: "Quel est ton objectif?", options: ["Vocabulaire", "Grammaire", "Conversation", "Tous"], correctIndex: 3 },
+  ];
+
+  const shuffleOptions = (options: string[], correctIdx: number): string[] => {
+    const correctAnswer = options[correctIdx];
+    const shuffled = [...options].sort(() => Math.random() - 0.5);
+    const newCorrectIdx = shuffled.indexOf(correctAnswer);
+    return shuffled;
+  };
 
   useEffect(() => {
     return () => {
@@ -49,19 +134,18 @@ export default function QuizScreen() {
   };
 
   const handleSelectAnswer = (index: number) => {
-    if (selectedAnswer !== null) return;
+    if (selectedAnswer !== null || questions.length === 0) return;
     setSelectedAnswer(index);
     setAnswers(prev => [...prev, index]);
     
-    const isCorrect = index === question.correctIndex;
+    const isCorrect = index === questions[currentQuestion].correctIndex;
     if (isCorrect) {
       setScore(prev => prev + 1);
     }
-    
   };
 
   const handleNext = () => {
-    if (currentQuestion < QUIZ_DATA.length - 1) {
+    if (currentQuestion < questions.length - 1) {
       setCurrentQuestion(prev => prev + 1);
       setSelectedAnswer(null);
     } else {
@@ -70,7 +154,7 @@ export default function QuizScreen() {
   };
 
   const getScoreEmoji = () => {
-    const percentage = (score / QUIZ_DATA.length) * 100;
+    const percentage = (score / (questions.length || 1)) * 100;
     if (percentage === 100) return "🏆";
     if (percentage >= 80) return "🌟";
     if (percentage >= 60) return "👏";
@@ -79,7 +163,7 @@ export default function QuizScreen() {
   };
 
   const getScoreMessage = () => {
-    const percentage = (score / QUIZ_DATA.length) * 100;
+    const percentage = (score / (questions.length || 1)) * 100;
     if (percentage === 100) return "Parfait ! Tu es un champion !";
     if (percentage >= 80) return "Excellent travail !";
     if (percentage >= 60) return "Bien joué, continue comme ça !";
@@ -87,8 +171,37 @@ export default function QuizScreen() {
     return "Ne lâche pas, tu vas progresser !";
   };
 
+  if (questions.length === 0) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
+        <View className="flex-1 items-center justify-center px-5">
+          {isLoading ? (
+            <>
+              <ActivityIndicator size="large" color="#002366" />
+              <Text className="text-gray-500 mt-4">Chargement du quiz...</Text>
+            </>
+          ) : (
+            <>
+              <Feather name="alert-circle" size={64} color="#D1D5DB" />
+              <Text className="text-gray-500 mt-4 text-center">Aucun cours disponible pour le quiz</Text>
+              <Pressable 
+                onPress={() => router.back()}
+                className="mt-6 bg-[#002366] px-6 py-3 rounded-xl"
+              >
+                <Text className="text-white font-bold">Retour</Text>
+              </Pressable>
+            </>
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const question = questions[currentQuestion];
+  const progress = ((currentQuestion + 1) / questions.length) * 100;
+
   if (showResult) {
-    const percentage = Math.round((score / QUIZ_DATA.length) * 100);
+    const percentage = Math.round((score / questions.length) * 100);
     
     return (
       <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top', 'bottom']}>
@@ -100,13 +213,11 @@ export default function QuizScreen() {
                 {getScoreMessage()}
               </Text>
               <Text className="text-gray-500 text-center mb-6">
-                Tu as obtenu {score} bonnes réponses sur {QUIZ_DATA.length}
+                Tu as obtenu {score} bonnes réponses sur {questions.length}
               </Text>
               
-              {/* Score Circle */}
               <View className="w-32 h-32 rounded-full border-8 mb-6 items-center justify-center"
                 style={{ 
-                  
                   borderColor: percentage >= 60 ? '#10B981' : '#EF4444',
                   backgroundColor: `${percentage >= 60 ? '#10B981' : '#EF4444'}10`
                 }}
@@ -119,31 +230,6 @@ export default function QuizScreen() {
               <View className="bg-yellow-50 rounded-xl px-6 py-3 mb-6 flex-row items-center">
                 <Text className="text-xl mr-2">⭐</Text>
                 <Text className="text-yellow-700 font-bold text-lg">+{score * 20} XP gagnés</Text>
-              </View>
-
-              {/* Answer Review */}
-              <View className="w-full mb-6">
-                <Text className="font-bold text-gray-700 mb-3">Tes réponses :</Text>
-                {QUIZ_DATA.map((q, i) => {
-                  const userAnswer = answers[i];
-                  const isCorrect = userAnswer === q.correctIndex;
-                  return (
-                    <View key={q.id} className="flex-row items-center py-2">
-                      <View className={`w-6 h-6 rounded-full items-center justify-center mr-3 ${
-                        isCorrect ? 'bg-green-100' : 'bg-red-100'
-                      }`}>
-                        <Feather 
-                          name={isCorrect ? "check" : "x"} 
-                          size={14} 
-                          color={isCorrect ? "#10B981" : "#EF4444"} 
-                        />
-                      </View>
-                      <Text className="text-gray-600 text-sm flex-1" numberOfLines={1}>
-                        {q.question.substring(0, 30)}...
-                      </Text>
-                    </View>
-                  );
-                })}
               </View>
 
               <View className="flex-row w-full">
@@ -175,143 +261,110 @@ export default function QuizScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
-    <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
-      <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
-        <Feather name="arrow-left" size={24} color="black" />
-      </Pressable>
-      <View className="flex-1">
-        <Text className="text-lg font-bold text-gray-900">Quiz</Text>
-        <Text className="text-gray-500 text-xs">
-          Question {currentQuestion + 1}/{QUIZ_DATA.length}
-        </Text>
-      </View>
-      <View className="bg-[#F59E0B] px-3 py-1 rounded-full">
-        <Text className="text-white font-bold text-sm">{score} pts</Text>
-      </View>
-    </View>
-
-    {/* Progress */}
-    <View className="px-5 mb-4">
-      <View className="h-2 bg-gray-200 rounded-full overflow-hidden">
-        <View 
-          className="h-full bg-[#F59E0B] rounded-full transition-all duration-300"
-          style={{ width: `${progress}%` }}
-        />
-      </View>
-    </View>
-
-    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}>
-      
-      {question.type === "audio-mcq" && (
-        <View 
-          className="bg-white rounded-3xl p-6 mb-6 border border-gray-200"
-          style={{
-            shadowColor: "#000",
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.05,
-            shadowRadius: 4,
-            elevation: 2,
-          }}
-        >
-          <View className="flex-row items-center justify-center h-12 mb-4">
-            {[...Array(18)].map((_, i) => (
-              <View 
-                key={i}
-                className={`w-1 mx-[2px] rounded-full ${isPlaying ? 'bg-[#4a90e2]' : 'bg-gray-300'}`}
-                style={{ height: isPlaying ? Math.floor(Math.random() * 32 + 12) : 12 }}
-              />
-            ))}
-          </View>
-
-          <View className="flex-row items-center justify-center">
-            <Pressable 
-              onPress={handlePlayAudio}
-              className="w-14 h-14 rounded-full bg-white border-2 border-gray-800 items-center justify-center"
-            >
-              <Feather name={isPlaying ? "pause" : "play"} size={22} color="black" />
-            </Pressable>
-            <Pressable className="ml-4">
-              <Feather name="mic-off" size={22} color="#4B5563" />
-            </Pressable>
-          </View>
-          <Text className="text-center text-gray-400 text-xs mt-3">Appuie pour écouter</Text>
+      <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
+        <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+          <Feather name="arrow-left" size={24} color="black" />
+        </Pressable>
+        <View className="flex-1">
+          <Text className="text-lg font-bold text-gray-900">Quiz Rapide</Text>
+          <Text className="text-gray-500 text-xs">
+            Question {currentQuestion + 1}/{questions.length}
+          </Text>
         </View>
-      )}
+        <View className="bg-[#F59E0B] px-3 py-1 rounded-full">
+          <Text className="text-white font-bold text-sm">{score} pts</Text>
+        </View>
+      </View>
 
-      <View 
-        className="bg-white rounded-3xl p-6 border border-gray-200"
-        style={{
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.05,
-          shadowRadius: 4,
-          elevation: 2,
-        }}
-      >
-        <Text className="text-lg font-bold text-gray-900 text-center mb-6">
-          {question.question}
-        </Text>
+      <View className="px-5 mb-4">
+        <View className="h-2 bg-gray-200 rounded-full overflow-hidden">
+          <View 
+            className="h-full bg-[#F59E0B] rounded-full transition-all duration-300"
+            style={{ width: `${progress}%` }}
+          />
+        </View>
+      </View>
 
-        <View className="flex-row flex-wrap justify-between">
-          {question.options.map((option, index) => {
-            const isSelected = selectedAnswer === index;
-            const isCorrect = index === question.correctIndex;
-            const showCorrect = isCorrect;
-            const showWrong = isSelected && !isCorrect;
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}>
+        
+        {question.type === "audio-mcq" && (
+          <View className="bg-white rounded-3xl p-6 mb-6 border border-gray-200">
+            <View className="flex-row items-center justify-center h-12 mb-4">
+              {[...Array(18)].map((_, i) => (
+                <View 
+                  key={i}
+                  className={`w-1 mx-[2px] rounded-full ${isPlaying ? 'bg-[#4a90e2]' : 'bg-gray-300'}`}
+                  style={{ height: isPlaying ? Math.floor(Math.random() * 32 + 12) : 12 }}
+                />
+              ))}
+            </View>
 
-            let bgColor = "bg-white";
-            let borderColor = "border-gray-200";
-            let textColor = "text-gray-900";
-
-            if (showCorrect) {
-              bgColor = "bg-green-50";
-              borderColor = "border-green-500";
-              textColor = "text-green-700";
-            } else if (showWrong) {
-              bgColor = "bg-red-50";
-              borderColor = "border-red-500";
-              textColor = "text-red-700";
-            } else if (isSelected) {
-              bgColor = "bg-blue-50";
-              borderColor = "border-[#4a90e2]";
-            }
-
-            return (
-              <Pressable
-                key={index}
-                onPress={() => handleSelectAnswer(index)}
-                disabled={selectedAnswer !== null}
-                className={`${bgColor} border-2 ${borderColor} rounded-2xl p-4 mb-3 w-[48%]`}
-                style={{
-                  shadowColor: "#000",
-                  shadowOffset: { width: 0, height: 1 },
-                  shadowOpacity: 0.05,
-                  shadowRadius: 2,
-                  elevation: 1,
-                }}
+            <View className="flex-row items-center justify-center">
+              <Pressable 
+                onPress={handlePlayAudio}
+                className="w-14 h-14 rounded-full bg-white border-2 border-gray-800 items-center justify-center"
               >
-                <View className="flex-row items-center">
-                  <View 
-                    className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${
-                      showCorrect ? 'bg-green-500' : showWrong ? 'bg-red-500' : isSelected ? 'bg-[#4a90e2]' : 'bg-gray-100'
-                    }`}
-                  >
-                    <Text className={`font-bold ${isSelected || showCorrect || showWrong ? 'text-white' : 'text-gray-600'}`}>
-                      {String.fromCharCode(65 + index)}
+                <Feather name={isPlaying ? "pause" : "play"} size={22} color="black" />
+              </Pressable>
+            </View>
+            <Text className="text-center text-gray-400 text-xs mt-3">Appuie pour écouter</Text>
+          </View>
+        )}
+
+        <View className="bg-white rounded-3xl p-6 border border-gray-200">
+          <Text className="text-lg font-bold text-gray-900 text-center mb-6">
+            {question.question}
+          </Text>
+
+          <View className="flex-row flex-wrap justify-between">
+            {question.options.map((option, index) => {
+              const isSelected = selectedAnswer === index;
+              const isCorrect = index === question.correctIndex;
+
+              let bgColor = "bg-white";
+              let borderColor = "border-gray-200";
+              let textColor = "text-gray-900";
+
+              if (isCorrect && selectedAnswer !== null) {
+                bgColor = "bg-green-50";
+                borderColor = "border-green-500";
+                textColor = "text-green-700";
+              } else if (isSelected && !isCorrect) {
+                bgColor = "bg-red-50";
+                borderColor = "border-red-500";
+                textColor = "text-red-700";
+              } else if (isSelected) {
+                bgColor = "bg-blue-50";
+                borderColor = "border-[#4a90e2]";
+              }
+
+              return (
+                <Pressable
+                  key={index}
+                  onPress={() => handleSelectAnswer(index)}
+                  disabled={selectedAnswer !== null}
+                  className={`${bgColor} border-2 ${borderColor} rounded-2xl p-4 mb-3 w-[48%]`}
+                >
+                  <View className="flex-row items-center">
+                    <View 
+                      className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${
+                        isCorrect && selectedAnswer !== null ? 'bg-green-500' : isSelected && !isCorrect ? 'bg-red-500' : isSelected ? 'bg-[#4a90e2]' : 'bg-gray-100'
+                      }`}
+                    >
+                      <Text className={`font-bold ${isSelected || (isCorrect && selectedAnswer !== null) ? 'text-white' : 'text-gray-600'}`}>
+                        {String.fromCharCode(65 + index)}
+                      </Text>
+                    </View>
+                    <Text className={`font-medium flex-1 ${textColor}`} numberOfLines={2}>
+                      {option}
                     </Text>
                   </View>
-                  <Text className={`font-medium flex-1 ${textColor}`} numberOfLines={2}>
-                    {option}
-                  </Text>
-                </View>
-              </Pressable>
-            );
-          })}
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
-
-        
-      </View>
-    </ScrollView>
+      </ScrollView>
 
       <Pressable
         onPress={handleNext}
@@ -319,16 +372,9 @@ export default function QuizScreen() {
         className={`absolute bottom-9 left-4 right-4 rounded-full py-3 ${
           selectedAnswer === null ? 'bg-gray-300' : 'bg-[#4a90e2]'
         }`}
-        style={{
-          shadowColor: selectedAnswer === null ? '#000' : '#4a90e2',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 4,
-          elevation: 3,
-        }}
       >
         <Text className={`font-bold text-center ${selectedAnswer === null ? 'text-gray-500' : 'text-white'}`}>
-          {currentQuestion === QUIZ_DATA.length - 1 ? 'Terminer' : 'Suivant'}
+          {currentQuestion === questions.length - 1 ? 'Terminer' : 'Suivant'}
         </Text>
       </Pressable>
     </SafeAreaView>

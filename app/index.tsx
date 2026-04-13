@@ -9,15 +9,19 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as SplashScreen from "expo-splash-screen";
 import { useSelector } from "react-redux";
 import { RootState } from "../services/redux/store";
-import { hasValidToken } from "../services/storage/tokenStorage";
+import { hasValidToken, getToken, getUserData } from "../services/storage/tokenStorage";
+import { useDispatch } from "react-redux";
+import { loginSuccess } from "../services/redux/slices/authSlice";
 
 const LOGO = require("../assets/images/logo_ipelan.png"); 
 const MASCOT = require("../assets/images/mascot_parrot.png");
 
 export default function Index() {
   const router = useRouter();
+  const dispatch = useDispatch();
   const { isAuthenticated } = useSelector((state: RootState) => state.auth);
   const [isReady, setIsReady] = useState(false);
+  const [authRestored, setAuthRestored] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -25,23 +29,54 @@ export default function Index() {
         await SplashScreen.preventAutoHideAsync();
         
         const hasToken = await hasValidToken();
+        console.log("[Index] hasValidToken:", hasToken);
         
-        if (hasToken && isAuthenticated) {
-          router.replace("/(tabs)/(home)");
+        if (hasToken) {
+          const token = await getToken();
+          const userData = await getUserData();
+          
+          if (token && userData) {
+            console.log("[Index] Restoring auth from storage...");
+            dispatch(loginSuccess({ user: userData, token }));
+            setAuthRestored(true);
+          } else {
+            console.log("[Index] No user data found, going to onboarding");
+            setAuthRestored(true);
+          }
         } else {
-          router.replace("/(auth)/onboarding");
+          console.log("[Index] No token found, going to onboarding");
+          setAuthRestored(true);
         }
       } catch (error) {
-        router.replace("/(auth)/onboarding");
-        console.error(error.message);
-      } finally {
-        setIsReady(true);
-        await SplashScreen.hideAsync();
+        console.log("[Index] Error:", error);
+        setAuthRestored(true);
       }
     };
 
     init();
-  }, [router, isAuthenticated]);
+  }, [dispatch]);
+
+  useEffect(() => {
+    const navigate = async () => {
+      if (!authRestored) return;
+      
+      const hasToken = await hasValidToken();
+      console.log("[Index] authRestored:", authRestored, "hasToken:", hasToken, "isAuthenticated:", isAuthenticated);
+      
+      if (hasToken && isAuthenticated) {
+        console.log("[Index] ✅ Valid token and authenticated, going to home");
+        router.replace("/(tabs)/(home)");
+      } else {
+        console.log("[Index] ❌ Not authenticated, going to onboarding");
+        router.replace("/(auth)/onboarding");
+      }
+      
+      setIsReady(true);
+      await SplashScreen.hideAsync();
+    };
+
+    navigate();
+  }, [authRestored, isAuthenticated, router]);
 
   if (!isReady) {
     return (

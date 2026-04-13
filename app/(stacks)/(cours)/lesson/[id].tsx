@@ -339,6 +339,7 @@ export default function LessonScreen() {
       </body>
       </html>
     `;
+    
   };
 
   const handleMessage = (event: any) => {

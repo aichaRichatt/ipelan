@@ -27,7 +27,7 @@ export default function Login() {
   };
 
   const goToSignup = () => {
-    router.push("/(auth)/signup");
+    router.replace("/(auth)/signup");
   };
 
   return (

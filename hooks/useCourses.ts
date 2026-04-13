@@ -58,7 +58,7 @@ export const useLessons = (courseId: number) => {
 
       try {
         const db = await getDBConnection();
-        const dbSections: CourseSection[] = sections.map(s => ({
+        const dbSections: CourseSection[] = sections.map((s: any) => ({
           id: s.id,
           courseid: courseId,
           name: s.title,
@@ -70,7 +70,7 @@ export const useLessons = (courseId: number) => {
         await saveCourseSections(db, dbSections);
 
         for (const section of sections) {
-          const dbModules: CourseModule[] = section.modules.map(m => ({
+          const dbModules: CourseModule[] = section.modules.map((m: any) => ({
             id: m.id,
             courseid: courseId,
             sectionid: section.id,
@@ -89,7 +89,7 @@ export const useLessons = (courseId: number) => {
 
           for (const m of section.modules) {
             if (m.contents && m.contents.length > 0) {
-              const dbContents: ModuleContent[] = m.contents.map(c => ({
+              const dbContents: ModuleContent[] = m.contents.map((c: any) => ({
                 moduleid: m.id,
                 type: 'file',
                 filename: c.filename,

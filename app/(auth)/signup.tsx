@@ -5,13 +5,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useSignup } from "../../hooks/useSignup";
 import { useLogin } from "../../hooks/useLogin";
 import { getDBConnection, getUser, saveUser } from "../../services/storage/db-service";
-import { useDispatch } from "react-redux";
-import { RootState } from "../../services/redux/store";
-import { updateUser } from "../../services/redux/slices/authSlice";
 import { PolicyModal } from "../../components/PolicyModal";
 
+const IS_DEV = process.env.NODE_ENV === "development";
+
 export default function SignUp() {
-  const dispatch = useDispatch();
   const router = useRouter();
   const [firstname, setFirstname] = useState("");
   const [lastname, setLastname] = useState("");
@@ -21,76 +19,89 @@ export default function SignUp() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showPolicy, setShowPolicy] = useState(false);
   const [policyAccepted, setPolicyAccepted] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
   
   const { signup } = useSignup();
   const { login } = useLogin();
 
-  const supplementSQLiteWithFormData = async (userId: number) => {
-    try {
-      const db = await getDBConnection();
-      const saved = await getUser(db, userId);
-      if (saved) {
-        const fullname = `${firstname} ${lastname}`.trim();
-        await saveUser(db, {
-          ...saved,
-          firstname: firstname,
-          lastname: lastname,
-          fullname: fullname || saved.fullname,
-          email: saved.email || email,
-        });
-        console.log("SQLite user profile forced update with signup names:", fullname);
-      }
-    } catch (err) {
-      console.warn("Could not supplement SQLite user data:", err);
+  const validatePassword = (pwd: string): string | null => {
+    if (pwd.length < 8) {
+      return "Le mot de passe doit contenir au moins 8 caractères";
     }
+    if (!/[A-Z]/.test(pwd)) {
+      return "Le mot de passe doit contenir au moins une majuscule";
+    }
+    if (!/[a-z]/.test(pwd)) {
+      return "Le mot de passe doit contenir au moins une minuscule";
+    }
+    if (!/[0-9]/.test(pwd)) {
+      return "Le mot de passe doit contenir au moins un chiffre";
+    }
+    return null;
+  };
+
+  const sanitizeInput = (input: string): string => {
+    return input.trim().replace(/[<>\"\'\\]/g, '');
   };
 
   const verifyAndLogin = async (usernameToLogin: string): Promise<any> => {
     try {
-       const res = await login(usernameToLogin, password, email, firstname, lastname, city);
+      const res = await login(usernameToLogin, password, email, firstname, lastname, city);
       return res;
     } catch (loginErr: any) {
-      console.warn("verifyAndLogin failed:", loginErr.message);
+      if (IS_DEV) console.warn("verifyAndLogin failed:", loginErr.message);
       return null;
     }
   };
 
   const handleSignup = async () => {
-    if (!firstname || !lastname || !email || !password || !city) {
+    setValidationError(null);
+
+    const cleanFirstname = sanitizeInput(firstname);
+    const cleanLastname = sanitizeInput(lastname);
+    const cleanEmail = sanitizeInput(email).toLowerCase();
+    const cleanCity = sanitizeInput(city);
+
+    if (!cleanFirstname || !cleanLastname || !cleanEmail || !password || !cleanCity) {
       Alert.alert("Erreur", "Tous les champs sont obligatoires");
       return;
     }
 
     if (!policyAccepted) {
-      Alert.alert("Politique de confidentialité", "Veuillez accepter les conditions d'utilisation avant de continuer.");
+      Alert.alert("Politique de confidentialité", "Veuillez accepter les conditions d&apos;utilisation avant de continuer.");
       return;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!emailRegex.test(cleanEmail)) {
       Alert.alert("Erreur", "Veuillez entrer une adresse email valide");
       return;
     }
 
-    if (password.length < 8) {
-      Alert.alert("Erreur", "Le mot de passe doit contenir au moins 8 caractères");
+    const pwdError = validatePassword(password);
+    if (pwdError) {
+      Alert.alert("Erreur", pwdError);
       return;
     }
 
-    const generatedUsername = `${firstname.toLowerCase().replace(/[^a-z0-9]/g, '')}_${lastname.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+    const generatedUsername = `${cleanFirstname.toLowerCase().replace(/[^a-z0-9]/g, '')}_${cleanLastname.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+
+    if (generatedUsername.length < 3) {
+      Alert.alert("Erreur", "Le nom d&apos;utilisateur généré est trop court. Veuillez utiliser un nom et prénom plus longs.");
+      return;
+    }
 
     setIsProcessing(true);
     let signupRes: any = null;
     try {
       try {
-        signupRes = await signup({ username: generatedUsername, email, password, firstname, lastname, city });
-        console.log("Signup API response:", JSON.stringify(signupRes));
+        signupRes = await signup({ username: generatedUsername, email: cleanEmail, password, firstname: cleanFirstname, lastname: cleanLastname, city: cleanCity });
       } catch (signupErr: any) {
         const errMsg = signupErr.message || "";
         if (errMsg.toLowerCase().includes("exist") || errMsg.toLowerCase().includes("already")) {
           Alert.alert(
             "Compte existant",
-            "Cette adresse email ou ce nom d'utilisateur est déjà enregistré. Veuillez vous connecter.",
+            "Cette adresse email ou ce nom d&apos;utilisateur est déjà enregistré. Veuillez vous connecter.",
             [
               { text: "Se connecter", onPress: () => router.replace("/(auth)/login") },
               { text: "Annuler", style: "cancel" }
@@ -99,34 +110,33 @@ export default function SignUp() {
           return;
         }
 
-        console.log("Signup API returned error:", errMsg);
-        Alert.alert("Erreur Moodle", `Impossible de créer le compte : ${errMsg}`);
+        Alert.alert("Erreur", "Impossible de créer le compte. Veuillez réessayer plus tard.");
         return; 
       }
 
       const userId = signupRes?.[0]?.id || signupRes?.id || 0;
       if (!userId) {
-         throw new Error("Moodle returned no User ID after signup");
+        throw new Error("Moodle returned no User ID after signup");
       }
 
-       const loginRes = await verifyAndLogin(generatedUsername);
+      const loginRes = await verifyAndLogin(generatedUsername);
 
       if (!loginRes || !loginRes.user) {
-        Alert.alert("Inscription réussie", "Votre compte a été créé. Veuillez vous connecter manuellement.");
-        router.replace("/(auth)/login");
+        Alert.alert(
+          "Compte créé", 
+          "Votre compte a été créé. La connexion automatique a échoué. Veuillez vous connecter manuellement.",
+          [
+            { text: "Se connecter", onPress: () => router.replace("/(auth)/login") }
+          ]
+        );
         return;
       }
 
-       dispatch(updateUser({ 
-        firstname,
-        lastname,
-        fullname: `${firstname} ${lastname}`.trim(),
-        email: email
-      }));
-
-       await supplementSQLiteWithFormData(userId);
       router.replace("/(tabs)/(home)" as any);
 
+    } catch (error: any) {
+      if (IS_DEV) console.error("Signup error:", error.message);
+      Alert.alert("Erreur", "Une erreur inattendue s&apos;est produite. Veuillez réessayer.");
     } finally {
       setIsProcessing(false);
     }
@@ -204,7 +214,7 @@ export default function SignUp() {
                 {policyAccepted && <Text style={{color: '#fff', fontSize: 10}}>✓</Text>}
               </View>
               <Text className="text-gray-600 text-sm ml-2">
-                J'accepte les <Text className="text-blue-600 font-bold">conditions d'utilisation</Text>
+                J&apos;accepte les <Text className="text-blue-600 font-bold">conditions d&apos;utilisation</Text>
               </Text>
             </Pressable>
 
@@ -219,7 +229,7 @@ export default function SignUp() {
                   onPress={handleSignup}
                   className="bg-blue-600 p-4 rounded-xl items-center"
                 >
-                  <Text className="text-white font-bold text-lg">S'inscrire</Text>
+                  <Text className="text-white font-bold text-lg">S&apos;inscrire</Text>
                 </Pressable>
               )}
             </View>

@@ -29,7 +29,7 @@ export default function ResetPassword() {
         }, 1000);
       } catch (error) {
         setLoading(false);
-        Alert.alert('Erreur', 'Impossible d\'envoyer le lien de réinitialisation');
+        Alert.alert('Erreur', 'Impossible d\'envoyer le lien de réinitialisation'+error);
       }
     } else if (step === 2) {
       if (!password || password !== confirmPassword) return;

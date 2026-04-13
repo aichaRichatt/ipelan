@@ -1,74 +1,59 @@
+const IS_DEV = process.env.NODE_ENV === "development";
+
 export const Config = {
-  baseURL: process.env.EXPO_PUBLIC_MOODLE_API_URL!,
-  service: "ipelan_full",
+  baseURL: process.env.EXPO_PUBLIC_MOODLE_API_URL || "https://moodle.richatt.com",
+  service: "IPELAN_FULL_SERVICE",
 };
 
- 
-function serializeMoodleParams(params: any, prefix: string = ""): string {
-  const queryParts: string[] = [];
+export async function moodleFetch(
+  endpoint: string,
+  params: Record<string, any> = {},
+  method: string = "POST"
+) {
+  const url = `${Config.baseURL}${endpoint}`;
 
-  for (const key in params) {
-    if (Object.prototype.hasOwnProperty.call(params, key)) {
-      const value = params[key];
-      const fullKey = prefix ? `${prefix}[${key}]` : key;
+  const queryString = Object.keys(params)
+    .filter((k) => params[k] != null)
+    .map((k) => encodeURIComponent(k) + "=" + encodeURIComponent(params[k]))
+    .join("&");
 
-      if (value !== null && typeof value === "object") {
-        queryParts.push(serializeMoodleParams(value, fullKey));
-      } else if (value !== undefined) {
-        queryParts.push(`${encodeURIComponent(fullKey)}=${encodeURIComponent(value)}`);
-      }
-    }
-  }
-
-  return queryParts.join("&");
-}
-
-export async function moodleFetch(endpoint: string, params: any = {}, method: string = "POST") {
-  let url = `${Config.baseURL}${endpoint}`;
-  
-  if (endpoint.includes("/webservice/server.php") || endpoint.includes("/webservice/rest/server.php")) {
-    params.moodlewsrestformat = "json";
-  }
-
-  const options: RequestInit = {
-    method,
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-  };
-
-  const serializedParams = serializeMoodleParams(params);
-
-  if (method === "GET") {
-    if (serializedParams) {
-      url += `?${serializedParams}`;
-    }
-  } else if (method === "POST") {
-    options.body = serializedParams;
-  }
-
-  console.log(` Response : ${method} ${url}`);
-  console.log(`Data :`, JSON.stringify(options));
+  const fullBody = queryString + (queryString ? "&" : "") + "moodlewsrestformat=json";
 
   try {
-    const response = await fetch(url, options);
-    const responseText = await response.text();
-    
-    let data;
-    try {
-      data = JSON.parse(responseText);
-    } catch (parseError) {
-      console.error("Il ne retourne pas json format", responseText);
-      throw new Error(` ${responseText.substring(0, 100)}...${parseError}`);
+    const response = await fetch(url, {
+      method,
+      body: method === "POST" ? fullBody : undefined,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "Accept": "*/*",
+      },
+    });
+
+    const text = await response.text();
+
+    if (!text || text.trim() === "") {
+      throw new Error("Serveur a retourne vide");
     }
 
-    if (!response.ok || !data || data.error || data.exception) {
-      throw new Error(data?.error || data?.message || data?.exception || "Server retourn vide ou nexiste");
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      if (IS_DEV) console.error("[API] Not JSON:", text.slice(0, 80));
+      throw new Error("Reponse nest pas JSON valide");
+    }
+
+    if (data?.exception) {
+      return { exception: data.exception, errorcode: data.errorcode, message: data.message };
+    }
+
+    if (data?.error) {
+      throw new Error(data.error);
     }
 
     return data;
   } catch (error: any) {
-    console.log("API :", error.message || error);
+    if (IS_DEV) console.error("[API] Error:", error.message);
     throw error;
   }
 }

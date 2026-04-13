@@ -146,8 +146,8 @@ EPUBLessonViewer (WebView avec base URL)
 
 1. **Phase 0** : Téléchargement + Décompression + Extraction HTML ✅
 2. **Phase 1** : Parsing OPF + Spine + Chemins ✅
-3. **Phase 2** : Correction assets (images/audio) ⏳
-4. **Phase 3** : Navigation chapitres ⏳
+3. **Phase 2** : Correction assets (images/audio) ✅
+4. **Phase 3** : Navigation chapitres ✅
 
 ---
 
@@ -189,7 +189,8 @@ EXPO_PUBLIC_MOODLE_TOKEN=your_admin_token_here
 | SQLite | ✅ Fonctionnel |
 | EPUB Download | ✅ Fonctionnel |
 | EPUB Parse | ✅ Fonctionnel |
-| Images/Audio | ⏳ En cours |
+| EPUB Assets (images/audio) | ✅ Fonctionnel |
+| Navigation chapitres | ✅ Fonctionnel |
 | Moodle Sync | 🔜 À venir |
 
 ---

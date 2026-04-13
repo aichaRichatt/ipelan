@@ -1,8 +1,11 @@
 import { AntDesign, Feather } from "@expo/vector-icons";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useSelector } from "react-redux";
+import { RootState } from "@/services/redux/store";
+import { getCourseContents } from "@/services/api/courseService";
 
 interface Lesson {
   id: number;
@@ -25,31 +28,87 @@ interface ModuleData {
   lessons: Lesson[];
 }
 
-const MOCK_MODULE: Record<string, ModuleData> = {
-  "1": {
-    id: 1,
-    title: "Salutations",
-    description: "Dans ce module, tu apprendras les salutations de base en Pulaar.",
-    language: "Pulaar",
-    level: "Fondamental",
-    totalLessons: 5,
-    completedLessons: 2,
-    lessons: [
-      { id: 1, title: "Introduction aux salutations", type: "audio", duration: "5 min", xp: 10, isCompleted: true, isLocked: false },
-      { id: 2, title: "Vocabulaire de base", type: "reading", duration: "8 min", xp: 15, isCompleted: true, isLocked: false },
-      { id: 3, title: "Exercice d'association", type: "exercise", duration: "10 min", xp: 20, isCompleted: false, isLocked: false },
-      { id: 4, title: "Quiz final", type: "quiz", duration: "15 min", xp: 30, isCompleted: false, isLocked: false },
-      { id: 5, title: "Dictée interactive", type: "audio", duration: "10 min", xp: 25, isCompleted: false, isLocked: true },
-    ]
-  },
+const mapModtypeToType = (modname: string): Lesson["type"] => {
+  const m = modname?.toLowerCase() || "";
+  if (m.includes("lesson")) return "audio";
+  if (m.includes("resource")) return "reading";
+  if (m.includes("quiz")) return "quiz";
+  if (m.includes("assign") || m.includes("exercise")) return "exercise";
+  if (m.includes("game")) return "game";
+  return "audio";
 };
 
 export default function LearningPathScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [moduleData] = useState<ModuleData | null>(MOCK_MODULE[id || "1"] || MOCK_MODULE["1"]);
+  const token = useSelector((state: RootState) => state.auth.token);
+  
+  const [moduleData, setModuleData] = useState<ModuleData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  if (!moduleData) {
+  useEffect(() => {
+    const fetchModuleData = async () => {
+      if (!token || !id) return;
+      
+      try {
+        const courseId = parseInt(id);
+        const contents = await getCourseContents(token, courseId);
+        
+        if (!contents || contents.length === 0) {
+          setIsLoading(false);
+          return;
+        }
+
+        const allLessons: Lesson[] = [];
+        let completedCount = 0;
+        
+        for (const section of contents) {
+          const modules = section.modules || [];
+          
+          for (let i = 0; i < modules.length; i++) {
+            const mod = modules[i];
+            const isLocked = i > 0 && allLessons.length === 0;
+            const isCompleted = mod.completed?.[0]?.state === 2;
+            
+            if (isCompleted) completedCount++;
+            
+            allLessons.push({
+              id: mod.id || mod.cmid || Math.random(),
+              title: mod.name || mod.title || "Leçon",
+              type: mapModtypeToType(mod.modname || ""),
+              duration: mod.duration || "10 min",
+              xp: mod.xp || 10,
+              isCompleted,
+              isLocked
+            });
+          }
+        }
+
+        const firstSection = contents[0] || {};
+        const courseSummary = firstSection.summary || "";
+        const courseName = firstSection.name || "Cours";
+
+        setModuleData({
+          id: courseId,
+          title: courseName,
+          description: courseSummary.replace(/<[^>]*>/g, ""),
+          language: "Pulaar",
+          level: "Fondamental",
+          totalLessons: allLessons.length,
+          completedLessons: completedCount,
+          lessons: allLessons
+        });
+      } catch (err) {
+        console.error("Error fetching module:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchModuleData();
+  }, [token, id]);
+
+  if (isLoading) {
     return (
       <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
         <View className="flex-1 items-center justify-center">
@@ -59,7 +118,23 @@ export default function LearningPathScreen() {
     );
   }
 
-  const progressPercent = Math.round((moduleData.completedLessons / moduleData.totalLessons) * 100);
+  if (!moduleData) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
+        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
+          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+            <Feather name="arrow-left" size={24} color="black" />
+          </Pressable>
+          <Text className="text-lg font-bold text-gray-900 flex-1">Parcours</Text>
+        </View>
+        <View className="flex-1 items-center justify-center px-5">
+          <Text className="text-gray-500">Aucune donnée disponible</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const progressPercent = Math.round((moduleData.completedLessons / Math.max(moduleData.totalLessons, 1)) * 100);
   const currentLessonIndex = moduleData.lessons.findIndex(l => !l.isCompleted && !l.isLocked);
   const currentLesson = moduleData.lessons[currentLessonIndex >= 0 ? currentLessonIndex : 0];
 

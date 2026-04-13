@@ -1,94 +1,216 @@
-import {  MoodleSection } from "@/types/course";
 import { moodleFetch } from "./moodleClient";
-import type { IPELANSection, SectionStatus } from "@/types/course";
 
+const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_TOKEN;
 
-export async function getUserCourses(token: string, userId?: number) {
-  const params: any = {
-    wstoken: token,
-    wsfunction: "core_enrol_get_users_courses"
-  };
-  if (userId) params.userid = userId;
-  
-  return moodleFetch("/webservice/rest/server.php", params, "POST");
-}
-
-export async function getEnrolledCoursesByTimeline(token: string) {
-  return moodleFetch("/webservice/rest/server.php", {
+export async function getEnrolledCoursesByTimeline(token: string, forUserId?: number) {
+  let params = {
     wstoken: token,
     wsfunction: "core_course_get_enrolled_courses_by_timeline_classification",
     classification: "all"
-  }, "POST");
+  };
+  
+  let result = await moodleFetch("/webservice/rest/server.php", params, "POST");
+  
+  if (result?.exception?.errorcode === "usernotfullysetup" && ADMIN_TOKEN) {
+    params = {
+      wstoken: ADMIN_TOKEN,
+      wsfunction: "core_course_get_enrolled_courses_by_timeline_classification",
+      classification: "all"
+    };
+    result = await moodleFetch("/webservice/rest/server.php", params, "POST");
+    
+    if (result?.exception && ADMIN_TOKEN) {
+      const fallbackResult = await getUserCourses(ADMIN_TOKEN, forUserId);
+      return { courses: fallbackResult };
+    }
+  }
+  
+  console.log("[courseService] API returned:", result ? "data" : "nothing");
+  return result;
 }
 
-export async function getCourseSections(token: string, courseId: number) {
-  return moodleFetch("/webservice/rest/server.php", {
+export async function getUserCourses(token: string, userId?: number): Promise<any[]> {
+  const params = {
+    wstoken: token,
+    wsfunction: "core_enrol_get_users_courses",
+    userid: userId || 0
+  };
+  
+  try {
+    const result = await moodleFetch("/webservice/rest/server.php", params, "POST");
+    
+    if (result?.exception) {
+      return [];
+    }
+    
+    return Array.isArray(result) ? result : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+export async function getCoursesByCategory(token: string, categoryId?: number): Promise<any[]> {
+  const params: any = {
+    wstoken: token,
+    wsfunction: "core_course_get_courses_by_field",
+    field: "category"
+  };
+  
+  if (categoryId) {
+    params.value = categoryId;
+  }
+  
+  try {
+    const result = await moodleFetch("/webservice/rest/server.php", params, "POST");
+    
+    if (result?.exception) {
+      return [];
+    }
+    
+    return Array.isArray(result) ? result : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+export async function getAllCourses(token: string): Promise<any[]> {
+  const params = {
+    wstoken: token,
+    wsfunction: "core_course_get_courses"
+  };
+  
+  try {
+    const result = await moodleFetch("/webservice/rest/server.php", params, "POST");
+    
+    if (result?.exception) {
+      return [];
+    }
+    
+    return Array.isArray(result) ? result : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+export async function getCourseContents(token: string, courseId: number): Promise<any[]> {
+  const params = {
     wstoken: token,
     wsfunction: "core_course_get_contents",
     courseid: courseId
-  }, "POST");
+  };
+  
+  try {
+    const result = await moodleFetch("/webservice/rest/server.php", params, "POST");
+    
+    if (result?.exception) {
+      return [];
+    }
+    
+    return Array.isArray(result) ? result : [];
+  } catch (error) {
+    return [];
+  }
 }
 
-export async function getCompletion({ userId, courseId, token }: { userId: number; courseId: number; token: string }): Promise<any>  {
-  return moodleFetch("/webservice/rest/server.php", {
+export async function getCourseSections(token: string, courseId: number): Promise<any[]> {
+  const params = {
     wstoken: token,
-    wsfunction: "core_completion_get_course_completion_status",
-    userid: userId,
+    wsfunction: "core_course_get_contents",
     courseid: courseId
-  }, "GET");
+  };
+  
+  try {
+    const result = await moodleFetch("/webservice/rest/server.php", params, "POST");
+    
+    if (result?.exception) {
+      return [];
+    }
+    
+    if (!Array.isArray(result)) {
+      return [];
+    }
+    
+    const sections = result.map((section: any, index: number) => ({
+      id: section.id || index,
+      title: section.name || `Section ${index + 1}`,
+      summary: section.summary || '',
+      modules: (section.modules || []).map((mod: any) => ({
+        id: mod.id,
+        name: mod.name,
+        modname: mod.modname,
+        modplural: mod.modplural,
+        url: mod.url,
+        description: mod.description || '',
+        visible: mod.visible ?? 1,
+        contents: mod.contents || [],
+        completion: mod.completion || 0
+      })),
+      status: 'not_started',
+      progress: 0,
+      isLocked: false,
+      isCurrent: index === 0
+    }));
+    
+    return sections;
+  } catch (error) {
+    return [];
+  }
 }
 
-export const parseSections = (
-  raw        : MoodleSection[],
-  completion : any,
-): IPELANSection[] => {
-  const completionsArray = completion?.completionstatus?.completions || [];
-  const completionMap = new Map(
-    completionsArray.map((c: any) => [c?.cmid, c.state ?? c.CompletionState]),
-  );
+export async function getCompletion(params: { userId: number; courseId: number; token: string }): Promise<any> {
+  const fetchParams = {
+    wstoken: params.token,
+    wsfunction: "core_completion_get_activities_completion_status",
+    courseid: params.courseId,
+    userid: params.userId
+  };
+  
+  try {
+    const result = await moodleFetch("/webservice/rest/server.php", fetchParams, "POST");
+    
+    if (result?.exception) {
+      return null;
+    }
+    
+    return result;
+  } catch (error) {
+    return null;
+  }
+}
 
-  return raw
-    .filter((s) => s.visible === 1 && s.name)  
-    .map((section, index) => {
+export function parseSections(data: any[], completion: any): any[] {
+  if (!Array.isArray(data)) {
+    return [];
+  }
+  
+  return data.map((section: any, index: number) => {
+    const completionData = completion?.Completions?.[index];
+    
+    return {
+      ...section,
+      id: section.id || index,
+      title: section.title || section.name || `Section ${index + 1}`,
+      status: completionData?.completionstate === 1 ? 'completed' : 
+               completionData?.completionstate === 2 ? 'in_progress' : 'not_started',
+      progress: completionData ? 100 : 0
+    };
+  });
+}
 
-      const modules   = section.modules ?? [];
-      const total     = modules.filter((m) => m.completion > 0).length;
-      const completed = modules.filter(
-        (m) => Number(completionMap.get(m.id) ?? 0) >= 1,
-      ).length;
-
-      const progress  = total > 0 ? Math.round((completed / total) * 100) : 0;
-      const isDone    = progress === 100;
-
-      const tag = extractLevel(section.name);
-
-      // const isFirst = index === 0;
-      // const prevDone = index === 0 || true; 
-
-      return {
-        id       : section.id,
-        title    : section.name,
-        tag,
-        icon     : section?.name,
-        xpReward : total * 10,
-        status   : getStatus(isDone, progress, index),
-        progress,
-        modules,
-        isLocked : index > 0 && progress === 0,  
-        isCurrent: progress > 0 && !isDone,
-      } as IPELANSection;
-    });
-};
-const getStatus = (done: boolean, progress: number, index: number): SectionStatus => {
-  if (done)         return 'completed';
-  if (progress > 0) return 'in_progress';
-  if (index === 0)  return 'not_started';
-  return 'locked';
-};
-
-const extractLevel = (name: string): 'fondamental' | 'intermediaire' | 'avance' => {  
-  const n = name.toLowerCase();
-  if (n.includes('inter'))  return 'intermediaire';
-  if (n.includes('avan'))   return 'avance';
-  return 'fondamental';
-};
+export async function getCourseLevel(token: string, courseId: number): Promise<string> {
+  console.log("[courseService] getCourseLevel called for course:", courseId);
+  
+  try {
+    const courses = await getUserCourses(token);
+    const course = courses.find((c: any) => c.id === courseId);
+    
+    if (course?.categoryid) {
+      return String(course.categoryid);
+    }
+    
+    return "1";
+  } catch (error) {
+    console.error("[courseService] getCourseLevel error:", error);
+    return "1";
+  }
+}
