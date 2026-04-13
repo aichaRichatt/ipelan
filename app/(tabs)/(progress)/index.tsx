@@ -4,49 +4,39 @@ import { Pressable, Text, View, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useLogin } from "../../../hooks/useLogin";
+import { MOCK_BADGES, MOCK_LEADERBOARD, MOCK_USER_PROGRESS } from "@/data/mock";
 
 interface Badge {
-  id: number;
+  id: string;
   name: string;
   emoji: string;
   description: string;
+  tier: 'bronze' | 'silver' | 'gold' | 'platinum';
   isEarned: boolean;
   earnedDate?: string;
 }
 
-interface Activity {
-  id: number;
-  title: string;
-  type: string;
-  date: string;
-  xp: number;
-  score: string;
-}
-
 interface LeaderboardEntry {
   rank: number;
-  name: string;
-  xp: number;
+  username: string;
   avatar: string;
+  xp: number;
+  streak: number;
+  level: number;
   isCurrentUser: boolean;
 }
 
-const BADGES: Badge[] = [
-  { id: 1, name: "Premier pas", emoji: "🎯", description: "Complète ta première leçon", isEarned: true, earnedDate: "15 Jan 2026" },
-  { id: 2, name: "Série de 3", emoji: "🔥", description: "3 jours consécutifs", isEarned: true, earnedDate: "18 Jan 2026" },
-  { id: 3, name: "Quiz Master", emoji: "🏆", description: "Score 100% à un quiz", isEarned: true, earnedDate: "20 Jan 2026" },
-  { id: 4, name: "Série de 7", emoji: "💎", description: "7 jours consécutifs", isEarned: false },
-  { id: 5, name: "Expert Pulaar", emoji: "🌟", description: "Termine tous les modules", isEarned: false },
-  { id: 6, name: "Champion", emoji: "👑", description: "500 XP gagnés", isEarned: false },
-];
+const BADGES: Badge[] = MOCK_BADGES.map(b => ({
+  id: b.id,
+  name: b.name,
+  emoji: b.emoji,
+  description: b.description,
+  tier: b.tier,
+  isEarned: b.isEarned,
+  earnedDate: b.earnedAt,
+}));
 
-const TOP_LEADERBOARD: LeaderboardEntry[] = [
-  { rank: 1, name: "Amadou D.", xp: 1250, avatar: "A", isCurrentUser: false },
-  { rank: 2, name: "Fatima S.", xp: 1180, avatar: "F", isCurrentUser: false },
-  { rank: 3, name: "Ibrahim M.", xp: 1050, avatar: "I", isCurrentUser: false },
-  { rank: 4, name: "Maimouna B.", xp: 980, avatar: "M", isCurrentUser: true },
-  { rank: 5, name: "Cheikh O.", xp: 920, avatar: "C", isCurrentUser: false },
-];
+const TOP_LEADERBOARD: LeaderboardEntry[] = MOCK_LEADERBOARD.slice(0, 5);
 
 export default function ProgressScreen() {
   const router = useRouter();
@@ -143,7 +133,7 @@ export default function ProgressScreen() {
                       {topThree[1].avatar}
                     </Text>
                   </View>
-                  <Text className="text-xs font-bold text-gray-700">{topThree[1].name}</Text>
+                  <Text className="text-xs font-bold text-gray-700">{topThree[1].username}</Text>
                   <Text className="text-xs text-gray-500">{topThree[1].xp} XP</Text>
                   <View className="w-16 h-16 bg-[#D1D5DB] rounded-t-xl" />
                   <Text className="font-bold text-gray-600">2</Text>
@@ -160,7 +150,7 @@ export default function ProgressScreen() {
                       {topThree[0].avatar}
                     </Text>
                   </View>
-                  <Text className="text-xs font-bold text-gray-900">{topThree[0].name}</Text>
+                  <Text className="text-xs font-bold text-gray-900">{topThree[0].username}</Text>
                   <Text className="text-xs text-gray-500">{topThree[0].xp} XP</Text>
                   <View className="w-20 h-20 bg-[#FBBF24] rounded-t-3xl" />
                   <Text className="font-bold text-yellow-700 text-lg">1</Text>
@@ -176,7 +166,7 @@ export default function ProgressScreen() {
                       {topThree[2].avatar}
                     </Text>
                   </View>
-                  <Text className="text-xs font-bold text-gray-700">{topThree[2].name}</Text>
+                  <Text className="text-xs font-bold text-gray-700">{topThree[2].username}</Text>
                   <Text className="text-xs text-gray-500">{topThree[2].xp} XP</Text>
                   <View className="w-16 h-12 bg-[#E5E7EB] rounded-t-xl" />
                   <Text className="font-bold text-gray-500">3</Text>
@@ -206,7 +196,7 @@ export default function ProgressScreen() {
                   </Text>
                 </View>
                 <Text className={`flex-1 font-medium ${entry.isCurrentUser ? 'text-[#F59E0B]' : 'text-gray-900'}`}>
-                  {entry.name}
+                  {entry.username}
                   {entry.isCurrentUser && ' (Toi)'}
                 </Text>
                 <Text className={`font-bold ${entry.isCurrentUser ? 'text-[#F59E0B]' : 'text-gray-500'}`}>

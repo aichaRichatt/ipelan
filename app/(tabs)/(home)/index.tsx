@@ -1,13 +1,13 @@
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Pressable, ScrollView, Text, View, Image } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLogin } from "../../../hooks/useLogin";
+import { MOCK_HOME_MODULES, MOCK_HOME_STATS } from "@/data/mock";
 
 interface ModuleData {
   id: string;
-  moduleName: string;
   title: string;
   description: string;
   xp: number;
@@ -30,103 +30,7 @@ interface QuickActionData {
   route: string;
 }
 
-const MOCK_MODULES: ModuleData[] = [
-  {
-    id: "1",
-    moduleName: "Module 1",
-    title: "Salutations",
-    description: "Apprende à saluer en Pulaar",
-    xp: 30,
-    isLocked: false,
-    lessonsCount: 5,
-    completedLessons: 5,
-    icon: "smile",
-    iconColor: "#10B981",
-    iconBg: "bg-green-100",
-    levelId: 1,
-  },
-  {
-    id: "2",
-    moduleName: "Module 2",
-    title: "La famille",
-    description: "Les membres de la famille",
-    xp: 30,
-    isLocked: false,
-    lessonsCount: 4,
-    completedLessons: 1,
-    icon: "users",
-    iconColor: "#6366F1",
-    iconBg: "bg-indigo-100",
-    levelId: 1,
-  },
-  {
-    id: "3",
-    moduleName: "Module 3",
-    title: "Les nombres",
-    description: "Apprendre à compter",
-    xp: 30,
-    isLocked: true,
-    lessonsCount: 6,
-    completedLessons: 0,
-    icon: "hash",
-    iconColor: "#F59E0B",
-    iconBg: "bg-amber-100",
-    levelId: 2,
-  },
-  {
-    id: "4",
-    moduleName: "Module 4",
-    title: "Les couleurs",
-    description: "Les couleurs en Pulaar",
-    xp: 25,
-    isLocked: true,
-    lessonsCount: 5,
-    completedLessons: 0,
-    icon: "droplet",
-    iconColor: "#EC4899",
-    iconBg: "bg-pink-100",
-    levelId: 3,
-  },
-];
-
-const MOCK_QUICK_ACTIONS: QuickActionData[] = [
-  {
-    id: "1",
-    title: "Quiz",
-    subtitle: "Teste tes connaissances",
-    icon: "edit-2",
-    bgColor: "bg-blue-50",
-    iconColor: "#4a90e2",
-    route: "/(quiz)/index",
-  },
-  {
-    id: "2",
-    title: "Oral",
-    subtitle: "Écoute et apprends",
-    icon: "headphones",
-    bgColor: "bg-green-50",
-    iconColor: "#10B981",
-    route: "/(stacks)/(cours)/listening",
-  },
-  {
-    id: "3",
-    title: "Dictée",
-    subtitle: "Écris ce que tu entends",
-    icon: "edit-3",
-    bgColor: "bg-amber-50",
-    iconColor: "#F59E0B",
-    route: "/(stacks)/(cours)/dictation",
-  },
-  {
-    id: "4",
-    title: "Association",
-    subtitle: "Associe les mots",
-    icon: "link",
-    bgColor: "bg-purple-50",
-    iconColor: "#9333EA",
-    route: "/(stacks)/(cours)/association",
-  },
-];
+const MOCK_MODULES: ModuleData[] = MOCK_HOME_MODULES;
 
 const getIconComponent = (iconName: string, size: number, color: string) => {
   switch (iconName) {

@@ -4,6 +4,7 @@ import { Pressable, Text, View, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { audioService } from "../../services/audio/audioService";
+import { MOCK_QUIZ_QUESTIONS } from "@/data/mock";
 
 interface QuizQuestion {
   id: number;
@@ -14,45 +15,10 @@ interface QuizQuestion {
   correctIndex: number;
 }
 
-const QUIZ_DATA: QuizQuestion[] = [
-  {
-    id: 1,
-    type: "text-mcq",
-    question: "Comment dit-on 'Bonjour' en Pulaar ?",
-    options: ["Jaarama", "Baadi", "Min yaha", "Hol ko"],
-    correctIndex: 0,
-  },
-  {
-    id: 2,
-    type: "audio-mcq",
-    question: "Écoute et choisis la bonne réponse :",
-    audioUrl: "salutation_1.mp3",
-    options: ["Merci", "Au revoir", "Comment va tu ?", "Je m'appelle"],
-    correctIndex: 0,
-  },
-  {
-    id: 3,
-    type: "text-mcq",
-    question: "Que signifie 'Baadi' ?",
-    options: ["Bonjour", "Au revoir", "Merci", "Comment ça va"],
-    correctIndex: 1,
-  },
-  {
-    id: 4,
-    type: "text-mcq",
-    question: "Comment dit-on 'Merci' en Pulaar ?",
-    options: ["Jaarama", "Baadi", "Min yaha", "Ndeyni"],
-    correctIndex: 2,
-  },
-  {
-    id: 5,
-    type: "audio-mcq",
-    question: "Quelle est la bonne traduction ?",
-    audioUrl: "salutation_2.mp3",
-    options: ["Je vais bien", "Au revoir", "Merci beaucoup", "Comment vas-tu"],
-    correctIndex: 1,
-  },
-];
+const QUIZ_DATA: QuizQuestion[] = MOCK_QUIZ_QUESTIONS.slice(0, 5).map((q, i) => ({
+  ...q,
+  id: i + 1,
+}));
 
 export default function QuizScreen() {
   const router = useRouter();

@@ -4,21 +4,20 @@ import { Pressable, Text, View, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { audioService } from "../../../services/audio/audioService";
+import { MOCK_LISTENING_EXERCISES } from "@/data/mock";
 
 interface ListeningExercise {
-  id: number;
+  id: string;
   word: string;
   translation: string;
+  audioUrl?: string;
   isCorrect: boolean | null;
 }
 
-const EXERCISES: ListeningExercise[] = [
-  { id: 1, word: "Jaa", translation: "Oui", isCorrect: null },
-  { id: 2, word: "Ala", translation: "Non", isCorrect: null },
-  { id: 3, word: "Te", translation: "Merci", isCorrect: null },
-  { id: 4, word: "Suka", translation: "Jour", isCorrect: null },
-  { id: 5, word: "Heri", translation: "Bonsoir", isCorrect: null },
-];
+const EXERCISES: ListeningExercise[] = MOCK_LISTENING_EXERCISES.slice(0, 5).map(e => ({
+  ...e,
+  isCorrect: null,
+}));
 
 export default function ListeningScreen() {
   const router = useRouter();

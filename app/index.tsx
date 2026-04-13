@@ -1,5 +1,5 @@
-import React, { useEffect } from "react";
-import { View, Text, Image } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, Image, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import Animated, { 
   FadeIn, 
@@ -7,25 +7,49 @@ import Animated, {
 } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as SplashScreen from "expo-splash-screen";
+import { useSelector } from "react-redux";
+import { RootState } from "../services/redux/store";
+import { hasValidToken } from "../services/storage/tokenStorage";
 
 const LOGO = require("../assets/images/logo_ipelan.png"); 
 const MASCOT = require("../assets/images/mascot_parrot.png");
 
-
 export default function Index() {
   const router = useRouter();
+  const { isAuthenticated } = useSelector((state: RootState) => state.auth);
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    SplashScreen.hideAsync();
+    const init = async () => {
+      try {
+        await SplashScreen.preventAutoHideAsync();
+        
+        const hasToken = await hasValidToken();
+        
+        if (hasToken && isAuthenticated) {
+          router.replace("/(tabs)/(home)");
+        } else {
+          router.replace("/(auth)/onboarding");
+        }
+      } catch (error) {
+        router.replace("/(auth)/onboarding");
+        console.error(error.message);
+      } finally {
+        setIsReady(true);
+        await SplashScreen.hideAsync();
+      }
+    };
 
-    const timer = setTimeout(() => {
-      // Skip auth - go directly to home for UI testing
-      router.replace("/(tabs)/(home)");
-      // Uncomment for real auth:
-      // router.push("/(auth)/onboarding");
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, [router]);
+    init();
+  }, [router, isAuthenticated]);
+
+  if (!isReady) {
+    return (
+      <SafeAreaView className="flex-1 bg-white items-center justify-center">
+        <ActivityIndicator size="large" color="#002366" />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView className="flex-1 bg-white">

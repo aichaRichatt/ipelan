@@ -6,6 +6,12 @@ import "../global.css";
 
 import { useFonts } from "expo-font";
 import { FontAwesome5 } from "@expo/vector-icons";
+import { useAuthRestore } from "../hooks/useAuthRestore";
+
+function AuthRestoreWrapper() {
+  useAuthRestore();
+  return null;
+}
 
 export default function RootLayout() {
   const [loaded, error] = useFonts({
@@ -13,11 +19,12 @@ export default function RootLayout() {
   });
 
   if (!loaded && !error) {
-    return null; 
+    return null;
   }
 
   return (
     <Provider store={store}>
+      <AuthRestoreWrapper />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
