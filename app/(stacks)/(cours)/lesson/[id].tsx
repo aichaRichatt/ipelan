@@ -6,160 +6,324 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { WebView } from "react-native-webview";
 import { useSelector } from "react-redux";
 import { RootState } from "../../../../services/redux/store";
-import { getCourseContents, getEnrolledCoursesByTimeline } from "../../../../services/api/courseService";
+import { getCourseContents } from "../../../../services/api/courseService";
+import { mapModuleToContentType } from "../../../../utils/contentMapper";
+
+const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_TOKEN;
+const MOODLE_URL = process.env.EXPO_PUBLIC_MOODLE_API_URL || "https://moodle.richatt.com";
+
+const IS_DEV = process.env.NODE_ENV === "development";
 
 interface ModuleContent {
   filename: string;
   fileurl: string;
   type: string;
+  mimetype?: string;
 }
 
-interface CourseModule {
+interface MoodleSection {
   id: number;
   name: string;
-  contents: ModuleContent[];
+  summary: string;
+  modules: MoodleModule[];
+}
+
+interface MoodleModule {
+  id: number;
+  name: string;
+  modname: string;
+  description?: string;
+  contents?: ModuleContent[];
+  url?: string;
+  instance?: number;
 }
 
 export default function LessonScreen() {
   const router = useRouter();
-  const { id, moduleName } = useLocalSearchParams<{ id: string; moduleName?: string }>();
-  const lessonId = parseInt(id || "1", 10);
-  const courseId = parseInt(id || "1", 10);
-  
+  const { id, courseId: courseIdParam } = useLocalSearchParams<{ id: string; courseId?: string }>();
+  const moduleId = parseInt(id || "0", 10);
+  const courseId = parseInt(courseIdParam || "0", 10);
+
   const token = useSelector((state: RootState) => state.auth.token);
-  
+
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [htmlContent, setHtmlContent] = useState<string>('');
-  const [baseUrl, setBaseUrl] = useState<string>('');
-  const [lessonTitle, setLessonTitle] = useState<string>('Leçon ' + lessonId);
-  const [spine, setSpine] = useState<string[]>([]);
-  const [currentChapter, setCurrentChapter] = useState(0);
-  const [allModules, setAllModules] = useState<CourseModule[]>([]);
+  const [lessonTitle, setLessonTitle] = useState<string>('Leçon');
+  const [error, setError] = useState<string | null>(null);
+
+  const getAuthToken = () => {
+    return token && token.length > 10 ? token : (ADMIN_TOKEN || '');
+  };
+
+  const cleanAndAuthUrl = (url: string): string => {
+    const authToken = getAuthToken();
+    if (!url) return url;
+    
+    let cleaned = url;
+    cleaned = cleaned.replace(/[?&]forceddownload=1/gi, '');
+    cleaned = cleaned.replace(/[?&]download=1/gi, '');
+    
+    if (cleaned.includes('token=') || cleaned.includes('wstoken=')) {
+      return cleaned;
+    }
+    
+    if (!authToken) return cleaned;
+    
+    const separator = cleaned.includes('?') ? '&' : '?';
+    
+    if (cleaned.includes('pluginfile.php')) {
+      return `${cleaned}${separator}token=${authToken}`;
+    }
+    return `${cleaned}${separator}wstoken=${authToken}`;
+  };
+
+  const fetchWithAuth = async (url: string): Promise<string | null> => {
+    const authToken = getAuthToken();
+    if (!authToken) {
+      if (IS_DEV) console.warn("[Lesson] No auth token available");
+      return null;
+    }
+
+    try {
+      const finalUrl = cleanAndAuthUrl(url);
+      if (IS_DEV) console.log("[Lesson] Fetching with auth:", finalUrl);
+
+      const response = await fetch(finalUrl, {
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+          'Accept': 'text/html, application/xhtml+xml, */*',
+        },
+      });
+
+      if (response.ok) {
+        const text = await response.text();
+        
+        if (text.includes('"error"') && text.length < 500) {
+          if (IS_DEV) console.warn("[Lesson] Response contains error:", text);
+          return null;
+        }
+        
+        if (!text.includes('<') && text.length < 200) {
+          if (IS_DEV) console.warn("[Lesson] Response doesn't look like HTML:", text);
+          return null;
+        }
+        
+        return text;
+      } else {
+        if (IS_DEV) console.warn("[Lesson] Fetch failed:", response.status, response.statusText);
+        return null;
+      }
+    } catch (err) {
+      if (IS_DEV) console.warn("[Lesson] Fetch error:", err);
+      return null;
+    }
+  };
+
+  const processHtmlContent = (html: string, baseUrl: string = ''): string => {
+    let processedHtml = html;
+    
+    processedHtml = processedHtml.replace(
+      /<a\s+([^>]*?)href=["']([^"']*)["']([^>]*)>/gi,
+      (match, attrsBefore, href, attrsAfter) => {
+        if (href.startsWith('http') && href.includes('moodle')) {
+          const authHref = cleanAndAuthUrl(href);
+          return `<a ${attrsBefore}href="#" onclick="window.ReactNativeWebView.postMessage(JSON.stringify({type:'openUrl', url:'${authHref}'}))"${attrsAfter}>`;
+        }
+        if (href.startsWith('/') || !href.includes('://')) {
+          const fullUrl = href.startsWith('/') 
+            ? `${MOODLE_URL}${href}` 
+            : `${baseUrl}/${href}`;
+          const authHref = cleanAndAuthUrl(fullUrl);
+          return `<a ${attrsBefore}href="#" onclick="window.ReactNativeWebView.postMessage(JSON.stringify({type:'openUrl', url:'${authHref}'}))"${attrsAfter}>`;
+        }
+        return `<a ${attrsBefore}href="#" onclick="window.ReactNativeWebView.postMessage(JSON.stringify({type:'openUrl', url:'${href}'}))"${attrsAfter}>`;
+      }
+    );
+    
+    processedHtml = processedHtml.replace(
+      /<(img|script|link|source)\s+([^>]*?)src=["']([^"']*)["']([^>]*)>/gi,
+      (match, tag, attrsBefore, src, attrsAfter) => {
+        let authSrc = src;
+        
+        if (src.startsWith('/')) {
+          authSrc = `${MOODLE_URL}${src}`;
+        } else if (!src.includes('://') && baseUrl) {
+          authSrc = `${baseUrl}/${src}`;
+        }
+        
+        authSrc = cleanAndAuthUrl(authSrc);
+        
+        return `<${tag} ${attrsBefore}src="${authSrc}"${attrsAfter}>`;
+      }
+    );
+    
+    processedHtml = processedHtml.replace(
+      /background:\s*url\(["']?([^"')]*)["']?\)/gi,
+      (match, url) => {
+        let authUrl = url;
+        if (url.startsWith('/')) {
+          authUrl = `${MOODLE_URL}${url}`;
+        }
+        authUrl = cleanAndAuthUrl(authUrl);
+        return `background:url(${authUrl})`;
+      }
+    );
+    
+    return processedHtml;
+  };
 
   const loadCourseContent = useCallback(async () => {
-    if (!token) {
-      const fallbackHtml = getFallbackLessonHTML();
-      setHtmlContent(fallbackHtml);
+    if (!token || !courseId) {
+      setError("Paramètres manquants");
       setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
-    
+    setError(null);
+
     try {
-      console.log("[Lesson] Loading course content for course:", courseId);
-      
+      if (IS_DEV) console.log("[Lesson] Loading module:", moduleId, "from course:", courseId);
+
       const contents = await getCourseContents(token, courseId);
-      
-      console.log("[Lesson] Course contents received:", contents.length, "sections");
-      
-      if (contents.length === 0) {
-        console.log("[Lesson] No sections found, checking enrolled courses...");
-        
-        try {
-          const enrolled = await getEnrolledCoursesByTimeline(token);
-          console.log("[Lesson] Enrolled courses:", enrolled);
-        } catch (e) {
-          console.warn("[Lesson] Could not get enrolled courses:", e);
-        }
-        
-        const fallbackHtml = getFallbackLessonHTML();
-        setHtmlContent(fallbackHtml);
-        setIsLoading(false);
-        return;
-      }
-      
-      const modules: CourseModule[] = [];
-      
-      for (const section of contents) {
-        const sectionName = section.name || section.summary || `Section ${contents.indexOf(section) + 1}`;
-        console.log("[Lesson] Section:", sectionName, "- Modules:", section.modules?.length || 0);
-        
-        if (section.modules && Array.isArray(section.modules)) {
-          for (const mod of section.modules) {
-            const moduleInfo = {
-              id: mod.id,
-              name: mod.name || mod.description?.substring(0, 50) || `Module ${mod.id}`,
-              contents: mod.contents || [],
-              modname: mod.modname,
-              url: mod.url,
-              description: mod.description
-            };
-            
-            console.log("[Lesson] Module:", moduleInfo.name, "- Type:", mod.modname, "- Contents:", moduleInfo.contents.length);
-            
-            modules.push(moduleInfo);
-          }
-        }
-      }
-      
-      setAllModules(modules);
-      console.log("[Lesson] Total modules found:", modules.length);
-      
-      if (modules.length === 0) {
-        console.log("[Lesson] No modules found, using fallback");
-        const fallbackHtml = getFallbackLessonHTML();
-        setHtmlContent(fallbackHtml);
+
+      if (!contents || contents.length === 0) {
+        setError("Aucune section trouvée dans ce cours");
         setIsLoading(false);
         return;
       }
 
-      const currentModule = modules.find(m => m.id === lessonId) || modules[0];
-      
-      if (currentModule) {
-        console.log("[Lesson] Current module:", currentModule.name, "- Type:", currentModule.modname);
-        setLessonTitle(currentModule.name);
-        
-        if (currentModule.contents && currentModule.contents.length > 0) {
-          for (const content of currentModule.contents) {
-            if (content.fileurl && (content.filename.endsWith('.html') || content.filename.endsWith('.xhtml') || content.filename.endsWith('.htm'))) {
-              console.log("[Lesson] Found HTML content:", content.filename, content.fileurl);
-              
-              try {
-                const response = await fetch(content.fileurl);
-                if (response.ok) {
-                  let html = await response.text();
-                  
-                  html = wrapWithStyles(html, 1, 1);
-                  
-                  setHtmlContent(html);
-                  setBaseUrl('');
-                  setSpine([content.filename]);
-                  setCurrentChapter(0);
-                  setHasScrolledToBottom(false);
-                  setIsLoading(false);
-                  return;
-                }
-              } catch (fetchErr) {
-                console.warn("[Lesson] Failed to fetch HTML:", fetchErr);
-              }
+      let targetModule: MoodleModule | null = null;
+      let foundInSection: string = "";
+
+      for (const section of contents) {
+        if (section.modules && Array.isArray(section.modules)) {
+          for (const mod of section.modules) {
+            if (mod.id === moduleId) {
+              targetModule = mod;
+              foundInSection = section.name;
+              break;
             }
           }
         }
-        
-        if (currentModule.modname === 'page' && currentModule.description) {
-          console.log("[Lesson] Module is a page, using description as content");
-          const pageHtml = wrapWithStyles(currentModule.description, 1, 1);
-          setHtmlContent(pageHtml);
+        if (targetModule) break;
+      }
+
+      if (!targetModule && moduleId > 0) {
+        for (const section of contents) {
+          if (section.modules && Array.isArray(section.modules)) {
+            if (section.modules.length > 0) {
+              targetModule = section.modules[0];
+              foundInSection = section.name;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!targetModule) {
+        setError("Module non trouvé");
+        setIsLoading(false);
+        return;
+      }
+
+      if (IS_DEV) {
+        console.log("[Lesson] Found module:", targetModule.name, "- Type:", targetModule.modname);
+        console.log("[Lesson] Contents count:", targetModule.contents?.length || 0);
+        console.log("[Lesson] Section:", foundInSection);
+      }
+
+      setLessonTitle(targetModule.name || "Leçon");
+
+      const mapped = mapModuleToContentType({
+        id: targetModule.id,
+        name: targetModule.name,
+        modname: targetModule.modname,
+        modplural: '',
+        instance: targetModule.instance || 0,
+        description: targetModule.description,
+        contents: targetModule.contents || [],
+        visible: 1,
+      });
+
+      if (IS_DEV) console.log("[Lesson] Mapped type:", mapped.type);
+
+      if (mapped.htmlContent && mapped.htmlContent.startsWith('http')) {
+        if (IS_DEV) console.log("[Lesson] Fetching HTML from URL:", mapped.htmlContent);
+        const html = await fetchWithAuth(mapped.htmlContent);
+        if (html) {
+          const baseUrl = mapped.htmlContent.substring(0, mapped.htmlContent.lastIndexOf('/'));
+          const processedHtml = processHtmlContent(html, baseUrl);
+          const styledHtml = wrapWithStyles(processedHtml, 1, 1);
+          setHtmlContent(styledHtml);
           setIsLoading(false);
           return;
         }
       }
 
-      const fallbackHtml = getFallbackLessonHTML();
-      setHtmlContent(fallbackHtml);
-      setSpine([]);
+      if (targetModule.description && targetModule.description.includes('<')) {
+        if (IS_DEV) console.log("[Lesson] Using description as HTML content");
+        const processedHtml = processHtmlContent(targetModule.description, MOODLE_URL);
+        const styledHtml = wrapWithStyles(processedHtml, 1, 1);
+        setHtmlContent(styledHtml);
+        setIsLoading(false);
+        return;
+      }
+
+      if (targetModule.contents && targetModule.contents.length > 0) {
+        for (const content of targetModule.contents) {
+          if (content.fileurl) {
+            const filename = content.filename?.toLowerCase() || '';
+            if (filename.endsWith('.html') || filename.endsWith('.htm') || filename.endsWith('.xhtml')) {
+              if (IS_DEV) console.log("[Lesson] Fetching HTML file:", content.fileurl);
+              const html = await fetchWithAuth(content.fileurl);
+              if (html) {
+                const baseUrl = content.fileurl.substring(0, content.fileurl.lastIndexOf('/'));
+                const processedHtml = processHtmlContent(html, baseUrl);
+                const styledHtml = wrapWithStyles(processedHtml, 1, 1);
+                setHtmlContent(styledHtml);
+                setIsLoading(false);
+                return;
+              }
+            }
+
+            if (filename.match(/\.(jpg|jpeg|png|gif|webp)$/)) {
+              const authUrl = cleanAndAuthUrl(content.fileurl);
+              const imgHtml = wrapWithStyles(
+                `<div class="image-container"><img src="${authUrl}" alt="Image" /></div>`,
+                1, 1
+              );
+              setHtmlContent(imgHtml);
+              setIsLoading(false);
+              return;
+            }
+          }
+        }
+      }
+
+      if (targetModule.url) {
+        const iframeHtml = wrapWithStyles(
+          `<div class="external-content">
+            <p>Ce contenu est disponible sur Moodle:</p>
+            <a href="${targetModule.url}" target="_blank">Ouvrir dans Moodle</a>
+          </div>`,
+          1, 1
+        );
+        setHtmlContent(iframeHtml);
+        setIsLoading(false);
+        return;
+      }
+
+      setError("Contenu non disponible pour ce module");
       setIsLoading(false);
-      
-    } catch (err) {
-      console.warn('[Lesson] Failed to load course content:', err);
-      const fallbackHtml = getFallbackLessonHTML();
-      setHtmlContent(fallbackHtml);
-      setSpine([]);
+
+    } catch (err: any) {
+      if (IS_DEV) console.error('[Lesson] Error:', err);
+      setError(err.message || "Erreur lors du chargement");
       setIsLoading(false);
     }
-  }, [token, courseId, lessonId]);
+  }, [token, courseId, moduleId]);
 
   useEffect(() => {
     loadCourseContent();
@@ -215,7 +379,7 @@ export default function LessonScreen() {
         .logo { max-width: 150px; margin: 20px auto; }
         .bordered-box { border: 2px solid #4a90e2; border-radius: 12px; padding: 16px; margin: 16px 0; }
         .image-center { text-align: center; margin: 16px 0; }
-        .image-container { margin: 16px 0; }
+        .image-container { margin: 16px 0; text-align: center; }
         .image-grid { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 16px 0; }
         .image-grid img { width: 45%; }
         .dialogue-section { display: flex; flex-direction: column; gap: 16px; }
@@ -230,9 +394,14 @@ export default function LessonScreen() {
         .small-text { font-size: 0.9em; }
         .centered { text-align: center; }
         .left-label { font-size: 0.9em; margin-bottom: 4px; }
+        .external-content { padding: 20px; text-align: center; }
+        .external-content a { color: #002366; font-size: 18px; }
+        .vocab-card { background: #f8fafc; border-radius: 12px; padding: 16px; margin: 12px 0; border-left: 4px solid #4a90e2; }
+        .pulaar-word { font-size: 1.4em; font-weight: bold; color: #002366; }
+        .translation { color: #64748b; margin-top: 4px; }
       </style>
     `;
-    
+
     const navigationScript = `
       <script>
         function playAudio(wordId) {
@@ -256,9 +425,19 @@ export default function LessonScreen() {
             }));
           }
         });
+        document.addEventListener('click', (e) => {
+          const link = e.target.closest('a');
+          if (link && link.href) {
+            e.preventDefault();
+            window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'linkClick',
+              url: link.href
+            }));
+          }
+        });
       </script>
     `;
-    
+
     if (content.includes('<head>')) {
       return content
         .replace('<head>', '<head>' + styles + navigationScript)
@@ -268,138 +447,26 @@ export default function LessonScreen() {
     }
   };
 
-  const getFallbackLessonHTML = (): string => {
-    return `
-      <!DOCTYPE html>
-      <html lang="pulaar">
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0">
-        <style>
-          * { box-sizing: border-box; margin: 0; padding: 0; }
-          body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            font-size: 16px;
-            line-height: 1.6;
-            color: #1F2937;
-            background-color: #FAF9F6;
-            padding: 16px;
-            padding-bottom: 100px;
-          }
-          .header {
-            background: linear-gradient(135deg, #002366, #4a90e2);
-            color: white;
-            padding: 20px;
-            border-radius: 12px;
-            margin-bottom: 20px;
-            text-align: center;
-          }
-          .header h1 { font-size: 1.5em; margin-bottom: 8px; }
-          .section {
-            background: white;
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 16px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-          }
-          .section h2 { color: #002366; font-size: 1.3em; margin-bottom: 12px; }
-          p { margin-bottom: 12px; text-align: justify; }
-          .vocab-card {
-            background: linear-gradient(135deg, #f8fafc, #f1f5f9);
-            border-radius: 12px;
-            padding: 16px;
-            margin: 12px 0;
-            border-left: 4px solid #4a90e2;
-          }
-          .pulaar-word { font-size: 1.4em; font-weight: bold; color: #002366; }
-          .translation { color: #64748b; margin-top: 4px; }
-          .audio-btn {
-            background: linear-gradient(135deg, #4a90e2, #3b82f6);
-            color: white;
-            border: none;
-            border-radius: 20px;
-            padding: 8px 16px;
-            font-size: 0.9em;
-            margin-top: 8px;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>📚 Deftere Pulaar - Tolon 1</h1>
-          <p>Manuel pour apprendre le Pulaar</p>
-        </div>
-
-        <div class="section">
-          <h2>👋 Les Salutations</h2>
-          <div class="vocab-card">
-            <div class="pulaar-word">Min ka ndef?</div>
-            <div class="translation">Comment allez-vous?</div>
-            <button class="audio-btn" onclick="playAudio('salut1')">🔊 Écouter</button>
-          </div>
-          <div class="vocab-card">
-            <div class="pulaar-word">Mii njaax</div>
-            <div class="translation">Je vais bien</div>
-          </div>
-          <div class="vocab-card">
-            <div class="pulaar-word">Baani</div>
-            <div class="translation">Au revoir</div>
-          </div>
-        </div>
-
-        <div class="section">
-          <h2>🔢 Les Nombres</h2>
-          <div class="vocab-card">
-            <div class="pulaar-word">Go'o</div>
-            <div class="translation">Un (1)</div>
-          </div>
-          <div class="vocab-card">
-            <div class="pulaar-word">Diidi</div>
-            <div class="translation">Deux (2)</div>
-          </div>
-          <div class="vocab-card">
-            <div class="pulaar-word">Tati</div>
-            <div class="translation">Trois (3)</div>
-          </div>
-        </div>
-
-        <div class="section">
-          <h2>👨‍👩‍👧 La Famille</h2>
-          <div class="vocab-card">
-            <div class="pulaar-word">Baaba</div>
-            <div class="translation">Père</div>
-          </div>
-          <div class="vocab-card">
-            <div class="pulaar-word">Yaaya</div>
-            <div class="translation">Mère</div>
-          </div>
-          <div class="vocab-card">
-            <div class="pulaar-word">Koy</div>
-            <div class="translation">Frère/Sœur</div>
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
-    
-  };
-
   const handleMessage = (event: any) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
       if (data.type === 'playAudio') {
-        Alert.alert("🔊 Audio", `Lecture: ${data.wordId}`, [
-          { text: "OK" }
-        ]);
+        Alert.alert("Audio", `Lecture: ${data.wordId}`);
       } else if (data.type === 'scrollProgress') {
         if (data.progress >= 90) {
           setHasScrolledToBottom(true);
         }
       } else if (data.type === 'pageReady') {
         setIsLoading(false);
+      } else if (data.type === 'linkClick' || data.type === 'openUrl') {
+        Alert.alert(
+          "Contenu externe",
+          "Ce lien ne peut pas être ouvert dans l'application.",
+          [{ text: "OK" }]
+        );
       }
-    } catch (error) {
-      console.warn('WebView message error:', error);
+    } catch {
+      // Ignore parse errors
     }
   };
 
@@ -413,6 +480,28 @@ export default function LessonScreen() {
         <ActivityIndicator size="large" color="#002366" />
         <Text className="mt-4 text-gray-600">Chargement de la leçon...</Text>
         <Text className="mt-2 text-gray-400 text-xs">Récupération du contenu depuis Moodle</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (error) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={["top"]}>
+        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
+          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+            <Feather name="arrow-left" size={24} color="black" />
+          </Pressable>
+          <Text className="text-lg font-bold text-gray-900 flex-1" numberOfLines={1}>
+            {lessonTitle}
+          </Text>
+        </View>
+        <View className="flex-1 items-center justify-center px-5">
+          <Feather name="alert-circle" size={48} color="#D1D5DB" />
+          <Text className="text-gray-500 mt-4 text-center">{error}</Text>
+          <Text className="text-gray-400 text-sm mt-2 text-center">
+            Ce module n&apos;as pas de contenu configuré dans Moodle
+          </Text>
+        </View>
       </SafeAreaView>
     );
   }
@@ -433,9 +522,9 @@ export default function LessonScreen() {
 
       <View className="px-5 mb-2">
         <View className="h-1 bg-gray-200 rounded-full overflow-hidden">
-          <View 
-            className="h-full bg-[#F59E0B] rounded-full transition-all duration-300" 
-            style={{ width: hasScrolledToBottom ? "100%" : "30%" }} 
+          <View
+            className="h-full bg-[#F59E0B] rounded-full transition-all duration-300"
+            style={{ width: hasScrolledToBottom ? "100%" : "30%" }}
           />
         </View>
       </View>

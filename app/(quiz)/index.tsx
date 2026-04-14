@@ -1,12 +1,12 @@
-import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
-import React, { useState, useEffect } from "react";
+import { Feather } from "@expo/vector-icons";
+import React, { useState, useEffect, useCallback } from "react";
 import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import { audioService } from "../../services/audio/audioService";
 import { useSelector } from "react-redux";
 import { RootState } from "../../services/redux/store";
-import { getEnrolledCoursesByTimeline, getCourseSections } from "../../services/api/courseService";
+import { useQuizContent } from "../../hooks/useQuizContent";
+import { QuizQuestion as QuizQuestionType } from "../../services/contentLoader";
 
 interface QuizQuestion {
   id: number;
@@ -22,8 +22,12 @@ export default function QuizScreen() {
   const params = useLocalSearchParams<{ moduleId?: string; moduleTitle?: string; courseId?: string }>();
   const token = useSelector((state: RootState) => state.auth.token);
   
+  const moduleId = parseInt(params.moduleId || "0", 10);
+  const courseId = parseInt(params.courseId || "0", 10);
+  
+  const { quiz, questions: dynamicQuestions, isLoading, error } = useQuizContent(token || '', moduleId, courseId);
+  
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [score, setScore] = useState(0);
@@ -32,77 +36,23 @@ export default function QuizScreen() {
   const [showResult, setShowResult] = useState(false);
 
   useEffect(() => {
-    const fetchQuizData = async () => {
-      if (!token) {
-        setIsLoading(false);
-        return;
-      }
-
-      try {
-        const coursesResponse = await getEnrolledCoursesByTimeline(token);
-        const courses = coursesResponse?.courses || [];
-        
-        const allModules: any[] = [];
-        
-        for (const course of courses.slice(0, 3)) {
-          try {
-            const sectionsResponse = await getCourseSections(token, course.id);
-            if (Array.isArray(sectionsResponse)) {
-              for (const section of sectionsResponse) {
-                if (section.modules) {
-                  allModules.push(...section.modules);
-                }
-              }
-            }
-          } catch (e) {
-            console.log("Error fetching sections for course", course.id);
-          }
-        }
-
-        const quizQuestions: QuizQuestion[] = generateQuizQuestions(allModules, courses);
-        setQuestions(quizQuestions);
-      } catch (error) {
-        console.error("Failed to fetch quiz data:", error);
-        setQuestions(generateDefaultQuestions());
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchQuizData();
-  }, [token]);
-
-  const generateQuizQuestions = (modules: any[], courses: any[]): QuizQuestion[] => {
-    const questionTemplates = [
-      { template: (c: string) => ({ question: `Quel est le contenu principal du cours "${c}"?`, options: ["Chapitre 1", "Chapitre 2", "Chapitre 3", "Chapitre 4"], correct: 0 }), type: "text-mcq" as const },
-      { template: (c: string) => ({ question: `As-tu terminé le cours "${c}"?`, options: ["Oui", "Non", "En cours", "Pas commencé"], correct: 2 }), type: "text-mcq" as const },
-      { template: (c: string) => ({ question: `Quelle activité dans "${c}"?`, options: ["Lecture", "Quiz", "Exercice", "Vidéo"], correct: 0 }), type: "text-mcq" as const },
-      { template: (c: string) => ({ question: `Le cours "${c}" est-il difficile?`, options: ["Très facile", "Facile", "Moyen", "Difficile"], correct: 1 }), type: "text-mcq" as const },
-    ];
-
-    const questions: QuizQuestion[] = [];
-    const usedCourses = new Set<string>();
-
-    courses.forEach((course, idx) => {
-      if (questions.length >= 5) return;
-      if (usedCourses.has(course.fullname)) return;
-      
-      usedCourses.add(course.fullname);
-      const template = questionTemplates[idx % questionTemplates.length];
-      const q = template.template(course.fullname);
-      const { options, newCorrectIndex } = shuffleOptions(q.options, q.correct);
-      
-      questions.push({
-        id: questions.length + 1,
-        type: template.type,
-        question: q.question,
-        options,
-        correctIndex: newCorrectIndex,
+    if (dynamicQuestions && dynamicQuestions.length > 0) {
+      const converted: QuizQuestion[] = dynamicQuestions.map(q => {
+        const { options, newCorrectIndex } = shuffleOptions(q.options || [], q.correctAnswer ?? 0);
+        return {
+          id: q.id,
+          type: q.type === 'audio' ? 'audio-mcq' as const : 'text-mcq' as const,
+          question: q.question,
+          audioUrl: q.audioUrl,
+          options,
+          correctIndex: newCorrectIndex,
+        };
       });
-    });
-
-    return questions.length > 0 ? questions : generateDefaultQuestions();
-  };
+      setQuestions(converted);
+    } else {
+      setQuestions(generateDefaultQuestions());
+    }
+  }, [dynamicQuestions]);
 
   const generateDefaultQuestions = (): QuizQuestion[] => {
     const defaultQ = [
@@ -125,12 +75,6 @@ export default function QuizScreen() {
     const newCorrectIndex = shuffled.indexOf(correctAnswer);
     return { options: shuffled, newCorrectIndex };
   };
-
-  useEffect(() => {
-    return () => {
-      audioService.stop();
-    };
-  }, []);
 
   const handlePlayAudio = async () => {
     setIsPlaying(true);
@@ -278,7 +222,7 @@ export default function QuizScreen() {
           <Feather name="arrow-left" size={24} color="black" />
         </Pressable>
         <View className="flex-1">
-          <Text className="text-lg font-bold text-gray-900">Quiz Rapide</Text>
+          <Text className="text-lg font-bold text-gray-900">{quiz?.name || params.moduleTitle || 'Quiz Rapide'}</Text>
           <Text className="text-gray-500 text-xs">
             Question {currentQuestion + 1}/{questions.length}
           </Text>
