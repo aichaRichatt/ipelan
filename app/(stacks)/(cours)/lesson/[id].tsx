@@ -4,133 +4,168 @@ import { Pressable, Text, View, Alert, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { WebView } from "react-native-webview";
-import { Paths, File } from "expo-file-system";
+import { useSelector } from "react-redux";
+import { RootState } from "../../../../services/redux/store";
+import { getCourseContents, getEnrolledCoursesByTimeline } from "../../../../services/api/courseService";
+
+interface ModuleContent {
+  filename: string;
+  fileurl: string;
+  type: string;
+}
+
+interface CourseModule {
+  id: number;
+  name: string;
+  contents: ModuleContent[];
+}
 
 export default function LessonScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, moduleName } = useLocalSearchParams<{ id: string; moduleName?: string }>();
   const lessonId = parseInt(id || "1", 10);
+  const courseId = parseInt(id || "1", 10);
+  
+  const token = useSelector((state: RootState) => state.auth.token);
   
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [htmlContent, setHtmlContent] = useState<string>('');
   const [baseUrl, setBaseUrl] = useState<string>('');
+  const [lessonTitle, setLessonTitle] = useState<string>('Leçon ' + lessonId);
   const [spine, setSpine] = useState<string[]>([]);
   const [currentChapter, setCurrentChapter] = useState(0);
+  const [allModules, setAllModules] = useState<CourseModule[]>([]);
 
-  const loadChapter = useCallback(async (chapterIndex: number) => {
-    if (spine.length === 0) return;
-    
-    setIsLoading(true);
-    const chapter = spine[chapterIndex];
-    
-    try {
-      const docDir = Paths.document;
-      const extractedPath = docDir.uri.replace('file://', '') + '/extracted_epub/libretest';
-      const chapterPath = extractedPath + '/OEBPS/Text/' + chapter;
-      const chapterFile = new File(chapterPath);
-      
-      if (!chapterFile.exists) {
-        const fallbackHtml = getFallbackLessonHTML();
-        setHtmlContent(fallbackHtml);
-        setBaseUrl('');
-        setIsLoading(false);
-        return;
-      }
-
-      let html = await chapterFile.text();
-      
-      html = html.replace(/href="\.\.\/Styles\//g, 'href="file:///' + extractedPath + '/OEBPS/Styles/');
-      html = html.replace(/src="\.\.\/Images\//g, 'src="file:///' + extractedPath + '/OEBPS/Images/');
-      html = html.replace(/src="\.\.\/Audio\//g, 'src="file:///' + extractedPath + '/OEBPS/Audio/');
-      
-      const styledHtml = wrapWithStyles(html, chapterIndex + 1, spine.length);
-      setHtmlContent(styledHtml);
-      setBaseUrl('file:///' + extractedPath + '/OEBPS/');
-      setCurrentChapter(chapterIndex);
-      setHasScrolledToBottom(false);
-      setIsLoading(false);
-      
-    } catch (err) {
-      console.warn('Failed to load chapter:', err);
+  const loadCourseContent = useCallback(async () => {
+    if (!token) {
       const fallbackHtml = getFallbackLessonHTML();
       setHtmlContent(fallbackHtml);
-      setBaseUrl('');
       setIsLoading(false);
+      return;
     }
-  }, [spine]);
 
-  const loadEPUBContent = useCallback(async () => {
     setIsLoading(true);
     
     try {
-      const docDir = Paths.document;
-      const extractedPath = docDir.uri.replace('file://', '') + '/extracted_epub/libretest';
-      const opfPath = extractedPath + '/OEBPS/content.opf';
-      const opfFile = new File(opfPath);
+      console.log("[Lesson] Loading course content for course:", courseId);
       
-      if (!opfFile.exists) {
+      const contents = await getCourseContents(token, courseId);
+      
+      console.log("[Lesson] Course contents received:", contents.length, "sections");
+      
+      if (contents.length === 0) {
+        console.log("[Lesson] No sections found, checking enrolled courses...");
+        
+        try {
+          const enrolled = await getEnrolledCoursesByTimeline(token);
+          console.log("[Lesson] Enrolled courses:", enrolled);
+        } catch (e) {
+          console.warn("[Lesson] Could not get enrolled courses:", e);
+        }
+        
         const fallbackHtml = getFallbackLessonHTML();
         setHtmlContent(fallbackHtml);
-        setBaseUrl('');
-        setSpine([]);
+        setIsLoading(false);
+        return;
+      }
+      
+      const modules: CourseModule[] = [];
+      
+      for (const section of contents) {
+        const sectionName = section.name || section.summary || `Section ${contents.indexOf(section) + 1}`;
+        console.log("[Lesson] Section:", sectionName, "- Modules:", section.modules?.length || 0);
+        
+        if (section.modules && Array.isArray(section.modules)) {
+          for (const mod of section.modules) {
+            const moduleInfo = {
+              id: mod.id,
+              name: mod.name || mod.description?.substring(0, 50) || `Module ${mod.id}`,
+              contents: mod.contents || [],
+              modname: mod.modname,
+              url: mod.url,
+              description: mod.description
+            };
+            
+            console.log("[Lesson] Module:", moduleInfo.name, "- Type:", mod.modname, "- Contents:", moduleInfo.contents.length);
+            
+            modules.push(moduleInfo);
+          }
+        }
+      }
+      
+      setAllModules(modules);
+      console.log("[Lesson] Total modules found:", modules.length);
+      
+      if (modules.length === 0) {
+        console.log("[Lesson] No modules found, using fallback");
+        const fallbackHtml = getFallbackLessonHTML();
+        setHtmlContent(fallbackHtml);
         setIsLoading(false);
         return;
       }
 
-      const xml = await opfFile.text();
-      const { DOMParser } = await import('xmldom');
-      const doc = new DOMParser().parseFromString(xml, 'text/xml');
+      const currentModule = modules.find(m => m.id === lessonId) || modules[0];
       
-      const manifestItems = doc.getElementsByTagName('item');
-      const spineItems = doc.getElementsByTagName('itemref');
-      
-      const manifestMap: Record<string, string> = {};
-      for (let i = 0; i < manifestItems.length; i++) {
-        const item = manifestItems[i];
-        const itemId = item.getAttribute('id');
-        const href = item.getAttribute('href');
-        if (itemId && href) {
-          manifestMap[itemId] = href;
+      if (currentModule) {
+        console.log("[Lesson] Current module:", currentModule.name, "- Type:", currentModule.modname);
+        setLessonTitle(currentModule.name);
+        
+        if (currentModule.contents && currentModule.contents.length > 0) {
+          for (const content of currentModule.contents) {
+            if (content.fileurl && (content.filename.endsWith('.html') || content.filename.endsWith('.xhtml') || content.filename.endsWith('.htm'))) {
+              console.log("[Lesson] Found HTML content:", content.filename, content.fileurl);
+              
+              try {
+                const response = await fetch(content.fileurl);
+                if (response.ok) {
+                  let html = await response.text();
+                  
+                  html = wrapWithStyles(html, 1, 1);
+                  
+                  setHtmlContent(html);
+                  setBaseUrl('');
+                  setSpine([content.filename]);
+                  setCurrentChapter(0);
+                  setHasScrolledToBottom(false);
+                  setIsLoading(false);
+                  return;
+                }
+              } catch (fetchErr) {
+                console.warn("[Lesson] Failed to fetch HTML:", fetchErr);
+              }
+            }
+          }
         }
-      }
-      
-      const spineList: string[] = [];
-      for (let i = 0; i < spineItems.length; i++) {
-        const item = spineItems[i];
-        const idref = item.getAttribute('idref');
-        if (idref && manifestMap[idref]) {
-          spineList.push(manifestMap[idref]);
+        
+        if (currentModule.modname === 'page' && currentModule.description) {
+          console.log("[Lesson] Module is a page, using description as content");
+          const pageHtml = wrapWithStyles(currentModule.description, 1, 1);
+          setHtmlContent(pageHtml);
+          setIsLoading(false);
+          return;
         }
-      }
-      
-      setSpine(spineList);
-      
-      if (spineList.length === 0) {
-        const fallbackHtml = getFallbackLessonHTML();
-        setHtmlContent(fallbackHtml);
-        setBaseUrl('');
-        setIsLoading(false);
-        return;
       }
 
-      await loadChapter(0);
-      
-    } catch (err) {
-      console.warn('Failed to load EPUB content:', err);
       const fallbackHtml = getFallbackLessonHTML();
       setHtmlContent(fallbackHtml);
-      setBaseUrl('');
+      setSpine([]);
+      setIsLoading(false);
+      
+    } catch (err) {
+      console.warn('[Lesson] Failed to load course content:', err);
+      const fallbackHtml = getFallbackLessonHTML();
+      setHtmlContent(fallbackHtml);
       setSpine([]);
       setIsLoading(false);
     }
-  }, [loadChapter]);
+  }, [token, courseId, lessonId]);
 
   useEffect(() => {
-    loadEPUBContent();
-  }, [loadEPUBContent]);
+    loadCourseContent();
+  }, [loadCourseContent]);
 
-  const wrapWithStyles = (content: string, chapterNum: number, totalChapters: number): string => {
+  const wrapWithStyles = (content: string, chapterNum: number = 1, totalChapters: number = 1): string => {
     const styles = `
       <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -198,31 +233,38 @@ export default function LessonScreen() {
       </style>
     `;
     
-    const navigation = `
-      <div class="chapter-nav">
-        <button onclick="prevChapter()" ${chapterNum <= 1 ? 'disabled' : ''}>← Précédent</button>
-        <span class="chapter-info">Chapitre ${chapterNum}/${totalChapters}</span>
-        <button onclick="nextChapter()" ${chapterNum >= totalChapters ? 'disabled' : ''}>Suivant →</button>
-      </div>
-    `;
-    
     const navigationScript = `
       <script>
-        function prevChapter() {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'prevChapter' }));
+        function playAudio(wordId) {
+          window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'playAudio',
+            wordId: wordId
+          }));
         }
-        function nextChapter() {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'nextChapter' }));
-        }
+        document.addEventListener('DOMContentLoaded', () => {
+          window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'pageReady'
+          }));
+        });
+        window.addEventListener('scroll', () => {
+          const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+          const scrolled = scrollHeight > 0 ? (window.scrollY / scrollHeight) * 100 : 0;
+          if (scrolled >= 90) {
+            window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'scrollProgress',
+              progress: scrolled
+            }));
+          }
+        });
       </script>
     `;
     
     if (content.includes('<head>')) {
       return content
         .replace('<head>', '<head>' + styles + navigationScript)
-        .replace('</body>', navigation + '</body>');
+        .replace('</body>', '</body>');
     } else {
-      return `<!DOCTYPE html><html><head>${styles}${navigationScript}</head><body>${content}${navigation}</body></html>`;
+      return `<!DOCTYPE html><html><head>${styles}${navigationScript}</head><body>${content}</body></html>`;
     }
   };
 
@@ -353,14 +395,8 @@ export default function LessonScreen() {
         if (data.progress >= 90) {
           setHasScrolledToBottom(true);
         }
-      } else if (data.type === 'prevChapter') {
-        if (currentChapter > 0) {
-          loadChapter(currentChapter - 1);
-        }
-      } else if (data.type === 'nextChapter') {
-        if (currentChapter < spine.length - 1) {
-          loadChapter(currentChapter + 1);
-        }
+      } else if (data.type === 'pageReady') {
+        setIsLoading(false);
       }
     } catch (error) {
       console.warn('WebView message error:', error);
@@ -376,6 +412,7 @@ export default function LessonScreen() {
       <SafeAreaView className="flex-1 bg-[#FAF9F6] items-center justify-center">
         <ActivityIndicator size="large" color="#002366" />
         <Text className="mt-4 text-gray-600">Chargement de la leçon...</Text>
+        <Text className="mt-2 text-gray-400 text-xs">Récupération du contenu depuis Moodle</Text>
       </SafeAreaView>
     );
   }
@@ -387,10 +424,10 @@ export default function LessonScreen() {
           <Feather name="arrow-left" size={24} color="black" />
         </Pressable>
         <View className="flex-1">
-          <Text className="text-lg font-bold text-gray-900">
-            Leçon {lessonId}
+          <Text className="text-lg font-bold text-gray-900" numberOfLines={1}>
+            {lessonTitle}
           </Text>
-          <Text className="text-gray-500 text-xs">Deftere Pulaar - Tolon 1</Text>
+          <Text className="text-gray-500 text-xs">Cours IPELAN</Text>
         </View>
       </View>
 
@@ -405,7 +442,7 @@ export default function LessonScreen() {
 
       <View className="flex-1 bg-white mx-4 rounded-xl overflow-hidden mb-24">
         <WebView
-          source={{ html: htmlContent, baseUrl: baseUrl }}
+          source={{ html: htmlContent }}
           style={{ flex: 1 }}
           onMessage={handleMessage}
           scrollEnabled={true}

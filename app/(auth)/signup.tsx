@@ -122,9 +122,7 @@ export default function SignUp() {
 
       Alert.alert(
         "Compte créé!",
-        `Bienvenue ${cleanFirstname}!\n\n` +
-        `Un email de confirmation a été envoyé à:\n${cleanEmail}\n\n` +
-        `Cliquez sur le lien dans l'email pour activer votre compte.`,
+        `Bienvenue ${cleanFirstname}! Votre compte a été créé avec succès. Un email de confirmation a été envoyé à ${cleanEmail}. Cliquez sur le lien dans l'email pour activer votre compte.`,
         [
           {
             text: "Ouvrir l'app email",

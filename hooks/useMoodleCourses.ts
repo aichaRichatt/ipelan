@@ -1,7 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getEnrolledCoursesByTimeline, getUserCourses, getCourseContents, getAllCourses } from '../services/api/courseService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getEnrolledCoursesByTimeline, getUserCourses, getCourseContents, getAllCourses, getCoursesForLanguageAndGrade } from '../services/api/courseService';
 
 const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_TOKEN;
+const PREFERENCES_KEY = '@ipelan_preferences';
+
+interface UserPreferences {
+  language: string;
+  grade: number;
+}
 
 interface MoodleCourse {
   id: number;
@@ -40,15 +47,27 @@ export function useMoodleCourses(token: string): UseMoodleCoursesReturn {
     setError(null);
     
     try {
-      let response = await getEnrolledCoursesByTimeline(cleanToken);
-      
       let rawCourses: any[] = [];
       
-      if (response?.courses && Array.isArray(response.courses)) {
-        rawCourses = response.courses;
-      } else if (response?.exception && ADMIN_TOKEN) {
-        const adminCourses = await getUserCourses(ADMIN_TOKEN);
-        rawCourses = adminCourses;
+      const prefsStr = await AsyncStorage.getItem(PREFERENCES_KEY);
+      const preferences: UserPreferences | null = prefsStr ? JSON.parse(prefsStr) : null;
+      
+      if (preferences) {
+        const langCourses = await getCoursesForLanguageAndGrade(cleanToken, preferences.language, preferences.grade);
+        if (langCourses.length > 0) {
+          rawCourses = langCourses;
+        }
+      }
+      
+      if (rawCourses.length === 0) {
+        let response = await getEnrolledCoursesByTimeline(cleanToken);
+        
+        if (response?.courses && Array.isArray(response.courses)) {
+          rawCourses = response.courses;
+        } else if (response?.exception && ADMIN_TOKEN) {
+          const adminCourses = await getUserCourses(ADMIN_TOKEN);
+          rawCourses = adminCourses;
+        }
       }
       
       if (rawCourses.length === 0 && ADMIN_TOKEN) {

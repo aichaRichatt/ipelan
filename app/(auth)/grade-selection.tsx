@@ -6,6 +6,14 @@ import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Grade } from "../../types";
 
+const LANGUAGE_STORAGE_KEY = '@ipelan_language';
+const PREFERENCES_KEY = '@ipelan_preferences';
+
+interface UserPreferences {
+  language: string;
+  grade: number;
+}
+
 interface GradeOption {
   value: Grade;
   label: string;
@@ -22,8 +30,6 @@ const GRADES: GradeOption[] = [
   { value: 6, label: "6ème année", description: "Expert", icon: "award" },
 ];
 
-const STORAGE_KEY = '@ipelan_grade';
-
 export default function GradeSelectionScreen() {
   const router = useRouter();
   const [selectedGrade, setSelectedGrade] = useState<Grade | null>(null);
@@ -38,10 +44,18 @@ export default function GradeSelectionScreen() {
     
     setIsLoading(true);
     try {
-      await AsyncStorage.setItem(STORAGE_KEY, selectedGrade.toString());
+      const language = await AsyncStorage.getItem(LANGUAGE_STORAGE_KEY);
+      
+      const preferences: UserPreferences = {
+        language: language || 'pulaar',
+        grade: selectedGrade
+      };
+      
+      await AsyncStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences));
+      
       router.replace("/(auth)/login" as any);
     } catch (error) {
-      console.error('Failed to save grade:', error);
+      console.error('Failed to save preferences:', error);
       router.replace("/(auth)/login" as any);
     } finally {
       setIsLoading(false);

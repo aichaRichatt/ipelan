@@ -3,9 +3,17 @@ import { useRouter } from "expo-router";
 import React, { useState, useEffect } from "react";
 import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSelector } from "react-redux";
 import { RootState } from "../../../services/redux/store";
-import { getEnrolledCoursesByTimeline } from "../../../services/api/courseService";
+import { getEnrolledCoursesByTimeline, getCoursesForLanguageAndGrade } from "../../../services/api/courseService";
+
+const PREFERENCES_KEY = '@ipelan_preferences';
+
+interface UserPreferences {
+  language: string;
+  grade: number;
+}
 
 interface CourseData {
   id: number;
@@ -45,6 +53,21 @@ export default function CoursScreen() {
   const [courses, setCourses] = useState<CourseData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [preferences, setPreferences] = useState<UserPreferences | null>(null);
+
+  useEffect(() => {
+    const loadPreferences = async () => {
+      try {
+        const prefs = await AsyncStorage.getItem(PREFERENCES_KEY);
+        if (prefs) {
+          setPreferences(JSON.parse(prefs));
+        }
+      } catch (e) {
+        console.warn("Failed to load preferences:", e);
+      }
+    };
+    loadPreferences();
+  }, []);
 
   useEffect(() => {
     const fetchCourses = async () => {
@@ -54,20 +77,57 @@ export default function CoursScreen() {
       }
 
       try {
-        const response = await getEnrolledCoursesByTimeline(token);
-        if (response?.courses && Array.isArray(response.courses)) {
-          setCourses(response.courses.filter((c: any) => c.visible !== false));
+        let fetchedCourses: any[] = [];
+        
+        if (preferences) {
+          console.log("[Cours] Fetching for:", preferences.language, preferences.grade);
+          
+          const langCourses = await getCoursesForLanguageAndGrade(token, preferences.language, preferences.grade);
+          
+          if (langCourses.length > 0) {
+            if (Array.isArray(langCourses[0])) {
+              fetchedCourses = langCourses.flat();
+            } else {
+              fetchedCourses = langCourses;
+            }
+          }
+        }
+        
+        if (fetchedCourses.length === 0) {
+          console.log("[Cours] No filtered courses, trying enrolled courses...");
+          const response = await getEnrolledCoursesByTimeline(token);
+          if (response?.courses && Array.isArray(response.courses)) {
+            fetchedCourses = response.courses.filter((c: any) => c.visible !== false);
+          }
+        }
+        
+        console.log("[Cours] Total courses to display:", fetchedCourses.length);
+        setCourses(fetchedCourses);
+        
+        if (fetchedCourses.length === 0) {
+          setError("Aucun cours trouvé pour cette langue et niveau");
+        } else {
+          setError(null);
         }
       } catch (err: any) {
         console.error("Failed to fetch courses:", err);
         setError(err.message);
+        
+        try {
+          const response = await getEnrolledCoursesByTimeline(token);
+          if (response?.courses) {
+            setCourses(Array.isArray(response.courses) ? response.courses : []);
+          }
+        } catch (fallbackErr) {
+          console.warn("Fallback also failed:", fallbackErr);
+        }
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchCourses();
-  }, [token]);
+  }, [token, preferences]);
 
   const groupedCourses = courses.reduce((acc, course) => {
     const level = getLevelFromCourse(course.fullname);

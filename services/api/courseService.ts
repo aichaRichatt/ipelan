@@ -2,6 +2,33 @@ import { moodleFetch } from "./moodleClient";
 
 const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_TOKEN;
 
+export interface Category {
+  id: number;
+  name: string;
+  parent: number;
+  depth: number;
+  path: string;
+}
+
+export async function getCategories(token: string): Promise<Category[]> {
+  const params = {
+    wstoken: token,
+    wsfunction: "core_course_get_categories",
+    moodlewsrestformat: "json"
+  };
+  
+  try {
+    const result = await moodleFetch("/webservice/rest/server.php", params, "POST");
+    if (result?.exception) {
+      return [];
+    }
+    return Array.isArray(result) ? result : [];
+  } catch (error) {
+    console.warn("[courseService] getCategories failed:", error);
+    return [];
+  }
+}
+
 export async function getEnrolledCoursesByTimeline(token: string, forUserId?: number) {
   let params = {
     wstoken: token,
@@ -25,7 +52,7 @@ export async function getEnrolledCoursesByTimeline(token: string, forUserId?: nu
     }
   }
   
-  console.log("[courseService] API returned:", result ? "data" : "nothing");
+  console.log("[courseService] API returned:", result ? "data" : "nothing", typeof result);
   return result;
 }
 
@@ -49,26 +76,134 @@ export async function getUserCourses(token: string, userId?: number): Promise<an
   }
 }
 
-export async function getCoursesByCategory(token: string, categoryId?: number): Promise<any[]> {
-  const params: any = {
+export async function getCoursesByCategory(token: string, categoryId: number): Promise<any[]> {
+  const IS_DEV = process.env.NODE_ENV === "development";
+  const params = {
     wstoken: token,
     wsfunction: "core_course_get_courses_by_field",
-    field: "category"
+    field: "category",
+    value: categoryId.toString(),
+    moodlewsrestformat: "json"
   };
-  
-  if (categoryId) {
-    params.value = categoryId;
-  }
   
   try {
     const result = await moodleFetch("/webservice/rest/server.php", params, "POST");
     
     if (result?.exception) {
+      if (IS_DEV) console.warn("[courseService] getCoursesByCategory exception:", result.exception);
       return [];
     }
     
-    return Array.isArray(result) ? result : [];
+    if (Array.isArray(result)) {
+      if (IS_DEV && result.length > 0) console.log("[courseService] Courses in category", categoryId, ":", result.length, result);
+      return result;
+    }
+    
+    if (result?.courses && Array.isArray(result.courses)) {
+      if (IS_DEV) console.log("[courseService] Courses in category", categoryId, ":", result.courses.length);
+      return result.courses;
+    }
+    
+    if (IS_DEV) console.warn("[courseService] getCoursesByCategory returned unexpected format:", typeof result, result);
+    return [];
   } catch (error) {
+    console.warn("[courseService] getCoursesByCategory failed:", error);
+    return [];
+  }
+}
+
+export async function getCoursesForLanguageAndGrade(token: string, language: string, grade: number): Promise<any[]> {
+  const IS_DEV = process.env.NODE_ENV === "development";
+  
+  const getToken = () => {
+    if (token && token.length > 10) return token;
+    if (ADMIN_TOKEN) return ADMIN_TOKEN;
+    return token;
+  };
+  
+  try {
+    const categories = await getCategories(getToken() || token);
+    
+    if (IS_DEV) {
+      console.log("[courseService] All categories:", categories.map(c => ({ id: c.id, name: c.name, parent: c.parent })));
+    }
+    
+    const langMap: Record<string, string[]> = {
+      'pulaar': ['Pulaar', 'pulaar', 'PULAAR', 'Pular'],
+      'soninke': ['Soninké', 'soninké', 'Soninke', 'soninke', 'SONINKE'],
+      'wolof': ['Wolof', 'wolof', 'WOLOF']
+    };
+    
+    const gradeMap: Record<number, string[]> = {
+      1: ['1ère année', '1ere année', '1ème année', '1eme année', '1e année', '1e', '1 ère année', '1 ème', '1è', '1 è'],
+      2: ['2ème année', '2eme année', '2ème', '2eme', '2e année', '2e', '2 ère année', '2 ème', '2è', '2 è', '2 ème'],
+      3: ['3ème année', '3eme année', '3ème', '3eme', '3e année', '3e', '3 ère année', '3 ème', '3è', '3 è', '3 ème'],
+      4: ['4ème année', '4eme année', '4ème', '4eme', '4e année', '4e', '4 ère année', '4 ème', '4è', '4 è', '4 ème'],
+      5: ['5ème année', '5eme année', '5ème', '5eme', '5e année', '5e', '5 ère année', '5 ème', '5è', '5 è', '5 ème'],
+      6: ['6ème année', '6eme année', '6ème', '6eme', '6e année', '6e', '6 ère année', '6 ème', '6è', '6 è', '6 ème'],
+    };
+    
+    const possibleLangNames = langMap[language.toLowerCase()] || [language];
+    const possibleGradeNames = gradeMap[grade] || [`${grade}ème année`];
+    
+    let langCategory = categories.find(c => 
+      possibleLangNames.some(name => c.name.toLowerCase() === name.toLowerCase())
+    );
+    
+    if (!langCategory) {
+      langCategory = categories.find(c => 
+        possibleLangNames.some(name => c.name.toLowerCase().includes(name.toLowerCase()))
+      );
+    }
+    
+    if (!langCategory) {
+      if (IS_DEV) console.warn("[courseService] Language category not found. Looking for:", possibleLangNames);
+      return [];
+    }
+    
+    if (IS_DEV) console.log("[courseService] Found language category:", langCategory);
+    
+    let gradeCategories = categories.filter(c => 
+      c.parent === langCategory.id && 
+      possibleGradeNames.some(name => c.name.toLowerCase().trim() === name.toLowerCase().trim())
+    );
+    
+    if (gradeCategories.length === 0) {
+      gradeCategories = categories.filter(c => 
+        c.parent === langCategory.id && 
+        possibleGradeNames.some(name => c.name.toLowerCase().trim().includes(name.toLowerCase().trim()))
+      );
+    }
+    
+    if (gradeCategories.length === 0) {
+      if (IS_DEV) console.log("[courseService] No grade-specific category, getting all courses from language category");
+      const allChildCategories = categories.filter(c => c.parent === langCategory.id);
+      
+      if (IS_DEV) console.log("[courseService] Child categories:", allChildCategories.map(c => ({ id: c.id, name: c.name })));
+      
+      const courses: any[] = [];
+      for (const cat of allChildCategories) {
+        const gradeCourses = await getCoursesByCategory(getToken() || token, cat.id);
+        if (IS_DEV && gradeCourses.length > 0) console.log("[courseService] Courses in", cat.name, ":", gradeCourses.length, gradeCourses);
+        courses.push(...gradeCourses);
+      }
+      
+      return courses;
+    }
+    
+    if (IS_DEV) console.log("[courseService] Found grade categories:", gradeCategories.map(c => c.name));
+    
+    const courses: any[] = [];
+    for (const gradeCat of gradeCategories) {
+      const gradeCourses = await getCoursesByCategory(getToken() || token, gradeCat.id);
+      courses.push(...gradeCourses);
+    }
+    
+    if (IS_DEV) console.log("[courseService] Total courses found:", courses.length);
+    
+    return courses;
+  } catch (error) {
+    console.warn("[courseService] getCoursesForLanguageAndGrade failed:", error);
     return [];
   }
 }
@@ -93,21 +228,47 @@ export async function getAllCourses(token: string): Promise<any[]> {
 }
 
 export async function getCourseContents(token: string, courseId: number): Promise<any[]> {
-  const params = {
-    wstoken: token,
-    wsfunction: "core_course_get_contents",
-    courseid: courseId
+  const IS_DEV = process.env.NODE_ENV === "development";
+  
+  const tryFetch = async (authToken: string): Promise<any> => {
+    const params = {
+      wstoken: authToken,
+      wsfunction: "core_course_get_contents",
+      courseid: courseId,
+      moodlewsrestformat: "json"
+    };
+    
+    const result = await moodleFetch("/webservice/rest/server.php", params, "POST");
+    return result;
   };
   
   try {
-    const result = await moodleFetch("/webservice/rest/server.php", params, "POST");
+    let result = await tryFetch(token);
+    
+    if (result?.exception && ADMIN_TOKEN) {
+      if (IS_DEV) console.log("[courseService] getCourseContents user token failed, trying admin...");
+      result = await tryFetch(ADMIN_TOKEN);
+    }
     
     if (result?.exception) {
+      if (IS_DEV) console.warn("[courseService] getCourseContents exception:", result.exception);
       return [];
     }
     
-    return Array.isArray(result) ? result : [];
+    if (Array.isArray(result)) {
+      if (IS_DEV) console.log("[courseService] getCourseContents returned", result.length, "sections");
+      return result;
+    }
+    
+    if (result?.sections && Array.isArray(result.sections)) {
+      if (IS_DEV) console.log("[courseService] getCourseContents returned", result.sections.length, "sections from result.sections");
+      return result.sections;
+    }
+    
+    if (IS_DEV) console.warn("[courseService] getCourseContents unexpected format:", typeof result);
+    return [];
   } catch (error) {
+    if (IS_DEV) console.warn("[courseService] getCourseContents error:", error);
     return [];
   }
 }
