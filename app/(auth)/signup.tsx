@@ -1,11 +1,11 @@
-import { View, Text, TextInput, StyleSheet, Alert, ActivityIndicator, Pressable, ScrollView, KeyboardAvoidingView, Platform } from "react-native";
+import { View, Text, TextInput, StyleSheet, Alert, ActivityIndicator, Pressable, ScrollView, KeyboardAvoidingView, Platform, Linking } from "react-native";
 import React, { useState } from "react";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSignup } from "../../hooks/useSignup";
-import { useLogin } from "../../hooks/useLogin";
-import { getDBConnection, getUser, saveUser } from "../../services/storage/db-service";
 import { PolicyModal } from "../../components/PolicyModal";
+import { saveUserData } from "../../services/storage/tokenStorage";
+import { getDBConnection, saveUser, createTables } from "../../services/storage/db-service";
 
 const IS_DEV = process.env.NODE_ENV === "development";
 
@@ -19,10 +19,8 @@ export default function SignUp() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showPolicy, setShowPolicy] = useState(false);
   const [policyAccepted, setPolicyAccepted] = useState(false);
-  const [validationError, setValidationError] = useState<string | null>(null);
   
   const { signup } = useSignup();
-  const { login } = useLogin();
 
   const validatePassword = (pwd: string): string | null => {
     if (pwd.length < 8) {
@@ -44,19 +42,7 @@ export default function SignUp() {
     return input.trim().replace(/[<>\"\'\\]/g, '');
   };
 
-  const verifyAndLogin = async (usernameToLogin: string): Promise<any> => {
-    try {
-      const res = await login(usernameToLogin, password, email, firstname, lastname, city);
-      return res;
-    } catch (loginErr: any) {
-      if (IS_DEV) console.warn("verifyAndLogin failed:", loginErr.message);
-      return null;
-    }
-  };
-
   const handleSignup = async () => {
-    setValidationError(null);
-
     const cleanFirstname = sanitizeInput(firstname);
     const cleanLastname = sanitizeInput(lastname);
     const cleanEmail = sanitizeInput(email).toLowerCase();
@@ -68,7 +54,7 @@ export default function SignUp() {
     }
 
     if (!policyAccepted) {
-      Alert.alert("Politique de confidentialité", "Veuillez accepter les conditions d&apos;utilisation avant de continuer.");
+      Alert.alert("Politique de confidentialité", "Veuillez accepter les conditions d'utilisation avant de continuer.");
       return;
     }
 
@@ -87,56 +73,86 @@ export default function SignUp() {
     const generatedUsername = `${cleanFirstname.toLowerCase().replace(/[^a-z0-9]/g, '')}_${cleanLastname.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
 
     if (generatedUsername.length < 3) {
-      Alert.alert("Erreur", "Le nom d&apos;utilisateur généré est trop court. Veuillez utiliser un nom et prénom plus longs.");
+      Alert.alert("Erreur", "Le nom d'utilisateur généré est trop court. Veuillez utiliser un nom et prénom plus longs.");
       return;
     }
 
     setIsProcessing(true);
-    let signupRes: any = null;
     try {
+      await signup({ username: generatedUsername, email: cleanEmail, password, firstname: cleanFirstname, lastname: cleanLastname, city: cleanCity });
+      
+      const userData = {
+        id: 0,
+        username: generatedUsername,
+        email: cleanEmail,
+        firstname: cleanFirstname,
+        lastname: cleanLastname,
+        fullname: `${cleanFirstname} ${cleanLastname}`,
+        ipelan_xp: 0,
+        coins: 0,
+        streak: 0,
+        avatar: "",
+        token: ""
+      };
+
       try {
-        signupRes = await signup({ username: generatedUsername, email: cleanEmail, password, firstname: cleanFirstname, lastname: cleanLastname, city: cleanCity });
-      } catch (signupErr: any) {
-        const errMsg = signupErr.message || "";
-        if (errMsg.toLowerCase().includes("exist") || errMsg.toLowerCase().includes("already")) {
-          Alert.alert(
-            "Compte existant",
-            "Cette adresse email ou ce nom d&apos;utilisateur est déjà enregistré. Veuillez vous connecter.",
-            [
-              { text: "Se connecter", onPress: () => router.replace("/(auth)/login") },
-              { text: "Annuler", style: "cancel" }
-            ]
-          );
-          return;
+        await saveUserData(userData);
+      } catch (storageErr) {
+        if (IS_DEV) console.warn("[Signup] Failed to save user data to AsyncStorage:", storageErr);
+      }
+
+      try {
+        const db = await getDBConnection();
+        if (db) {
+          await createTables(db);
+          await saveUser(db, {
+            id: 0,
+            username: generatedUsername,
+            email: cleanEmail,
+            fullname: `${cleanFirstname} ${cleanLastname}`,
+            ipelan_xp: 0,
+            coins: 0,
+            streak: 0,
+            token: ""
+          } as any);
         }
-
-        Alert.alert("Erreur", "Impossible de créer le compte. Veuillez réessayer plus tard.");
-        return; 
+      } catch (dbErr) {
+        if (IS_DEV) console.warn("[Signup] Failed to save user data to SQLite:", dbErr);
       }
 
-      const userId = signupRes?.[0]?.id || signupRes?.id || 0;
-      if (!userId) {
-        throw new Error("Moodle returned no User ID after signup");
-      }
-
-      const loginRes = await verifyAndLogin(generatedUsername);
-
-      if (!loginRes || !loginRes.user) {
+      Alert.alert(
+        "Compte créé!",
+        `Bienvenue ${cleanFirstname}!\n\n` +
+        `Un email de confirmation a été envoyé à:\n${cleanEmail}\n\n` +
+        `Cliquez sur le lien dans l'email pour activer votre compte.`,
+        [
+          {
+            text: "Ouvrir l'app email",
+            onPress: () => Linking.openURL(`mailto:${cleanEmail}`)
+          },
+          {
+            text: "Se connecter",
+            onPress: () => router.replace("/(auth)/login"),
+            style: "default"
+          }
+        ]
+      );
+      return;
+    } catch (signupErr: any) {
+      const errMsg = signupErr.message || "";
+      if (errMsg.toLowerCase().includes("exist") || errMsg.toLowerCase().includes("already") || errMsg.toLowerCase().includes("déjà")) {
         Alert.alert(
-          "Compte créé", 
-          "Votre compte a été créé. La connexion automatique a échoué. Veuillez vous connecter manuellement.",
+          "Compte existant",
+          "Cette adresse email ou ce nom d'utilisateur est déjà enregistré. Veuillez vous connecter.",
           [
-            { text: "Se connecter", onPress: () => router.replace("/(auth)/login") }
+            { text: "Se connecter", onPress: () => router.replace("/(auth)/login") },
+            { text: "Annuler", style: "cancel" }
           ]
         );
         return;
       }
 
-      router.replace("/(tabs)/(home)" as any);
-
-    } catch (error: any) {
-      if (IS_DEV) console.error("Signup error:", error.message);
-      Alert.alert("Erreur", "Une erreur inattendue s&apos;est produite. Veuillez réessayer.");
+      Alert.alert("Erreur", signupErr.message || "Impossible de créer le compte. Veuillez réessayer plus tard.");
     } finally {
       setIsProcessing(false);
     }
@@ -159,7 +175,7 @@ export default function SignUp() {
               <TextInput
                 value={lastname}
                 className="flex-1 h-full"
-                placeholder="Nom de famille"
+                placeholder="Nom"
                 autoCapitalize="words"
                 onChangeText={setLastname}
               />

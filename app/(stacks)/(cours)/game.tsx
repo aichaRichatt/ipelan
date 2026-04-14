@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import React, { useState } from "react";
 import { Pressable, Text, View, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 
 interface Sentence {
   id: number;
@@ -18,6 +18,7 @@ const SENTENCES: Sentence[] = [
 
 export default function GameScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ moduleId?: string; moduleTitle?: string; courseId?: string }>();
   const [currentSentenceIndex, setCurrentSentenceIndex] = useState(0);
   const [placedWords, setPlacedWords] = useState<string[]>([]);
   const [availableWords, setAvailableWords] = useState<string[]>([]);
@@ -28,6 +29,11 @@ export default function GameScreen() {
   const [isCorrect, setIsCorrect] = useState(false);
 
   const sentence = SENTENCES[currentSentenceIndex];
+
+  const handleContinue = () => {
+    const resultParams = `?activity=Ordre+des+mots&score=${score}&total=${SENTENCES.length}&xp=${score * 25}&moduleId=${params.moduleId || ''}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Exercice')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
+    router.push(`/(stacks)/(cours)/result${resultParams}` as any);
+  };
 
   React.useEffect(() => {
     initSentence();
@@ -121,10 +127,10 @@ export default function GameScreen() {
 
               <View className="flex-row w-full">
                 <Pressable
-                  onPress={() => router.back()}
+                  onPress={handleContinue}
                   className="flex-1 bg-gray-200 py-4 rounded-xl mr-2"
                 >
-                  <Text className="text-gray-700 font-bold text-center">Retour</Text>
+                  <Text className="text-gray-700 font-bold text-center">Continuer</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => {

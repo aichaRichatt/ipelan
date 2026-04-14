@@ -1,13 +1,9 @@
-import { Stack, useRouter } from "expo-router";
-import React, { useEffect } from "react";
-import { useLogin } from "../../hooks/useLogin";
+import { Stack } from "expo-router";
+import React from "react";
+
 
 export default function AuthLayout() {
-  const { user, token } = useLogin();
-  const router = useRouter();
-
- 
-
+  
   return (
     <Stack>
       <Stack.Screen 

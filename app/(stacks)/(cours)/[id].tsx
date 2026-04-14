@@ -4,8 +4,8 @@ import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-nati
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "react-redux";
-import { RootState } from "@/services/redux/store";
-import { getCourseContents } from "@/services/api/courseService";
+import { RootState } from "../../../services/redux/store";
+import { getCourseContents } from "../../../services/api/courseService";
 
 interface Lesson {
   id: number;
@@ -149,15 +149,23 @@ export default function ModuleDetailScreen() {
   const handleLessonPress = (lesson: Lesson) => {
     if (lesson.isLocked) return;
     
+    const params = `?moduleId=${lesson.id}&moduleTitle=${encodeURIComponent(lesson.title)}&courseId=${moduleData.id}`;
+    
     if (lesson.type === "quiz") {
-      router.push("/(quiz)/index" as any);
+      router.push(`/(quiz)/index${params}` as any);
     } else if (lesson.type === "exercise") {
-      router.push("/(stacks)/(cours)/association" as any);
+      router.push(`/(stacks)/(cours)/association${params}` as any);
     } else if (lesson.type === "audio") {
-      router.push("/(stacks)/(cours)/listening" as any);
+      router.push(`/(stacks)/(cours)/listening${params}` as any);
     } else if (lesson.type === "game") {
-      router.push("/(stacks)/(cours)/game" as any);
+      router.push(`/(stacks)/(cours)/game${params}` as any);
+    } else if (lesson.type === "reading") {
+      router.push(`/(stacks)/(cours)/lesson/${lesson.id}?courseId=${moduleData.id}` as any);
     }
+  };
+
+  const handleViewTimeline = () => {
+    router.push(`/(stacks)/(cours)/learning-path?courseId=${moduleData.id}&courseTitle=${encodeURIComponent(moduleData.title)}` as any);
   };
 
   return (
@@ -205,6 +213,14 @@ export default function ModuleDetailScreen() {
                 {moduleData.completedLessons}/{moduleData.totalLessons} leçons complétées
               </Text>
             </View>
+            
+            <Pressable
+              onPress={handleViewTimeline}
+              className="mt-4 bg-white/10 rounded-xl p-3 flex-row items-center justify-center"
+            >
+              <Feather name="git-branch" size={18} color="white" className="mr-2" />
+              <Text className="text-white font-medium">Voir le parcours d&apos;apprentissage</Text>
+            </Pressable>
           </View>
         </View>
 

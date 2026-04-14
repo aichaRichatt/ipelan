@@ -368,7 +368,7 @@ export default function LessonScreen() {
   };
 
   const handleContinue = () => {
-    router.push("/(quiz)" as any);
+    router.back();
   };
 
   if (isLoading) {

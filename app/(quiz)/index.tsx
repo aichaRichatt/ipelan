@@ -2,7 +2,7 @@ import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import React, { useState, useEffect } from "react";
 import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { audioService } from "../../services/audio/audioService";
 import { useSelector } from "react-redux";
 import { RootState } from "../../services/redux/store";
@@ -19,6 +19,7 @@ interface QuizQuestion {
 
 export default function QuizScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ moduleId?: string; moduleTitle?: string; courseId?: string }>();
   const token = useSelector((state: RootState) => state.auth.token);
   
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
@@ -89,32 +90,40 @@ export default function QuizScreen() {
       usedCourses.add(course.fullname);
       const template = questionTemplates[idx % questionTemplates.length];
       const q = template.template(course.fullname);
+      const { options, newCorrectIndex } = shuffleOptions(q.options, q.correct);
       
       questions.push({
         id: questions.length + 1,
         type: template.type,
         question: q.question,
-        options: shuffleOptions(q.options, q.correct),
-        correctIndex: 0,
+        options,
+        correctIndex: newCorrectIndex,
       });
     });
 
     return questions.length > 0 ? questions : generateDefaultQuestions();
   };
 
-  const generateDefaultQuestions = (): QuizQuestion[] => [
-    { id: 1, type: "text-mcq", question: "Quel niveau as-tu choisi?", options: ["Fondamental", "Intermédiaire", "Avancé", "Tous"], correctIndex: 0 },
-    { id: 2, type: "text-mcq", question: "Quelle langue souhaites-tu apprendre?", options: ["Pulaar", "Soninké", "Wolof", "Toutes"], correctIndex: 0 },
-    { id: 3, type: "text-mcq", question: "Comment évalues-tu ton niveau?", options: ["Débutant", "Intermédiaire", "Avancé", "Expert"], correctIndex: 0 },
-    { id: 4, type: "text-mcq", question: "Quelle activité préfères-tu?", options: ["Lecture", "Quiz", "Audio", "Exercices"], correctIndex: 0 },
-    { id: 5, type: "text-mcq", question: "Quel est ton objectif?", options: ["Vocabulaire", "Grammaire", "Conversation", "Tous"], correctIndex: 3 },
-  ];
+  const generateDefaultQuestions = (): QuizQuestion[] => {
+    const defaultQ = [
+      { id: 1, question: "Quel niveau as-tu choisi?", options: ["Fondamental", "Intermédiaire", "Avancé", "Tous"], correct: 0 },
+      { id: 2, question: "Quelle langue souhaites-tu apprendre?", options: ["Pulaar", "Soninké", "Wolof", "Toutes"], correct: 0 },
+      { id: 3, question: "Comment évalues-tu ton niveau?", options: ["Débutant", "Intermédiaire", "Avancé", "Expert"], correct: 0 },
+      { id: 4, question: "Quelle activité préfères-tu?", options: ["Lecture", "Quiz", "Audio", "Exercices"], correct: 0 },
+      { id: 5, question: "Quel est ton objectif?", options: ["Vocabulaire", "Grammaire", "Conversation", "Tous"], correct: 3 },
+    ];
+    
+    return defaultQ.map(q => {
+      const { options, newCorrectIndex } = shuffleOptions(q.options, q.correct);
+      return { id: q.id, type: "text-mcq" as const, question: q.question, options, correctIndex: newCorrectIndex };
+    });
+  };
 
-  const shuffleOptions = (options: string[], correctIdx: number): string[] => {
+  const shuffleOptions = (options: string[], correctIdx: number): { options: string[]; newCorrectIndex: number } => {
     const correctAnswer = options[correctIdx];
     const shuffled = [...options].sort(() => Math.random() - 0.5);
-    const newCorrectIdx = shuffled.indexOf(correctAnswer);
-    return shuffled;
+    const newCorrectIndex = shuffled.indexOf(correctAnswer);
+    return { options: shuffled, newCorrectIndex };
   };
 
   useEffect(() => {
@@ -234,10 +243,13 @@ export default function QuizScreen() {
 
               <View className="flex-row w-full">
                 <Pressable
-                  onPress={() => router.back()}
+                  onPress={() => {
+                    const resultParams = `?activity=Quiz&score=${score}&total=${questions.length}&xp=${score * 20}&moduleId=${params.moduleId || ''}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Quiz')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
+                    router.push(`/(stacks)/(cours)/result${resultParams}` as any);
+                  }}
                   className="flex-1 bg-gray-200 py-4 rounded-xl mr-2"
                 >
-                  <Text className="text-gray-700 font-bold text-center">Retour</Text>
+                  <Text className="text-gray-700 font-bold text-center">Continuer</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => {

@@ -42,15 +42,23 @@ async function moodleFetch(endpoint: string, params: Record<string, any>, method
   const data = await response.json();
   
   if (data.exception) {
-    throw new Error(data.message || "API Exception");
+    const msg = data.message || "";
+    if (msg.includes("لم تكتمل") || msg.includes("setup") || msg.includes("complete")) {
+      throw new Error("Votre compte n'est pas encore actif. Veuillez confirmer votre email ou contacter l'administrateur.");
+    }
+    throw new Error(data.message || "Erreur serveur");
   }
   
   if (data.error) {
+    const errMsg = data.error.toString();
+    if (errMsg.includes("401") || errMsg.includes("invalid")) {
+      throw new Error("Identifiants incorrects");
+    }
     throw new Error(data.error);
   }
   
   if (!data || (Array.isArray(data) && data.length < 1)) {
-    throw new Error("No data returned from API. Check Moodle configuration.");
+    throw new Error("Aucune donnée reçue du serveur");
   }
   return data;
 }
@@ -58,14 +66,44 @@ async function moodleFetch(endpoint: string, params: Record<string, any>, method
 export async function login(username: string, password: string) {
   if (IS_DEV) console.log("[moodleAuth.login] Starting login for:", username);
   
+  let loginUsername = username;
+  
+  if (username.includes("@")) {
+    if (IS_DEV) console.log("[moodleAuth.login] Email detected, finding username...");
+    
+    try {
+      const adminToken = process.env.EXPO_PUBLIC_MOODLE_TOKEN;
+      if (adminToken) {
+        const usersByEmail = await moodleFetch("/webservice/rest/server.php", {
+          wstoken: adminToken,
+          wsfunction: "core_user_get_users_by_field",
+          field: "email",
+          values: [username],
+          moodlewsrestformat: "json",
+        }, "POST");
+        
+        const userArray = usersByEmail?.users || usersByEmail;
+        if (userArray && userArray.length > 0 && userArray[0]?.username) {
+          loginUsername = userArray[0].username;
+          if (IS_DEV) console.log("[moodleAuth.login] Found username:", loginUsername);
+        } else {
+          throw new Error("Aucun compte trouvé avec cette adresse email");
+        }
+      }
+    } catch (emailErr: any) {
+      if (IS_DEV) console.warn("[moodleAuth.login] Email lookup failed:", emailErr.message);
+      throw new Error("Aucun compte trouvé avec cette adresse email");
+    }
+  }
+  
   const result = await moodleFetch("/login/token.php", {
-    username,
+    username: loginUsername,
     password,
     service: "ipelan_full", 
   });
   
   if (!result?.token) {
-    throw new Error("Login failed: no token");
+    throw new Error("Identifiants incorrects");
   }
   
   if (IS_DEV) console.log("[moodleAuth.login] Login successful");

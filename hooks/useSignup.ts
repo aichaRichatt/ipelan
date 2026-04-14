@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { signUp as moodleSignUp } from '../services/api/moodleAuth';
 import { SignupForm } from '../types';
 
+const IS_DEV = process.env.NODE_ENV === "development";
+
 export function useSignup() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -17,7 +19,7 @@ export function useSignup() {
     try {
       const result = await moodleSignUp({ username, email, password, firstname, lastname, city });
       
-      console.log("Signup API response:", JSON.stringify(result));
+      if (IS_DEV) console.log("Signup API response:", JSON.stringify(result));
       
       if (result && result.success === true) {
         setSuccess(true);
@@ -27,7 +29,12 @@ export function useSignup() {
       if (result && Array.isArray(result) && result.length > 0) {
         setSuccess(true);
         return result[0];
-      } 
+      }
+
+      if (result && result.success === false) {
+        const warningMsg = result.warnings?.[0]?.message || "Inscription impossible";
+        throw new Error(warningMsg);
+      }
 
       throw new Error(result?.error || result?.message || "Failed to create user");
     } catch (err: any) {

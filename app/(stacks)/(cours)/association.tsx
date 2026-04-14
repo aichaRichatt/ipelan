@@ -2,7 +2,7 @@ import { AntDesign, Feather } from "@expo/vector-icons";
 import React, { useState } from "react";
 import { Pressable, Text, View, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 
 interface MatchItem {
   id: number;
@@ -21,12 +21,18 @@ const MATCH_ITEMS: MatchItem[] = [
 
 export default function AssociationScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ moduleId?: string; moduleTitle?: string; courseId?: string }>();
   const [selectedWord, setSelectedWord] = useState<MatchItem | null>(null);
   const [selectedTranslation, setSelectedTranslation] = useState<MatchItem | null>(null);
   const [matched, setMatched] = useState<number[]>([]);
   const [score, setScore] = useState(0);
   const [attempts, setAttempts] = useState(0);
   const [showResult, setShowResult] = useState(false);
+
+  const handleContinue = () => {
+    const resultParams = `?activity=Association&score=${score}&total=${totalPairs}&xp=${score * 20}&moduleId=${params.moduleId || ''}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Exercice')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
+    router.push(`/(stacks)/(cours)/result${resultParams}` as any);
+  };
 
   const shuffledTranslations = [...MATCH_ITEMS].sort(() => Math.random() - 0.5);
   const totalPairs = MATCH_ITEMS.length;
@@ -108,10 +114,10 @@ export default function AssociationScreen() {
 
               <View className="flex-row w-full">
                 <Pressable
-                  onPress={() => router.back()}
+                  onPress={handleContinue}
                   className="flex-1 bg-gray-200 py-4 rounded-xl mr-2"
                 >
-                  <Text className="text-gray-700 font-bold text-center">Retour</Text>
+                  <Text className="text-gray-700 font-bold text-center">Continuer</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => {

@@ -19,9 +19,28 @@ export default function Login() {
   const handleLogin = async () => {
     if (validateAll(username, password)) {
       try {
-         await login(username, password, username, "Ip", "User", "Nktt");
+         await login(username, password);
       } catch (err: any) {
-        Alert.alert("Erreur de connexion", err.message);
+        const errMsg = err.message || "";
+        const isInvalidLogin = 
+          errMsg.toLowerCase().includes("invalid") || 
+          errMsg.toLowerCase().includes("incorrect") ||
+          errMsg.toLowerCase().includes("wrong") ||
+          errMsg.toLowerCase().includes("failed") ||
+          errMsg.toLowerCase().includes("error");
+        
+        if (isInvalidLogin) {
+          Alert.alert(
+            "Compte introuvable",
+            "Ce compte n'existe pas. Veuillez créer un compte pour vous connecter.",
+            [
+              { text: "S'inscrire", onPress: () => router.replace("/(auth)/signup") },
+              { text: "Réessayer", style: "cancel" }
+            ]
+          );
+        } else {
+          Alert.alert("Erreur de connexion", err.message);
+        }
       }
     }
   };

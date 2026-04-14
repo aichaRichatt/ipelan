@@ -1,8 +1,8 @@
-import { AntDesign, Feather } from "@expo/vector-icons";
+import { Feather } from "@expo/vector-icons";
 import React, { useState, useEffect } from "react";
 import { Pressable, Text, TextInput, View, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { audioService } from "../../../services/audio/audioService";
 
 interface DictationWord {
@@ -21,13 +21,18 @@ const DICTATION_WORDS: DictationWord[] = [
 
 export default function DictationScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{
+    moduleId?: string;
+    moduleTitle?: string;
+    courseId?: string;
+    returnRoute?: string;
+  }>();
   const [currentWordIndex, setCurrentWordIndex] = useState(0);
   const [userInput, setUserInput] = useState("");
   const [score, setScore] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [showResult, setShowResult] = useState(false);
-  const [answers, setAnswers] = useState<{ word: string; correct: boolean }[]>([]);
   const [currentAnswer, setCurrentAnswer] = useState<boolean | null>(null);
+  const [answers, setAnswers] = useState<{ word: string; correct: boolean }[]>([]);
 
   const currentWord = DICTATION_WORDS[currentWordIndex];
   const progress = ((currentWordIndex + 1) / DICTATION_WORDS.length) * 100;
@@ -43,7 +48,7 @@ export default function DictationScreen() {
     try {
       await audioService.playAndAutoStop(2000);
       setIsPlaying(false);
-    } catch (error) {
+    } catch {
       setIsPlaying(false);
     }
   };
@@ -64,97 +69,30 @@ export default function DictationScreen() {
         setUserInput("");
         setCurrentAnswer(null);
       } else {
-        setShowResult(true);
+        navigateToResult();
       }
     }, 1500);
   };
 
-  const getScoreEmoji = () => {
-    const percentage = (score / DICTATION_WORDS.length) * 100;
-    if (percentage === 100) return "🏆";
-    if (percentage >= 80) return "🌟";
-    if (percentage >= 60) return "👏";
-    if (percentage >= 40) return "💪";
-    return "📚";
-  };
-
-  if (showResult) {
-    const percentage = Math.round((score / DICTATION_WORDS.length) * 100);
+  const navigateToResult = () => {
+    const totalQuestions = DICTATION_WORDS.length;
+    const earnedXp = score * 20;
+    const returnRoute = params.returnRoute || `/(stacks)/(cours)/${params.courseId}`;
     
-    return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top', 'bottom']}>
-        <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 120 }}>
-          <View className="flex-1 items-center justify-center px-5 py-10">
-            <View className="bg-white rounded-3xl p-8 items-center shadow-lg w-full max-w-sm">
-              <Text className="text-6xl mb-4">{getScoreEmoji()}</Text>
-              <Text className="text-2xl font-bold text-gray-900 mb-2 text-center">
-                {percentage >= 60 ? "Bravo !" : "Continue tes efforts !"}
-              </Text>
-              <Text className="text-gray-500 text-center mb-6">
-                Tu as obtenu {score} bonnes réponses sur {DICTATION_WORDS.length}
-              </Text>
-              
-              <View className="w-32 h-32 rounded-full border-8 mb-6 items-center justify-center"
-                style={{ 
-                  borderColor: percentage >= 60 ? '#10B981' : '#EF4444',
-                  backgroundColor: `${percentage >= 60 ? '#10B981' : '#EF4444'}10`
-                }}
-              >
-                <Text className="text-4xl font-black" style={{ color: percentage >= 60 ? '#10B981' : '#EF4444' }}>
-                  {percentage}%
-                </Text>
-              </View>
-
-              <View className="bg-yellow-50 rounded-xl px-6 py-3 mb-6 flex-row items-center">
-                <Text className="text-xl mr-2">⭐</Text>
-                <Text className="text-yellow-700 font-bold text-lg">+{score * 20} XP gagnés</Text>
-              </View>
-
-              <View className="w-full mb-4">
-                <Text className="font-bold text-gray-700 mb-3">Tes réponses :</Text>
-                {answers.map((answer, index) => (
-                  <View key={index} className="flex-row items-center py-2">
-                    <View className={`w-6 h-6 rounded-full items-center justify-center mr-3 ${
-                      answer.correct ? 'bg-green-100' : 'bg-red-100'
-                    }`}>
-                      <Feather 
-                        name={answer.correct ? "check" : "x"} 
-                        size={14} 
-                        color={answer.correct ? "#10B981" : "#EF4444"} 
-                      />
-                    </View>
-                    <Text className="text-gray-600 text-sm">{answer.word}</Text>
-                  </View>
-                ))}
-              </View>
-
-              <View className="flex-row w-full">
-                <Pressable
-                  onPress={() => router.back()}
-                  className="flex-1 bg-gray-200 py-4 rounded-xl mr-2"
-                >
-                  <Text className="text-gray-700 font-bold text-center">Retour</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    setCurrentWordIndex(0);
-                    setScore(0);
-                    setAnswers([]);
-                    setUserInput("");
-                    setShowResult(false);
-                    setCurrentAnswer(null);
-                  }}
-                  className="flex-1 bg-[#4a90e2] py-4 rounded-xl ml-2"
-                >
-                  <Text className="text-white font-bold text-center">Recommencer</Text>
-                </Pressable>
-              </View>
-            </View>
-          </View>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
+    router.push({
+      pathname: "/(stacks)/(cours)/result",
+      params: {
+        activity: "Dictée audio",
+        score: score.toString(),
+        total: totalQuestions.toString(),
+        xp: earnedXp.toString(),
+        courseId: params.courseId || '',
+        moduleId: params.moduleId || '',
+        moduleTitle: params.moduleTitle || '',
+        returnRoute: encodeURIComponent(returnRoute),
+      }
+    } as any);
+  };
 
   return (
     <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>

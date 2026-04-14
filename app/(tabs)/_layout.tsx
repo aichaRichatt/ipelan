@@ -1,8 +1,18 @@
-import { Tabs } from "expo-router";
+import { Tabs, useRouter } from "expo-router";
+import React, { useEffect } from "react";
 import { AntDesign, Feather } from "@expo/vector-icons";
-import React from "react";
+import { useLogin } from "../../hooks/useLogin";
 
 export default function TabsLayout() {
+  const { token, user } = useLogin();
+  const router = useRouter();
+  
+  useEffect(() => {
+    if (!token) {
+      router.push('/(auth)/login');
+    }
+  }, [token, router]);
+  
   return (
     <Tabs screenOptions={{ 
       tabBarActiveTintColor: '#FF6B00', 

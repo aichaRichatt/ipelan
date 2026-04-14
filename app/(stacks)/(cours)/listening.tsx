@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import React, { useState, useEffect } from "react";
 import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { audioService } from "../../../services/audio/audioService";
 import { useSelector } from "react-redux";
 import { RootState } from "@/services/redux/store";
@@ -18,6 +18,7 @@ interface ListeningExercise {
 
 export default function ListeningScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ moduleId?: string; moduleTitle?: string; courseId?: string }>();
   const token = useSelector((state: RootState) => state.auth.token);
   
   const [exercises, setExercises] = useState<ListeningExercise[]>([]);
@@ -27,6 +28,11 @@ export default function ListeningScreen() {
   const [answers, setAnswers] = useState<boolean[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [showResult, setShowResult] = useState(false);
+
+  const handleContinue = () => {
+    const resultParams = `?activity=Listening&score=${score}&total=${exercises.length}&xp=${score * 15}&moduleId=${params.moduleId || ''}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Exercice')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
+    router.push(`/(stacks)/(cours)/result${resultParams}` as any);
+  };
 
   useEffect(() => {
     const fetchListeningData = async () => {
@@ -182,10 +188,10 @@ export default function ListeningScreen() {
 
               <View className="flex-row w-full">
                 <Pressable
-                  onPress={() => router.back()}
+                  onPress={handleContinue}
                   className="flex-1 bg-gray-200 py-4 rounded-xl mr-2"
                 >
-                  <Text className="text-gray-700 font-bold text-center">Retour</Text>
+                  <Text className="text-gray-700 font-bold text-center">Continuer</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => {

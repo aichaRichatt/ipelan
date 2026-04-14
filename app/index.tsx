@@ -64,10 +64,10 @@ export default function Index() {
       console.log("[Index] authRestored:", authRestored, "hasToken:", hasToken, "isAuthenticated:", isAuthenticated);
       
       if (hasToken && isAuthenticated) {
-        console.log("[Index] ✅ Valid token and authenticated, going to home");
+        console.log("[Index]  Valid token and authenticated, going to home");
         router.replace("/(tabs)/(home)");
       } else {
-        console.log("[Index] ❌ Not authenticated, going to onboarding");
+        console.log("[Index]  Not authenticated, going to onboarding");
         router.replace("/(auth)/onboarding");
       }
       

@@ -38,8 +38,8 @@ export const createTables = async (db: SQLiteDatabase) => {
         id INTEGER PRIMARY KEY,
         username TEXT NOT NULL,
         email TEXT NOT NULL,
-        firstname TEXT,
-        lastname TEXT,
+        firstname TEXT DEFAULT '',
+        lastname TEXT DEFAULT '',
         fullname TEXT NOT NULL,
         ipelan_xp INTEGER DEFAULT 0,
         coins INTEGER DEFAULT 0,
@@ -107,15 +107,6 @@ export const createTables = async (db: SQLiteDatabase) => {
         license TEXT
     );
   `);
-
-   try {
-    await db.execAsync(`ALTER TABLE users ADD COLUMN firstname TEXT;`);
-  } catch (e) {
-   }
-  try {
-    await db.execAsync(`ALTER TABLE users ADD COLUMN lastname TEXT;`);
-  } catch (e) {
-   }
 };
 
 export const saveUser = async (db: SQLiteDatabase, user: UserDB) => {

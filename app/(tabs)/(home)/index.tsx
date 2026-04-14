@@ -1,9 +1,8 @@
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React from "react";
 import { Pressable, ScrollView, Text, View, Image, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useLogin } from "../../../hooks/useLogin";
 import { useMoodleCourses } from "../../../hooks/useMoodleCourses";
 import { useSelector } from "react-redux";
 import { RootState } from "../../../services/redux/store";
@@ -48,11 +47,12 @@ const getIconComponent = (iconName: string, size: number, color: string) => {
 const DefaultProfileImage = require('../../../assets/images/defaultprofile.png');
 
 export default function HomeScreen() {
-  const { user: loggedUser, token } = useLogin();
+  const reduxUser = useSelector((state: RootState) => state.auth.user);
   const reduxToken = useSelector((state: RootState) => state.auth.token);
   const router = useRouter();
   
-  const activeToken = token || reduxToken || "";
+  const loggedUser = reduxUser;
+  const activeToken = reduxToken || "";
   
   const { courses, isLoading, error } = useMoodleCourses(activeToken);
 

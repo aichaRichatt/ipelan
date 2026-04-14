@@ -1,10 +1,10 @@
 import { Feather } from "@expo/vector-icons";
 import React, { useState } from "react";
-import { Pressable, Text, View, StyleSheet } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Grade } from "@/types";
+import { Grade } from "../../types";
 
 interface GradeOption {
   value: Grade;
