@@ -3,6 +3,7 @@ import { downloadService } from '../sync/downloadService';
 import { unzipEPUB, findFirstHtml, findFileInFolder, getEPUBBasePath } from './unzipService';
 import { findOPFPath, parseOPFLite, getChapterPath, ParsedOPF } from './epubParserLite';
 import { resolveChapterPath } from './pathResolver';
+import { injectAbsolutePaths, wrapHTMLForEPUB, processEPUBChapter } from './epubPathHelper';
 
 export interface EPUBChapter {
   id: string;
@@ -458,60 +459,7 @@ class EPUBService {
   }
 
   generateHTMLWithContent(htmlContent: string, opfDir: string): string {
-    const baseUrl = `file://${opfDir}/`;
-    
-    return `
-      <!DOCTYPE html>
-      <html lang="fr">
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <base href="${baseUrl}">
-        <style>
-          * { box-sizing: border-box; margin: 0; padding: 0; }
-          body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            font-size: 18px;
-            line-height: 1.6;
-            color: #1F2937;
-            background-color: #FAF9F6;
-            padding: 20px;
-            padding-bottom: 100px;
-            -webkit-font-smoothing: antialiased;
-          }
-          img { max-width: 100%; height: auto; display: block; margin: 16px auto; }
-          audio { width: 100%; margin: 16px 0; }
-          h1, h2, h3 { color: #002366; margin: 16px 0 8px 0; }
-          p { margin-bottom: 12px; }
-          a { color: #4a90e2; }
-        </style>
-        <script>
-          window.addEventListener('scroll', () => {
-            const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
-            const scrolled = scrollHeight > 0 ? (window.scrollY / scrollHeight) * 100 : 0;
-            window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
-              type: 'scrollProgress',
-              progress: scrolled
-            }));
-          });
-          function playAudio(wordId) {
-            window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
-              type: 'playAudio',
-              wordId: wordId
-            }));
-          }
-          document.addEventListener('DOMContentLoaded', () => {
-            window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
-              type: 'pageReady'
-            }));
-          });
-        </script>
-      </head>
-      <body>
-        ${htmlContent}
-      </body>
-      </html>
-    `;
+    return processEPUBChapter(htmlContent, opfDir);
   }
 
   async clearCache(): Promise<void> {

@@ -1,6 +1,7 @@
 import { cleanAndAuthUrl } from "@/services/urlAuth";
+import { injectAbsolutePaths, wrapHTMLForEPUB } from "@/services/epub/epubPathHelper";
 import { Feather, Ionicons } from "@expo/vector-icons";
-import { Audio, Video } from "expo-av";
+import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import {
   deleteAsync,
   documentDirectory,
@@ -8,7 +9,7 @@ import {
   readAsStringAsync,
 } from "expo-file-system/legacy";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState, useRef } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -70,10 +71,10 @@ export default function UnifiedContentViewer() {
   const [pdfLocalPath, setPdfLocalPath] = useState<string | null>(null);
   const [pdfBase64, setPdfBase64] = useState<string | null>(null);
   const [epubData, setEpubData] = useState<string | null>(null);
-  const [sound, setSound] = useState<Audio.Sound | null>(null);
+  const [audioPlayer, setAudioPlayer] = useState<ReturnType<typeof useAudioPlayer> | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [position, setPosition] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
 
   const detectContentType = useCallback(
     (filename: string, mimeType?: string, url?: string): ContentType => {
@@ -263,7 +264,7 @@ export default function UnifiedContentViewer() {
             break;
 
           case "epub":
-            setError("Format EPUB non encore supporté dans cette vue.");
+            await downloadAndParseEpub(targetUrl);
             break;
 
           default:
@@ -328,60 +329,110 @@ export default function UnifiedContentViewer() {
     }
   };
 
-  useEffect(() => {
-    let isMounted = true;
+  const epubDataRef = useRef<{ bookId: number; currentChapter: number; totalChapters: number; localPath: string } | null>(null);
+  const [epubLocalPath, setEpubLocalPath] = useState<string | null>(null);
 
-    if (audioUri) {
-      const loadAudio = async () => {
-        try {
-          await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
-          const { sound: newSound } = await Audio.Sound.createAsync(
-            { uri: audioUri },
-            { shouldPlay: false },
-            (status) => {
-              if (status.isLoaded && isMounted) {
-                setPosition(status.positionMillis);
-                setDuration(status.durationMillis || 0);
-                setIsPlaying(status.isPlaying);
-              }
-            },
-          );
-          if (isMounted) setSound(newSound);
-        } catch (err) {
-          if (IS_DEV) console.error("[UnifiedViewer] Audio error:", err);
-        }
-      };
-      loadAudio();
+  const downloadAndParseEpub = async (url: string) => {
+    if (IS_DEV)
+      console.log("[UnifiedViewer] Loading EPUB:", url);
+    
+    try {
+      const epubLoader = await import('../../../../services/epub/epubLoader');
+      
+      const result = await epubLoader.loadEPUB(url, token || undefined, { removeAudio: true });
+      
+      if (IS_DEV) {
+        console.log("[UnifiedViewer] EPUB loaded:", result.parsed.title || 'Untitled');
+        console.log("[UnifiedViewer] Chapters:", result.chapters.length);
+        console.log("[UnifiedViewer] Offline:", result.isOffline);
+        console.log("[UnifiedViewer] Local path:", result.localPath);
+      }
+      
+      if (result.chapters.length > 0) {
+        const chapterContent = result.chapters[0].content;
+        const opfDir = result.parsed.opfDir;
+        const normalizedContent = injectAbsolutePaths(chapterContent, opfDir);
+        const wrappedHtml = wrapHTMLForEPUB(normalizedContent, opfDir);
+        
+        setHtmlContent(wrappedHtml);
+        setEpubLocalPath(result.localPath);
+        
+        epubDataRef.current = {
+          bookId: result.bookId,
+          currentChapter: 0,
+          totalChapters: result.chapters.length,
+          localPath: result.localPath,
+        };
+        
+        setEpubData(JSON.stringify({
+          bookId: result.bookId,
+          currentChapter: 0,
+          totalChapters: result.chapters.length,
+          title: result.parsed.title,
+          isOffline: result.isOffline,
+          localPath: result.localPath,
+          sourceUrl: url,
+        }));
+        
+        if (IS_DEV)
+          console.log("[UnifiedViewer] First chapter displayed from", result.isOffline ? "offline storage" : "new download");
+      } else {
+        setError("Aucun chapitre trouvé dans l'EPUB");
+      }
+      
+    } catch (err: any) {
+      if (IS_DEV)
+        console.error("[UnifiedViewer] EPUB error:", err);
+      setError(err.message || "Erreur lors du chargement de l'EPUB");
     }
+  };
 
+  useEffect(() => {
+    if (audioPlayer) {
+      const statusInterval = setInterval(() => {
+        setIsPlaying(audioPlayer.playing);
+        setPosition(audioPlayer.currentTime * 1000);
+        setAudioDuration(audioPlayer.duration * 1000);
+      }, 500);
+      return () => clearInterval(statusInterval);
+    }
+  }, [audioPlayer]);
+
+  useEffect(() => {
     return () => {
-      isMounted = false;
-      if (sound) sound.unloadAsync();
+      if (audioPlayer) {
+        audioPlayer.pause();
+        audioPlayer.remove();
+      }
     };
-  }, [audioUri, sound]);
+  }, [audioPlayer]);
 
   const togglePlayPause = async () => {
-    if (!sound) return;
+    if (!audioPlayer) return;
     try {
-      if (isPlaying) await sound.pauseAsync();
-      else await sound.playAsync();
+      if (isPlaying) {
+        audioPlayer.pause();
+      } else {
+        audioPlayer.play();
+      }
+      setIsPlaying(!isPlaying);
     } catch (err) {
       if (IS_DEV) console.error("[UnifiedViewer] Play/Pause error:", err);
     }
   };
 
   const restartAudio = async () => {
-    if (!sound) return;
+    if (!audioPlayer) return;
     try {
-      await sound.setPositionAsync(0);
-      await sound.playAsync();
+      await audioPlayer.seekTo(0);
+      audioPlayer.play();
     } catch (err) {
       if (IS_DEV) console.error("[UnifiedViewer] Restart error:", err);
     }
   };
 
-  const formatTime = (ms: number) => {
-    const s = Math.floor(ms / 1000);
+  const formatTime = (seconds: number) => {
+    const s = Math.floor(seconds);
     return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
   };
 
@@ -479,14 +530,31 @@ export default function UnifiedContentViewer() {
         );
 
       case "video":
+        const videoHtml = videoUri ? `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; }
+              video { width: 100%; max-height: 100vh; }
+            </style>
+          </head>
+          <body>
+            <video controls>
+              <source src="${videoUri}" type="video/mp4">
+            </video>
+          </body>
+          </html>
+        ` : '';
         return (
           <View className="flex-1 bg-black">
             {videoUri && (
-              <Video
-                source={{ uri: videoUri }}
+              <WebView
+                source={{ html: videoHtml }}
                 style={{ flex: 1 }}
-                useNativeControls={true}
-                shouldPlay={false}
+                javaScriptEnabled={true}
+                allowsFullscreenVideo={true}
               />
             )}
           </View>
@@ -616,20 +684,43 @@ export default function UnifiedContentViewer() {
         );
 
       case "epub":
+        if (htmlContent) {
+          const webViewBaseUrl = epubLocalPath ? `file://${epubLocalPath}/` : undefined;
+          if (IS_DEV && webViewBaseUrl) {
+            console.log("[UnifiedViewer] EPUB WebView baseUrl:", webViewBaseUrl);
+          }
+          return (
+            <View className="flex-1">
+              <WebView
+                source={{ html: htmlContent, baseUrl: webViewBaseUrl }}
+                style={{ flex: 1 }}
+                javaScriptEnabled={true}
+                domStorageEnabled={true}
+                originWhitelist={["*"]}
+                scalesPageToFit={true}
+                onMessage={handleWebViewMessage}
+                allowFileAccess={true}
+                allowUniversalAccessFromFileURLs={true}
+                allowFileAccessFromFileURLs={true}
+                mixedContentMode="always"
+              />
+            </View>
+          );
+        }
         return (
           <View className="flex-1 items-center justify-center px-5">
-            <Ionicons name="book" size={64} color="#4CAF50" />
+            <ActivityIndicator size="large" color="#002366" />
             <Text className="text-gray-700 font-bold mt-4 text-center">
               {detectedContent.filename}
             </Text>
             <Text className="text-gray-500 text-sm mt-2 text-center">
-              Ouvrez ce fichier depuis le lecteur EPUB
+              Chargement de l&apos;EPUB...
             </Text>
           </View>
         );
 
       case "audio":
-        const progress = duration > 0 ? (position / duration) * 100 : 0;
+        const progress = audioDuration > 0 ? (position / audioDuration) * 100 : 0;
         return (
           <View className="flex-1 items-center justify-center px-5 bg-[#FAF9F6]">
             <View className="w-48 h-48 rounded-full bg-gradient-to-br from-[#002366] to-[#4a90e2] items-center justify-center mb-12 shadow-xl">
@@ -651,10 +742,10 @@ export default function UnifiedContentViewer() {
               </View>
               <View className="flex-row justify-between">
                 <Text className="text-gray-500 text-xs">
-                  {formatTime(position)}
+                  {formatTime(position / 1000)}
                 </Text>
                 <Text className="text-gray-500 text-xs">
-                  {formatTime(duration)}
+                  {formatTime(audioDuration / 1000)}
                 </Text>
               </View>
             </View>

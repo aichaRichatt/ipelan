@@ -106,7 +106,109 @@ export const createTables = async (db: SQLiteDatabase) => {
         author TEXT,
         license TEXT
     );
+    CREATE TABLE IF NOT EXISTS epub_books(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        author TEXT,
+        source_url TEXT UNIQUE,
+        cover_path TEXT,
+        total_chapters INTEGER DEFAULT 0,
+        downloaded_at INTEGER,
+        last_read_at INTEGER,
+        last_chapter INTEGER DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS epub_chapters(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        book_id INTEGER,
+        chapter_index INTEGER,
+        chapter_title TEXT,
+        content TEXT,
+        FOREIGN KEY (book_id) REFERENCES epub_books(id) ON DELETE CASCADE
+    );
   `);
+};
+
+export interface EPUBBookDB {
+  id: number;
+  title: string;
+  author?: string;
+  source_url: string;
+  cover_path?: string;
+  total_chapters: number;
+  downloaded_at: number;
+  last_read_at?: number;
+  last_chapter: number;
+}
+
+export interface EPUBChapterDB {
+  id: number;
+  book_id: number;
+  chapter_index: number;
+  chapter_title?: string;
+  content: string;
+}
+
+export const saveEPUBBook = async (db: SQLiteDatabase, book: {
+  title: string;
+  author?: string;
+  source_url: string;
+  cover_path?: string;
+  total_chapters: number;
+  chapters: Array<{ index: number; title?: string; content: string }>;
+}): Promise<number> => {
+  await db.runAsync(`DELETE FROM epub_chapters WHERE book_id IN (SELECT id FROM epub_books WHERE source_url = ?)`, [book.source_url]);
+  await db.runAsync(`DELETE FROM epub_books WHERE source_url = ?`, [book.source_url]);
+
+  const now = Date.now();
+  const result = await db.runAsync(
+    `INSERT INTO epub_books(title, author, source_url, cover_path, total_chapters, downloaded_at, last_chapter) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [book.title, book.author || null, book.source_url, book.cover_path || null, book.total_chapters, now, 0]
+  );
+
+  const bookId = typeof result.lastInsertRowId === 'number' ? result.lastInsertRowId : 0;
+
+  for (const chapter of book.chapters) {
+    await db.runAsync(
+      `INSERT INTO epub_chapters(book_id, chapter_index, chapter_title, content) VALUES (?, ?, ?, ?)`,
+      [bookId, chapter.index, chapter.title || null, chapter.content]
+    );
+  }
+
+  return bookId;
+};
+
+export const getEPUBBook = async (db: SQLiteDatabase, sourceUrl: string): Promise<EPUBBookDB | null> => {
+  return await db.getFirstAsync<EPUBBookDB>(`SELECT * FROM epub_books WHERE source_url = ?`, [sourceUrl]);
+};
+
+export const getEPUBChapter = async (db: SQLiteDatabase, bookId: number, chapterIndex: number): Promise<EPUBChapterDB | null> => {
+  return await db.getFirstAsync<EPUBChapterDB>(
+    `SELECT * FROM epub_chapters WHERE book_id = ? AND chapter_index = ?`,
+    [bookId, chapterIndex]
+  );
+};
+
+export const getEPUBChapters = async (db: SQLiteDatabase, bookId: number): Promise<EPUBChapterDB[]> => {
+  return await db.getAllAsync<EPUBChapterDB>(
+    `SELECT * FROM epub_chapters WHERE book_id = ? ORDER BY chapter_index ASC`,
+    [bookId]
+  );
+};
+
+export const updateEPUBProgress = async (db: SQLiteDatabase, bookId: number, chapterIndex: number): Promise<void> => {
+  await db.runAsync(
+    `UPDATE epub_books SET last_read_at = ?, last_chapter = ? WHERE id = ?`,
+    [Date.now(), chapterIndex, bookId]
+  );
+};
+
+export const deleteEPUBBook = async (db: SQLiteDatabase, bookId: number): Promise<void> => {
+  await db.runAsync(`DELETE FROM epub_chapters WHERE book_id = ?`, [bookId]);
+  await db.runAsync(`DELETE FROM epub_books WHERE id = ?`, [bookId]);
+};
+
+export const getAllEPUBBooks = async (db: SQLiteDatabase): Promise<EPUBBookDB[]> => {
+  return await db.getAllAsync<EPUBBookDB>(`SELECT * FROM epub_books ORDER BY downloaded_at DESC`);
 };
 
 export const saveUser = async (db: SQLiteDatabase, user: UserDB) => {

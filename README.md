@@ -63,7 +63,8 @@ npx expo export             # Exporter pour production
 | State Management | Redux Toolkit | ^2.11 |
 | Database | expo-sqlite | ~16.0.10 |
 | Secure Storage | expo-secure-store | ~15.0.8 |
-| Audio | expo-av | ^16.0.8 |
+| Audio | expo-audio | ~1.1.1 |
+| Video | expo-video | ~3.0.16 |
 | EPUB Parsing | xmldom | 0.6.0 |
 | ZIP Archive | react-native-zip-archive | 7.0.2 |
 | Styling | NativeWind (Tailwind) | 2.0.11 |
