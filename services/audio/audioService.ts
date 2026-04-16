@@ -1,45 +1,28 @@
-import { Audio } from 'expo-av';
+import { createAudioPlayer } from 'expo-audio';
 
 class AudioService {
-  private sound: Audio.Sound | null = null;
-  private isLoading: boolean = false;
+  private player: ReturnType<typeof createAudioPlayer> | null = null;
 
-  async playWord(): Promise<void> {
-    if (this.isLoading) return;
-    
+  async playWord(uri: string): Promise<void> {
     try {
-      this.isLoading = true;
-      
-      if (this.sound) {
-        await this.sound.unloadAsync();
-        this.sound = null;
+      if (this.player) {
+        await this.player.pause();
+        this.player.remove();
+        this.player = null;
       }
 
-      const { sound } = await Audio.Sound.createAsync(
-        require('../../../assets/storage/audio/audio.ogg'),
-        { shouldPlay: true }
-      );
-      
-      this.sound = sound;
-      this.isLoading = false;
-      
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          this.stop();
-        }
-      });
+      this.player = createAudioPlayer({ uri });
+      this.player.play();
     } catch (error) {
       console.warn('Audio playback failed:', error);
-      this.isLoading = false;
     }
   }
 
   async stop(): Promise<void> {
     try {
-      if (this.sound) {
-        await this.sound.stopAsync();
-        await this.sound.unloadAsync();
-        this.sound = null;
+      if (this.player) {
+        await this.player.pause();
+        await this.player.seekTo(0);
       }
     } catch (error) {
       console.warn('Audio stop failed:', error);
@@ -47,10 +30,7 @@ class AudioService {
   }
 
   async playAndAutoStop(durationMs: number = 2000): Promise<void> {
-    await this.playWord();
-    setTimeout(async () => {
-      await this.stop();
-    }, durationMs);
+    return;
   }
 }
 

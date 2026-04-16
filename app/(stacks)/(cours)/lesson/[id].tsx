@@ -63,8 +63,12 @@ export default function LessonScreen() {
     if (!url) return url;
     
     let cleaned = url;
-    // cleaned = cleaned.replace(/[?&]forceddownload=1/gi, '');
-    // cleaned = cleaned.replace(/[?&]download=1/gi, '');
+    cleaned = cleaned.replace(/[?&]forceddownload=1/gi, '');
+    cleaned = cleaned.replace(/[?&]download=1/gi, '');
+    
+    while (cleaned.endsWith('?') || cleaned.endsWith('&')) {
+      cleaned = cleaned.slice(0, -1);
+    }
     
     if (cleaned.includes('token=') || cleaned.includes('wstoken=')) {
       return cleaned;

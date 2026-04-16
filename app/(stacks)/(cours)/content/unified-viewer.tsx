@@ -494,38 +494,113 @@ export default function UnifiedContentViewer() {
 
       case "pdf":
         if (pdfBase64) {
-          const htmlContent = `
+          const pdfJsHtml = `
             <!DOCTYPE html>
             <html>
             <head>
-              <meta charset="UTF-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0">
+              <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
               <style>
-                body { margin: 0; padding: 0; }
-                #viewer { width: 100%; height: 100vh; border: none; }
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { 
+                  font-family: -apple-system, BlinkMacSystemFont, sans-serif; 
+                  background: #f5f5f5;
+                  padding: 10px;
+                }
+                .page-container { 
+                  margin-bottom: 15px; 
+                  background: white;
+                  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                  border-radius: 8px;
+                  overflow: hidden;
+                }
+                canvas { 
+                  display: block; 
+                  width: 100%;
+                  height: auto;
+                }
+                .page-num { 
+                  background: #002366; 
+                  color: white; 
+                  padding: 8px;
+                  text-align: center;
+                  font-size: 12px;
+                }
+                #loading {
+                  text-align: center;
+                  padding: 40px;
+                  color: #666;
+                }
               </style>
             </head>
             <body>
-              <embed id="viewer" type="application/pdf" src="data:application/pdf;base64,${pdfBase64}" />
+              <div id="loading">Chargement du PDF...</div>
+              <div id="pages"></div>
+              
+              <script>
+                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                
+                async function loadPdf() {
+                  try {
+                    const pdfData = atob('${pdfBase64}');
+                    const uint8Array = new Uint8Array(pdfData.length);
+                    for (let i = 0; i < pdfData.length; i++) {
+                      uint8Array[i] = pdfData.charCodeAt(i);
+                    }
+                    
+                    const loadingTask = pdfjsLib.getDocument({ data: uint8Array });
+                    const pdf = await loadingTask.promise;
+                    const numPages = pdf.numPages;
+                    
+                    document.getElementById('loading').textContent = numPages + ' pages trouvées';
+                    
+                    for (let i = 1; i <= numPages; i++) {
+                      const page = await pdf.getPage(i);
+                      const scale = (window.innerWidth - 20) / page.getViewport({ scale: 1 }).width * 1.5;
+                      const viewport = page.getViewport({ scale });
+                      
+                      const canvas = document.createElement('canvas');
+                      canvas.width = viewport.width;
+                      canvas.height = viewport.height;
+                      
+                      const context = canvas.getContext('2d');
+                      await page.render({
+                        canvasContext: context,
+                        viewport: viewport
+                      }).promise;
+                      
+                      const pageDiv = document.createElement('div');
+                      pageDiv.className = 'page-container';
+                      pageDiv.innerHTML = '<div class="page-num">Page ' + i + ' / ' + numPages + '</div>';
+                      const img = document.createElement('img');
+                      img.src = canvas.toDataURL('image/jpeg', 0.9);
+                      img.style.width = '100%';
+                      img.style.height = 'auto';
+                      pageDiv.appendChild(img);
+                      document.getElementById('pages').appendChild(pageDiv);
+                    }
+                    
+                    document.getElementById('loading').style.display = 'none';
+                    
+                  } catch (err) {
+                    document.getElementById('loading').textContent = 'Erreur: ' + err.message;
+                  }
+                }
+                
+                loadPdf();
+              </script>
             </body>
             </html>
           `;
           return (
             <View className="flex-1">
               <WebView
-                source={{ html: htmlContent }}
+                source={{ html: pdfJsHtml }}
                 style={{ flex: 1 }}
-                startInLoadingState={true}
-                renderLoading={() => (
-                  <View className="absolute top-0 left-0 right-0 bottom-0 items-center justify-center bg-gray-100">
-                    <ActivityIndicator size="large" color="#002366" />
-                    <Text className="mt-4 text-gray-500">
-                      Chargement du PDF...
-                    </Text>
-                  </View>
-                )}
-                scalesPageToFit={true}
                 originWhitelist={["*"]}
+                javaScriptEnabled={true}
+                domStorageEnabled={true}
+                scalesPageToFit={true}
               />
             </View>
           );
@@ -534,7 +609,7 @@ export default function UnifiedContentViewer() {
           <View className="flex-1 items-center justify-center">
             <ActivityIndicator size="large" color="#002366" />
             <Text className="mt-4 text-gray-500">Traitement du PDF...</Text>
-            <Text className="text-gray-400 text-xs mt-2">Téléchargement et encodage...</Text>
+            <Text className="text-gray-400 text-xs mt-2">Téléchargement...</Text>
           </View>
         );
 

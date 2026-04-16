@@ -5,7 +5,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "react-redux";
 import { RootState } from "@/services/redux/store";
-import { Audio } from "expo-av";
+import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
+import { cleanAndAuthUrl } from "@/services/urlAuth";
 
 const IS_DEV = process.env.NODE_ENV === "development";
 
@@ -19,122 +20,51 @@ export default function AudioPlayerScreen() {
   }>();
   const token = useSelector((state: RootState) => state.auth.token);
   
-  const [isLoading, setIsLoading] = useState(true);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sound, setSound] = useState<Audio.Sound | null>(null);
-  const [position, setPosition] = useState(0);
-  const [duration, setDuration] = useState(0);
 
-  const getAuthToken = () => {
-    return token && token.length > 10 ? token : '';
-  };
-
-  const cleanAndAuthUrl = (url: string): string => {
-    const authToken = getAuthToken();
-    if (!url) return url;
-    
-    let cleaned = url;
-    
-    if (cleaned.includes('token=') || cleaned.includes('wstoken=')) {
-      return cleaned;
-    }
-    
-    if (!authToken) return cleaned;
-    
-    const separator = cleaned.includes('?') ? '&' : '?';
-    
-    if (cleaned.includes('pluginfile.php')) {
-      return `${cleaned}${separator}token=${authToken}`;
-    }
-    return `${cleaned}${separator}wstoken=${authToken}`;
-  };
+  const authUrl = audioUrl ? cleanAndAuthUrl(audioUrl, token) : undefined;
+  
+  const player = useAudioPlayer(authUrl || "");
+  const status = useAudioPlayerStatus(player);
 
   useEffect(() => {
-    let isMounted = true;
-    
-    const loadAudio = async () => {
-      if (!audioUrl) {
-        setError("URL audio manquante");
-        setIsLoading(false);
-        return;
-      }
-
-      try {
-        if (IS_DEV) console.log('[AudioPlayer] Loading audio...');
-
-        await Audio.setAudioModeAsync({
-          playsInSilentModeIOS: true,
-          staysActiveInBackground: false,
-        });
-
-        const authUrl = cleanAndAuthUrl(audioUrl);
-        
-        const { sound: newSound } = await Audio.Sound.createAsync(
-          { uri: authUrl },
-          { shouldPlay: false },
-          (status) => {
-            if (!isMounted) return;
-            if (status.isLoaded) {
-              setPosition(status.positionMillis);
-              setDuration(status.durationMillis || 0);
-              setIsPlaying(status.isPlaying);
-            }
-          }
-        );
-
-        if (isMounted) {
-          setSound(newSound);
-          setIsLoading(false);
-        }
-      } catch (err: any) {
-        if (IS_DEV) console.error('[AudioPlayer] Error:', err);
-        if (isMounted) {
-          setError(err.message || "Erreur lors du chargement de l'audio");
-          setIsLoading(false);
-        }
-      }
-    };
-
-    loadAudio();
-
-    return () => {
-      isMounted = false;
-      if (sound) {
-        sound.unloadAsync();
-      }
-    };
-  }, [audioUrl, token]);
+    if (IS_DEV) {
+      console.log('[AudioPlayer] Status:', {
+        playing: status.playing,
+        currentTime: status.currentTime,
+        duration: status.duration,
+        playbackState: status.playbackState,
+      });
+    }
+  }, [status.playing, status.currentTime]);
 
   const handlePlayPause = async () => {
-    if (!sound) return;
-
     try {
-      if (isPlaying) {
-        await sound.pauseAsync();
+      if (status.playing) {
+        await player.pause();
       } else {
-        await sound.playAsync();
+        await player.play();
       }
     } catch (err: any) {
       if (IS_DEV) console.error('[AudioPlayer] Play/Pause error:', err);
+      setError(err.message || "Erreur de lecture");
     }
   };
 
   const handleRestart = async () => {
-    if (!sound) return;
     try {
-      await sound.setPositionAsync(0);
-      await sound.playAsync();
+      await player.seekTo(0);
+      await player.play();
     } catch (err: any) {
       if (IS_DEV) console.error('[AudioPlayer] Restart error:', err);
     }
   };
 
-  const formatTime = (ms: number) => {
-    const seconds = Math.floor(ms / 1000);
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  const formatTime = (seconds: number) => {
+    const secs = Math.floor(seconds);
+    const mins = Math.floor(secs / 60);
+    const remainingSecs = secs % 60;
+    return `${mins}:${remainingSecs.toString().padStart(2, '0')}`;
   };
 
   const handleFinish = () => {
@@ -143,13 +73,15 @@ export default function AudioPlayerScreen() {
     router.push(`/(stacks)/(cours)/result${params}` as any);
   };
 
-  const progress = duration > 0 ? (position / duration) * 100 : 0;
+  const progress = status.duration && status.duration > 0 
+    ? (status.currentTime / status.duration) * 100 
+    : 0;
 
-  if (isLoading) {
+  if (!audioUrl) {
     return (
       <SafeAreaView className="flex-1 bg-[#FAF9F6] items-center justify-center">
         <ActivityIndicator size="large" color="#002366" />
-        <Text className="mt-4 text-gray-600">Chargement de l&apos;audio...</Text>
+        <Text className="mt-4 text-gray-600">URL audio manquante...</Text>
       </SafeAreaView>
     );
   }
@@ -190,7 +122,7 @@ export default function AudioPlayerScreen() {
           <View className="w-48 h-48 rounded-full bg-white/20 items-center justify-center">
             <View className="w-32 h-32 rounded-full bg-white items-center justify-center">
               <Ionicons 
-                name={isPlaying ? "musical-notes" : "musical-note"} 
+                name={status.playing ? "musical-notes" : "musical-note"} 
                 size={64} 
                 color="#002366" 
               />
@@ -206,8 +138,8 @@ export default function AudioPlayerScreen() {
             />
           </View>
           <View className="flex-row justify-between">
-            <Text className="text-gray-500 text-xs">{formatTime(position)}</Text>
-            <Text className="text-gray-500 text-xs">{formatTime(duration)}</Text>
+            <Text className="text-gray-500 text-xs">{formatTime(status.currentTime)}</Text>
+            <Text className="text-gray-500 text-xs">{formatTime(status.duration || 0)}</Text>
           </View>
         </View>
 
@@ -220,7 +152,7 @@ export default function AudioPlayerScreen() {
             onPress={handlePlayPause}
             className="w-20 h-20 rounded-full bg-[#002366] items-center justify-center shadow-lg"
           >
-            <Feather name={isPlaying ? "pause" : "play"} size={32} color="white" />
+            <Feather name={status.playing ? "pause" : "play"} size={32} color="white" />
           </Pressable>
 
           <View className="w-14 h-14 rounded-full bg-gray-200 items-center justify-center ml-6">

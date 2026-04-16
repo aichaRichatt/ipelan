@@ -7,6 +7,7 @@ import { useSelector } from "react-redux";
 import { RootState } from "../../services/redux/store";
 import { useQuizContent } from "../../hooks/useQuizContent";
 import { QuizQuestion as QuizQuestionType } from "../../services/contentLoader";
+import { audioService } from "../../services/audio/audioService";
 
 interface QuizQuestion {
   id: number;
@@ -41,7 +42,7 @@ export default function QuizScreen() {
         const { options, newCorrectIndex } = shuffleOptions(q.options || [], q.correctAnswer ?? 0);
         return {
           id: q.id,
-          type: q.type === 'audio' ? 'audio-mcq' as const : 'text-mcq' as const,
+          type: q.audioUrl ? 'audio-mcq' as const : 'text-mcq' as const,
           question: q.question,
           audioUrl: q.audioUrl,
           options,

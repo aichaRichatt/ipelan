@@ -1,26 +1,19 @@
 import { Feather, Ionicons } from "@expo/vector-icons";
-import React, { useState, useCallback, useEffect } from "react";
-import { Pressable, Text, View, ActivityIndicator, Linking, ScrollView, Modal, FlatList } from "react-native";
+import React, { useState, useCallback, useEffect, useRef } from "react";
+import { Pressable, Text, View, ActivityIndicator, Linking, ScrollView, Dimensions } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector } from "react-redux";
 import { RootState } from "@/services/redux/store";
-import { documentDirectory, downloadAsync, deleteAsync } from "expo-file-system/legacy";
-import { cleanAndAuthUrl, getUserToken } from "@/services/urlAuth";
+import { cleanAndAuthUrl } from "@/services/urlAuth";
 
 const IS_DEV = process.env.NODE_ENV === "development";
+const CORS_PROXY = "https://corsproxy.io/?";
 
 interface PdfPage {
   pageNum: number;
-  textContent: string;
-  images: string[];
-}
-
-interface PdfOutlineItem {
-  title: string;
-  page: number;
-  children?: PdfOutlineItem[];
+  dataUrl: string;
 }
 
 export default function PdfViewerScreen() {
@@ -29,232 +22,191 @@ export default function PdfViewerScreen() {
   const token = useSelector((state: RootState) => state.auth.token);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [localPath, setLocalPath] = useState<string | null>(null);
-  const [showOutline, setShowOutline] = useState(false);
-  const [pdfPages, setPdfPages] = useState<PdfPage[]>([]);
+  const [pages, setPages] = useState<PdfPage[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
-  const [outline, setOutline] = useState<PdfOutlineItem[]>([]);
-  const [showExtract, setShowExtract] = useState(false);
-  const [extractedText, setExtractedText] = useState<string>('');
+  const webViewRef = useRef<WebView>(null);
 
-  const extractPdfContent = async (localUri: string): Promise<{ text: string; pages: PdfPage[]; outline: PdfOutlineItem[] }> => {
-    if (IS_DEV) console.log('[PdfViewer] Extracting PDF content...');
-    
-    const pages: PdfPage[] = [];
-    let fullText = '';
-    const outline: PdfOutlineItem[] = [];
-    
-    const pdfJsHtml = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: sans-serif; padding: 20px; background: #FAF9F6; }
-          canvas { border: 1px solid #ddd; margin-bottom: 10px; display: block; }
-          #text-output { white-space: pre-wrap; line-height: 1.6; }
-          .page-num { color: #666; font-size: 12px; margin-bottom: 8px; }
-        </style>
-      </head>
-      <body>
-        <div id="text-output"></div>
-        <script>
-          pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  useEffect(() => {
+    if (pdfUrl && token) {
+      const authUrl = cleanAndAuthUrl(pdfUrl, token);
+      const proxyUrl = CORS_PROXY + encodeURIComponent(authUrl);
+      
+      if (IS_DEV) console.log('[PdfViewer] Loading PDF via proxy:', proxyUrl);
+      
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0, user-scalable=yes">
+          <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { 
+              font-family: -apple-system, BlinkMacSystemFont, sans-serif; 
+              background: #f5f5f5;
+              padding: 10px;
+            }
+            .page-container { 
+              margin-bottom: 15px; 
+              background: white;
+              box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+              border-radius: 8px;
+              overflow: hidden;
+            }
+            canvas { 
+              display: block; 
+              width: 100%;
+              height: auto;
+            }
+            .page-num { 
+              background: #002366; 
+              color: white; 
+              padding: 8px;
+              text-align: center;
+              font-size: 12px;
+            }
+            #loading {
+              text-align: center;
+              padding: 40px;
+              color: #666;
+            }
+            .error {
+              color: #dc2626;
+              padding: 20px;
+              text-align: center;
+            }
+          </style>
+        </head>
+        <body>
+          <div id="loading">Chargement du PDF...</div>
+          <div id="pages"></div>
           
-          let pageInfo = [];
-          
-          async function extractContent() {
-            try {
-              const loadingTask = pdfjsLib.getDocument('file://${localUri}');
-              const pdf = await loadingTask.promise;
-              
-              let fullText = '';
-              const numPages = pdf.numPages;
-              
-              window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'pageCount',
-                count: numPages
-              }));
-              
-              for (let i = 1; i <= numPages; i++) {
-                const page = await pdf.getPage(i);
-                const textContent = await page.getTextContent();
-                const pageText = textContent.items.map(item => item.str).join(' ');
+          <script>
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            
+            let extractedPages = [];
+            
+            async function loadPdf() {
+              try {
+                const loadingTask = pdfjsLib.getDocument('${proxyUrl}');
+                const pdf = await loadingTask.promise;
+                const numPages = pdf.numPages;
                 
-                fullText += '\\n--- Page ' + i + ' ---\\n' + pageText;
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'pageCount',
+                  count: numPages
+                }));
                 
-                const canvas = document.createElement('canvas');
-                const scale = 1.5;
-                const viewport = page.getViewport({ scale });
+                document.getElementById('loading').style.display = 'none';
                 
-                canvas.height = viewport.height;
-                canvas.width = viewport.width;
+                for (let i = 1; i <= numPages; i++) {
+                  const page = await pdf.getPage(i);
+                  const scale = window.innerWidth / page.getViewport({ scale: 1 }).width * 1.5;
+                  const viewport = page.getViewport({ scale });
+                  
+                  const canvas = document.createElement('canvas');
+                  canvas.width = viewport.width;
+                  canvas.height = viewport.height;
+                  
+                  const context = canvas.getContext('2d');
+                  await page.render({
+                    canvasContext: context,
+                    viewport: viewport
+                  }).promise;
+                  
+                  const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                  extractedPages.push({ pageNum: i, dataUrl });
+                  
+                  const pageDiv = document.createElement('div');
+                  pageDiv.className = 'page-container';
+                  pageDiv.innerHTML = '<div class="page-num">Page ' + i + ' / ' + numPages + '</div>';
+                  const img = document.createElement('img');
+                  img.src = dataUrl;
+                  img.style.width = '100%';
+                  img.style.height = 'auto';
+                  pageDiv.appendChild(img);
+                  document.getElementById('pages').appendChild(pageDiv);
+                  
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'pageLoaded',
+                    page: i,
+                    total: numPages
+                  }));
+                }
                 
-                const context = canvas.getContext('2d');
-                await page.render({
-                  canvasContext: context,
-                  viewport: viewport
-                }).promise;
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'complete',
+                  pages: extractedPages
+                }));
                 
-                const imageData = canvas.toDataURL('image/jpeg', 0.7);
-                
-                pageInfo.push({
-                  pageNum: i,
-                  textContent: pageText,
-                  imageData: imageData
-                });
-                
-                window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
-                  type: 'pageProgress',
-                  page: i,
-                  total: numPages,
-                  text: pageText.substring(0, 200)
+              } catch (err) {
+                document.getElementById('loading').innerHTML = '<div class="error">Erreur: ' + err.message + '</div>';
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'error',
+                  message: err.message
                 }));
               }
-              
-              document.getElementById('text-output').textContent = fullText;
-              
-              window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'extractionComplete',
-                fullText: fullText,
-                pages: pageInfo
-              }));
-              
-            } catch (err) {
-              window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'extractionError',
-                error: err.message
-              }));
             }
-          }
-          
-          extractContent();
-        </script>
-      </body>
-      </html>
-    `;
-    
-    return new Promise((resolve) => {
-      const webviewRef: any = { current: null };
+            
+            loadPdf();
+          </script>
+        </body>
+        </html>
+      `;
       
-      setTimeout(() => {
-        resolve({ text: fullText, pages, outline });
-      }, 30000);
-    });
-  };
-
-  const downloadPdf = useCallback(async () => {
-    if (!pdfUrl) {
-      setError("URL PDF manquante");
-      setIsLoading(false);
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      if (IS_DEV) console.log('[PdfViewer] Downloading PDF...');
-
-      const authToken = getUserToken(token);
-      const authUrl = cleanAndAuthUrl(pdfUrl, token);
-      const filename = `temp_${Date.now()}.pdf`;
-      const localUri = `${documentDirectory}${filename}`;
-
-      const downloadResult = await downloadAsync(authUrl, localUri);
-      
-      if (downloadResult.status === 200) {
-        if (IS_DEV) console.log('[PdfViewer] PDF downloaded to:', localUri);
-        setLocalPath(localUri);
-        setTotalPages(1);
-      } else {
-        if (IS_DEV) console.warn('[PdfViewer] Download failed:', downloadResult.status);
-        setError("Impossible de télécharger le PDF");
-      }
-    } catch (err: any) {
-      if (IS_DEV) console.error('[PdfViewer] Error:', err);
-      setError(err.message || "Erreur lors du chargement du PDF");
-    } finally {
-      setIsLoading(false);
+      setPdfHtml(html);
     }
   }, [pdfUrl, token]);
 
-  const handleExtractText = async () => {
-    if (!localPath) return;
-    
-    setShowExtract(true);
-    setExtractedText("Extraction en cours...");
-    
-    const authUrl = `file://${localPath}`;
-    if (IS_DEV) console.log('[PdfViewer] Extracting text from:', authUrl);
-  };
+  const [pdfHtml, setPdfHtml] = useState<string | null>(null);
 
   const handleWebViewMessage = (event: any) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
+      if (IS_DEV) console.log('[PdfViewer] WebView message:', data.type);
+      
       if (data.type === 'pageCount') {
         setTotalPages(data.count);
-        if (IS_DEV) console.log('[PdfViewer] Total pages:', data.count);
-      } else if (data.type === 'pageProgress') {
-        if (IS_DEV) console.log(`[PdfViewer] Page ${data.page}/${data.total}`);
-      } else if (data.type === 'extractionComplete') {
-        setExtractedText(data.fullText || "Aucun texte extrait");
-        if (IS_DEV) console.log('[PdfViewer] Extraction complete, text length:', data.fullText?.length);
-      } else if (data.type === 'extractionError') {
-        setExtractedText("Erreur d'extraction: " + data.error);
+      } else if (data.type === 'pageLoaded') {
+        if (IS_DEV) console.log(`[PdfViewer] Page ${data.page}/${data.total} loaded`);
+      } else if (data.type === 'complete') {
+        setPages(data.pages);
+        setIsLoading(false);
+      } else if (data.type === 'error') {
+        setError(data.message);
+        setIsLoading(false);
       }
-    } catch {}
+    } catch (err) {
+      if (IS_DEV) console.error('[PdfViewer] Message parse error:', err);
+    }
   };
-
-  React.useEffect(() => {
-    downloadPdf();
-    
-    return () => {
-      if (localPath) {
-        deleteAsync(localPath, { idempotent: true }).catch(() => {});
-      }
-    };
-  }, []);
 
   const handleOpenExternal = () => {
     if (pdfUrl) {
-      const authUrl = cleanAndAuthUrl(pdfUrl);
+      const authUrl = cleanAndAuthUrl(pdfUrl, token || '');
       Linking.openURL(authUrl);
     }
   };
 
-  const googleDocsViewerHtml = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: #FAF9F6; }
-        iframe { width: 100%; height: 100vh; border: none; }
-      </style>
-    </head>
-    <body>
-      ${localPath ? `
-        <iframe src="file://${localPath}" type="application/pdf"></iframe>
-      ` : `
-        <div style="padding: 40px; text-align: center; font-family: sans-serif;">
-          <p>Chargement du PDF...</p>
-        </div>
-      `}
-    </body>
-    </html>
-  `;
+  if (!pdfUrl) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#FAF9F6] items-center justify-center">
+        <Feather name="file" size={64} color="#D1D5DB" />
+        <Text className="mt-4 text-gray-500">URL PDF manquante</Text>
+        <Pressable onPress={() => router.back()} className="mt-4 px-6 py-3 bg-[#002366] rounded-xl">
+          <Text className="text-white font-bold">Retour</Text>
+        </Pressable>
+      </SafeAreaView>
+    );
+  }
 
-  if (isLoading) {
+  if (isLoading && !pdfHtml) {
     return (
       <SafeAreaView className="flex-1 bg-[#FAF9F6] items-center justify-center">
         <ActivityIndicator size="large" color="#002366" />
         <Text className="mt-4 text-gray-600">Chargement du PDF...</Text>
-        <Text className="mt-2 text-gray-400 text-xs">Téléchargement en cours</Text>
+        <Text className="mt-2 text-gray-400 text-xs">Préparation de la visionneuse</Text>
       </SafeAreaView>
     );
   }
@@ -262,7 +214,7 @@ export default function PdfViewerScreen() {
   if (error) {
     return (
       <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={["top"]}>
-        <View className="px-5 py-4 flex-row items-center">
+        <View className="px-5 py-4 flex-row items-center bg-white border-b border-gray-200">
           <Pressable onPress={() => router.back()} className="mr-4 p-2">
             <Feather name="arrow-left" size={24} color="black" />
           </Pressable>
@@ -270,10 +222,8 @@ export default function PdfViewerScreen() {
         </View>
         <View className="flex-1 items-center justify-center px-5">
           <Feather name="file-text" size={64} color="#D1D5DB" />
-          <Text className="text-gray-500 mt-4 text-center">{error}</Text>
-          <Text className="text-gray-400 text-sm mt-2 text-center mb-6">
-            Le PDF ne peut pas être affiché dans l&apos;application
-          </Text>
+          <Text className="text-gray-500 mt-4 text-center">Erreur de chargement</Text>
+          <Text className="text-gray-400 text-sm mt-2 text-center mb-6">{error}</Text>
           <Pressable
             onPress={handleOpenExternal}
             className="bg-[#002366] px-6 py-3 rounded-xl"
@@ -296,113 +246,40 @@ export default function PdfViewerScreen() {
             {title || 'Document PDF'}
           </Text>
           {totalPages > 0 && (
-            <Text className="text-xs text-gray-500">{totalPages} pages</Text>
+            <Text className="text-xs text-gray-500">
+              {pages.length}/{totalPages} pages chargées
+            </Text>
           )}
         </View>
-        <Pressable onPress={() => setShowOutline(true)} className="p-2">
-          <Feather name="list" size={24} color="#002366" />
-        </Pressable>
-        <Pressable onPress={handleExtractText} className="p-2">
-          <Ionicons name="document-text" size={24} color="#002366" />
-        </Pressable>
         <Pressable onPress={handleOpenExternal} className="p-2">
           <Feather name="external-link" size={24} color="#002366" />
         </Pressable>
       </View>
 
-      {localPath ? (
-        <View className="flex-1 bg-gray-100">
-          <WebView
-            source={{ uri: `file://${localPath}` }}
-            style={{ flex: 1 }}
-            startInLoadingState={true}
-            renderLoading={() => (
-              <View className="absolute top-0 left-0 right-0 bottom-0 items-center justify-center bg-gray-100">
-                <ActivityIndicator size="large" color="#002366" />
-              </View>
-            )}
-            onError={() => {
-              if (IS_DEV) console.warn('[PdfViewer] WebView error, trying external');
-              handleOpenExternal();
-            }}
-            originWhitelist={['*']}
-            allowFileAccess={true}
-            allowFileAccessFromFileURLs={true}
-            allowUniversalAccessFromFileURLs={true}
-          />
-        </View>
-      ) : (
-        <View className="flex-1 items-center justify-center">
-          <Text className="text-gray-500">PDF non disponible</Text>
+      {isLoading && pdfHtml && (
+        <View className="absolute top-20 left-0 right-0 z-10 items-center">
+          <View className="bg-white px-4 py-2 rounded-full shadow-md flex-row items-center">
+            <ActivityIndicator size="small" color="#002366" className="mr-2" />
+            <Text className="text-sm text-gray-600">Chargement des pages...</Text>
+          </View>
         </View>
       )}
 
-      <Modal visible={showExtract} animationType="slide" transparent={true}>
-        <View className="flex-1 bg-black/50 justify-end">
-          <View className="bg-white rounded-t-3xl max-h-[85%]">
-            <View className="px-5 py-4 border-b border-gray-200 flex-row items-center justify-between">
-              <View className="flex-row items-center">
-                <Ionicons name="document-text" size={24} color="#002366" className="mr-2" />
-                <Text className="text-lg font-bold">Contenu du PDF</Text>
-              </View>
-              <Pressable onPress={() => setShowExtract(false)} className="p-2">
-                <Feather name="x" size={24} color="#6B7280" />
-              </Pressable>
-            </View>
-            <ScrollView className="px-5 py-4">
-              {extractedText ? (
-                <Text className="text-gray-700 text-sm leading-relaxed whitespace-pre-wrap">
-                  {extractedText}
-                </Text>
-              ) : (
-                <View className="items-center py-8">
-                  <Ionicons name="hourglass-outline" size={48} color="#D1D5DB" />
-                  <Text className="text-gray-500 mt-4 text-center">
-                    Extraction en cours...
-                  </Text>
-                  <Text className="text-gray-400 text-xs mt-2 text-center">
-                    Patientez pendant le traitement du PDF
-                  </Text>
-                </View>
-              )}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={showOutline} animationType="slide" transparent={true}>
-        <View className="flex-1 bg-black/50 justify-end">
-          <View className="bg-white rounded-t-3xl max-h-[70%]">
-            <View className="px-5 py-4 border-b border-gray-200 flex-row items-center justify-between">
-              <View className="flex-row items-center">
-                <Feather name="list" size={24} color="#002366" className="mr-2" />
-                <Text className="text-lg font-bold">Table des matières</Text>
-              </View>
-              <Pressable onPress={() => setShowOutline(false)} className="p-2">
-                <Feather name="x" size={24} color="#6B7280" />
-              </Pressable>
-            </View>
-            <FlatList
-              data={outline.length > 0 ? outline : [{ title: 'Aucune table des matières disponible', page: 0 }]}
-              keyExtractor={(item, index) => index.toString()}
-              renderItem={({ item }) => (
-                <Pressable
-                  className={`px-5 py-4 border-b border-gray-100 ${item.page === 0 ? 'opacity-50' : ''}`}
-                  disabled={item.page === 0}
-                >
-                  <Text className={`text-sm ${item.page > 0 ? 'text-gray-900' : 'text-gray-500'}`}>
-                    {item.title}
-                  </Text>
-                  {item.page > 0 && (
-                    <Text className="text-xs text-gray-400 mt-1">Page {item.page}</Text>
-                  )}
-                </Pressable>
-              )}
-              contentContainerStyle={{ paddingBottom: 40 }}
-            />
-          </View>
-        </View>
-      </Modal>
+      {pdfHtml && (
+        <WebView
+          ref={webViewRef}
+          source={{ html: pdfHtml, baseUrl: 'https://ipelan.mr' }}
+          style={{ flex: 1, backgroundColor: '#f5f5f5' }}
+          onMessage={handleWebViewMessage}
+          originWhitelist={['*']}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          allowFileAccess={false}
+          scalesPageToFit={true}
+          bounces={true}
+          showsVerticalScrollIndicator={true}
+        />
+      )}
     </SafeAreaView>
   );
 }
