@@ -34,7 +34,7 @@ export default function AudioPlayerScreen() {
     const authToken = getAuthToken();
     if (!url) return url;
     
-    let cleaned = url.replace(/[?&]forceddownload=1/gi, '').replace(/[?&]download=1/gi, '');
+    let cleaned = url;
     
     if (cleaned.includes('token=') || cleaned.includes('wstoken=')) {
       return cleaned;

@@ -89,18 +89,23 @@ export default function ModuleDetailScreen() {
       let pdfUrl: string | undefined;
       let audioUrl: string | undefined;
       if (mod.contents && mod.contents.length > 0) {
-        console.log(`[Module ${mod.id}] Contents:`, JSON.stringify(mod.contents.map(f => ({ name: f.filename, type: f.mimetype }))));
+        console.log(`[Module ${mod.id}] Full contents:`, JSON.stringify(mod.contents, null, 2));
         for (const file of mod.contents) {
           const filename = file.filename?.toLowerCase() || '';
+          const fileurl = file.fileurl || '';
+          console.log(`[Module ${mod.id}] Checking file: "${filename}" from URL: ${fileurl.substring(0, 100)}...`);
+          
           if (isEpubFile(filename)) {
-            console.log(`[Module ${mod.id}] Found EPUB:`, filename);
+            console.log(`[Module ${mod.id}] → Detected as EPUB`);
             epubUrl = file.fileurl;
           } else if (filename.endsWith('.pdf')) {
-            console.log(`[Module ${mod.id}] Found PDF:`, filename);
+            console.log(`[Module ${mod.id}] → Detected as PDF`);
             pdfUrl = file.fileurl;
           } else if (filename.match(/\.(mp3|wav|ogg|m4a)$/)) {
-            console.log(`[Module ${mod.id}] Found audio:`, filename);
+            console.log(`[Module ${mod.id}] → Detected as audio`);
             audioUrl = file.fileurl;
+          } else {
+            console.log(`[Module ${mod.id}] → Unknown type (will use lesson screen)`);
           }
         }
       }
@@ -133,7 +138,7 @@ export default function ModuleDetailScreen() {
     return { icon: iconName, color };
   };
 
-  const handleLessonPress = (lesson: Lesson) => {
+    const handleLessonPress = (lesson: Lesson) => {
     if (lesson.isLocked) return;
 
     const params = `?moduleId=${lesson.id}&moduleTitle=${encodeURIComponent(lesson.title)}&courseId=${courseId}`;
@@ -144,7 +149,7 @@ export default function ModuleDetailScreen() {
     }
 
     if (lesson.pdfUrl) {
-      router.push(`/(stacks)/(cours)/pdf-viewer?pdfUrl=${encodeURIComponent(lesson.pdfUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
+      router.push(`/(stacks)/(cours)/pdf/pdf-viewer?pdfUrl=${encodeURIComponent(lesson.pdfUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
       return;
     }
 

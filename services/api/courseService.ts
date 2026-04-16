@@ -375,3 +375,73 @@ export async function getCourseLevel(token: string, courseId: number): Promise<s
     return "1";
   }
 }
+
+export async function getAllCoursesFromLanguageCategory(token: string, rootCategoryId: number = 18): Promise<any[]> {
+  const IS_DEV = process.env.NODE_ENV === "development";
+  
+  const getToken = () => {
+    if (token && token.length > 10) return token;
+    if (ADMIN_TOKEN) return ADMIN_TOKEN;
+    return token;
+  };
+  
+  const effectiveToken = getToken();
+  if (!effectiveToken) {
+    if (IS_DEV) console.warn("[courseService] No token available");
+    return [];
+  }
+  
+  try {
+    if (IS_DEV) console.log("[courseService] Fetching all courses from category:", rootCategoryId);
+    
+    const categories = await getCategories(effectiveToken);
+    
+    if (categories.length === 0) {
+      if (IS_DEV) console.warn("[courseService] No categories returned");
+      return [];
+    }
+    
+    const findAllSubcategories = (parentId: number): number[] => {
+      const directChildren = categories
+        .filter(c => c.parent === parentId)
+        .map(c => c.id);
+      
+      let allChildren = [...directChildren];
+      for (const childId of directChildren) {
+        allChildren = [...allChildren, ...findAllSubcategories(childId)];
+      }
+      
+      return allChildren;
+    };
+    
+    const allCategoryIds = [rootCategoryId, ...findAllSubcategories(rootCategoryId)];
+    
+    if (IS_DEV) {
+      const categoryNames = categories
+        .filter(c => allCategoryIds.includes(c.id))
+        .map(c => ({ id: c.id, name: c.name, parent: c.parent }));
+      console.log("[courseService] All categories to search:", categoryNames);
+    }
+    
+    const allCourses: any[] = [];
+    
+    for (const categoryId of allCategoryIds) {
+      const courses = await getCoursesByCategory(effectiveToken, categoryId);
+      if (courses.length > 0) {
+        if (IS_DEV) console.log("[courseService] Found", courses.length, "courses in category", categoryId);
+        allCourses.push(...courses);
+      }
+    }
+    
+    const uniqueCourses = allCourses.filter((course, index, self) => 
+      index === self.findIndex((c) => c.id === course.id)
+    );
+    
+    if (IS_DEV) console.log("[courseService] Total unique courses found:", uniqueCourses.length);
+    
+    return uniqueCourses;
+  } catch (error) {
+    if (IS_DEV) console.error("[courseService] getAllCoursesFromLanguageCategory error:", error);
+    return [];
+  }
+}

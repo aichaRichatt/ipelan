@@ -4,7 +4,6 @@ import {
   parseCourseContent,
   parseMoodleSections,
   ParsedSection,
-  ParsedModule,
   CourseContent,
 } from '../services/moodleParser';
 import { mapModuleToContentType, MappedContent } from '../utils/contentMapper';

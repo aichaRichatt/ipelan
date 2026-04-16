@@ -423,3 +423,181 @@ export function isHtmlFile(filename: string): boolean {
   const lower = filename.toLowerCase();
   return lower.endsWith('.html') || lower.endsWith('.htm') || lower.endsWith('.xhtml');
 }
+
+export interface MoodleLesson {
+  id: number;
+  name: string;
+  course: number;
+  intro?: string;
+  introformat?: number;
+  practice?: boolean;
+  allowediet?: boolean;
+  modattempts?: boolean;
+  usepassword?: boolean;
+  requirescorecompletion?: boolean;
+  review朔息?: boolean;
+  maxattempts?: number;
+  defaultgrade?: number;
+  disablelegend?: boolean;
+  available?: number;
+  deadline?: number;
+  timelimit?: number;
+  retake?: boolean;
+  activitylink?: number;
+  mediafile?: string;
+  mediafiles?: string[];
+  paths?: string;
+  slides?: string;
+  progressevents?: number;
+  allowofflineattempts?: number;
+  contents?: MoodleLessonContent[];
+}
+
+export interface MoodleLessonContent {
+  id?: number;
+  type?: string;
+  title?: string;
+  contents?: string;
+  contentsformat?: number;
+  importance?: number;
+  displayoptions?: number;
+  properties?: Record<string, any>;
+}
+
+export interface MoodleLessonPage {
+  id: number;
+  lessonid: number;
+  prevpageid?: number;
+  nextpageid?: number;
+  qtype?: number;
+  qoption?: number;
+  layout?: number;
+  display?: number;
+  timecreated?: number;
+  timemodified?: number;
+  title?: string;
+  contents?: string;
+  contentsformat?: number;
+}
+
+export async function getMoodleLesson(
+  token: string,
+  lessonId: number
+): Promise<MoodleLesson | null> {
+  const IS_DEV = process.env.NODE_ENV === "development";
+  
+  if (IS_DEV) console.log('[ContentLoader] Fetching lesson:', lessonId);
+  
+  try {
+    const params = {
+      wstoken: getAuthToken(token),
+      wsfunction: 'mod_lesson_get_lesson',
+      lessonid: lessonId,
+      moodlewsrestformat: 'json'
+    };
+    
+    const result = await moodleFetch('/webservice/rest/server.php', params, 'POST');
+    
+    if (result?.exception) {
+      if (IS_DEV) console.warn('[ContentLoader] Lesson API exception:', result.message);
+      return null;
+    }
+    
+    if (IS_DEV) {
+      const lessonData = result?.lesson || result;
+      console.log('[ContentLoader] Lesson fetched:', {
+        id: lessonData?.id,
+        name: lessonData?.name,
+        course: lessonData?.course,
+        hasIntro: !!lessonData?.intro,
+        pageCount: lessonData?.contents?.length || 0
+      });
+    }
+    
+    return result?.lesson || result;
+  } catch (err) {
+    if (IS_DEV) console.error('[ContentLoader] Error fetching lesson:', err);
+    return null;
+  }
+}
+
+export async function getMoodleLessonPages(
+  token: string,
+  lessonId: number
+): Promise<MoodleLessonPage[]> {
+  const IS_DEV = process.env.NODE_ENV === "development";
+  
+  if (IS_DEV) console.log('[ContentLoader] Fetching lesson pages for:', lessonId);
+  
+  try {
+    const params = {
+      wstoken: getAuthToken(token),
+      wsfunction: 'mod_lesson_get_pages',
+      lessonid: lessonId,
+      moodlewsrestformat: 'json'
+    };
+    
+    const result = await moodleFetch('/webservice/rest/server.php', params, 'POST');
+    
+    if (result?.exception) {
+      if (IS_DEV) console.warn('[ContentLoader] Lesson pages API exception:', result.message);
+      return [];
+    }
+    
+    const pagesResponse = result?.pages || [];
+    const pages: MoodleLessonPage[] = pagesResponse.map((p: any) => p.page || p);
+    
+    if (IS_DEV) {
+      console.log('[ContentLoader] Lesson pages fetched:', pages.length);
+      pages.slice(0, 3).forEach((page: any, i: number) => {
+        console.log(`[ContentLoader] Page ${i + 1}:`, page.id, '-', page.title?.substring(0, 50));
+      });
+    }
+    
+    return pages;
+  } catch (err) {
+    if (IS_DEV) console.error('[ContentLoader] Error fetching lesson pages:', err);
+    return [];
+  }
+}
+
+export async function getMoodleLessonAttempts(
+  token: string,
+  lessonId: number,
+  userId?: number
+): Promise<any[]> {
+  const IS_DEV = process.env.NODE_ENV === "development";
+  
+  if (IS_DEV) console.log('[ContentLoader] Fetching lesson attempts for:', lessonId);
+  
+  try {
+    const params: Record<string, any> = {
+      wstoken: getAuthToken(token),
+      wsfunction: 'mod_lesson_get_lesson_attempts',
+      lessonid: lessonId,
+      moodlewsrestformat: 'json'
+    };
+    
+    if (userId) {
+      params.userid = userId;
+    }
+    
+    const result = await moodleFetch('/webservice/rest/server.php', params, 'POST');
+    
+    if (result?.exception) {
+      if (IS_DEV) console.warn('[ContentLoader] Lesson attempts API exception:', result.message);
+      return [];
+    }
+    
+    const attempts = result?.attempts || [];
+    
+    if (IS_DEV) {
+      console.log('[ContentLoader] Lesson attempts fetched:', attempts.length);
+    }
+    
+    return attempts;
+  } catch (err) {
+    if (IS_DEV) console.error('[ContentLoader] Error fetching lesson attempts:', err);
+    return [];
+  }
+}

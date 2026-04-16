@@ -6,7 +6,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSelector } from "react-redux";
 import { RootState } from "../../../services/redux/store";
-import { getEnrolledCoursesByTimeline, getCoursesForLanguageAndGrade } from "../../../services/api/courseService";
+import { getEnrolledCoursesByTimeline, getCoursesForLanguageAndGrade, getAllCoursesFromLanguageCategory } from "../../../services/api/courseService";
+
+const IS_DEV = process.env.NODE_ENV === "development";
 
 const PREFERENCES_KEY = '@ipelan_preferences';
 
@@ -79,11 +81,17 @@ export default function CoursScreen() {
       try {
         let fetchedCourses: any[] = [];
         
-        if (preferences) {
-          console.log("[Cours] Fetching for:", preferences.language, preferences.grade);
-          
+        console.log("[Cours] Fetching all courses from Langues Nationales iplan (category 18)...");
+        const allLangCourses = await getAllCoursesFromLanguageCategory(token, 18);
+        
+        if (allLangCourses.length > 0) {
+          if (IS_DEV) console.log("[Cours] Found", allLangCourses.length, "courses in language category");
+          fetchedCourses = allLangCourses;
+        }
+        
+        if (fetchedCourses.length === 0 && preferences) {
+          console.log("[Cours] No courses from language category, trying grade-specific...");
           const langCourses = await getCoursesForLanguageAndGrade(token, preferences.language, preferences.grade);
-          
           if (langCourses.length > 0) {
             if (Array.isArray(langCourses[0])) {
               fetchedCourses = langCourses.flat();
@@ -105,7 +113,7 @@ export default function CoursScreen() {
         setCourses(fetchedCourses);
         
         if (fetchedCourses.length === 0) {
-          setError("Aucun cours trouvé pour cette langue et niveau");
+          setError("Aucun cours trouvé dans les catégories de langues");
         } else {
           setError(null);
         }

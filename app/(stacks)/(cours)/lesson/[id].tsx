@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Pressable, Text, View, Alert, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -8,6 +8,7 @@ import { useSelector } from "react-redux";
 import { RootState } from "../../../../services/redux/store";
 import { getCourseContents } from "../../../../services/api/courseService";
 import { mapModuleToContentType } from "../../../../utils/contentMapper";
+import { getMoodleLesson, getMoodleLessonPages } from "../../../../services/contentLoader";
 
 const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_TOKEN;
 const MOODLE_URL = process.env.EXPO_PUBLIC_MOODLE_API_URL || "https://moodle.richatt.com";
@@ -51,6 +52,7 @@ export default function LessonScreen() {
   const [htmlContent, setHtmlContent] = useState<string>('');
   const [lessonTitle, setLessonTitle] = useState<string>('Leçon');
   const [error, setError] = useState<string | null>(null);
+  const targetModuleRef = useRef<MoodleModule | null>(null);
 
   const getAuthToken = () => {
     return token && token.length > 10 ? token : (ADMIN_TOKEN || '');
@@ -61,8 +63,8 @@ export default function LessonScreen() {
     if (!url) return url;
     
     let cleaned = url;
-    cleaned = cleaned.replace(/[?&]forceddownload=1/gi, '');
-    cleaned = cleaned.replace(/[?&]download=1/gi, '');
+    // cleaned = cleaned.replace(/[?&]forceddownload=1/gi, '');
+    // cleaned = cleaned.replace(/[?&]download=1/gi, '');
     
     if (cleaned.includes('token=') || cleaned.includes('wstoken=')) {
       return cleaned;
@@ -228,6 +230,11 @@ export default function LessonScreen() {
         return;
       }
 
+      targetModuleRef.current = targetModule;
+      
+      const lessonInstanceId = targetModule.instance;
+      if (IS_DEV) console.log("[Lesson] Module instance (lesson ID):", lessonInstanceId);
+
       if (IS_DEV) {
         console.log("[Lesson] Found module:", targetModule.name, "- Type:", targetModule.modname);
         console.log("[Lesson] Contents count:", targetModule.contents?.length || 0);
@@ -235,6 +242,28 @@ export default function LessonScreen() {
       }
 
       setLessonTitle(targetModule.name || "Leçon");
+
+      if (targetModule.modname === 'lesson' && lessonInstanceId) {
+        if (IS_DEV) console.log("[Lesson] Loading lesson content via API for instance:", lessonInstanceId);
+        
+        const lessonData = await getMoodleLesson(token, lessonInstanceId);
+        if (lessonData) {
+          if (IS_DEV) console.log("[Lesson] Lesson data loaded:", lessonData.name || 'Unnamed');
+        }
+        
+        const lessonPages = await getMoodleLessonPages(token, lessonInstanceId);
+        if (IS_DEV) console.log("[Lesson] Lesson pages:", lessonPages.length);
+        
+        if (lessonPages.length > 0) {
+          const firstPage = lessonPages[0];
+          if (firstPage.contents) {
+            const styledHtml = wrapWithStyles(firstPage.contents, 1, lessonPages.length);
+            setHtmlContent(styledHtml);
+            setIsLoading(false);
+            return;
+          }
+        }
+      }
 
       const mapped = mapModuleToContentType({
         id: targetModule.id,
@@ -248,17 +277,23 @@ export default function LessonScreen() {
       });
 
       if (IS_DEV) console.log("[Lesson] Mapped type:", mapped.type);
+      if (IS_DEV) console.log("[Lesson] Module contents:", JSON.stringify(mapped.module.contents, null, 2));
 
       if (mapped.htmlContent && mapped.htmlContent.startsWith('http')) {
         if (IS_DEV) console.log("[Lesson] Fetching HTML from URL:", mapped.htmlContent);
         const html = await fetchWithAuth(mapped.htmlContent);
-        if (html) {
+        if (html && !html.includes('"error"')) {
+          if (IS_DEV) console.log("[Lesson] HTML fetched successfully, length:", html.length);
           const baseUrl = mapped.htmlContent.substring(0, mapped.htmlContent.lastIndexOf('/'));
           const processedHtml = processHtmlContent(html, baseUrl);
           const styledHtml = wrapWithStyles(processedHtml, 1, 1);
           setHtmlContent(styledHtml);
           setIsLoading(false);
           return;
+        } else if (html) {
+          if (IS_DEV) console.warn("[Lesson] HTML fetch returned error response");
+        } else {
+          if (IS_DEV) console.warn("[Lesson] HTML fetch returned null");
         }
       }
 
@@ -272,23 +307,60 @@ export default function LessonScreen() {
       }
 
       if (targetModule.contents && targetModule.contents.length > 0) {
+        if (IS_DEV) console.log("[Lesson] Processing", targetModule.contents.length, "contents");
         for (const content of targetModule.contents) {
+          if (IS_DEV) console.log("[Lesson] Content file:", content.filename, "| Type:", content.type, "| MimeType:", content.mimetype, "| URL:", content.fileurl?.substring(0, 100));
+          
           if (content.fileurl) {
-            const filename = content.filename?.toLowerCase() || '';
-            if (filename.endsWith('.html') || filename.endsWith('.htm') || filename.endsWith('.xhtml')) {
+            const filename = (content.filename || '').toLowerCase();
+            const mimetype = (content.mimetype || content.type || '').toLowerCase();
+            
+            if (filename.endsWith('.pdf') || mimetype.includes('pdf')) {
+              if (IS_DEV) console.log("[Lesson] Detected PDF, redirecting to PDF viewer");
+              setError("PDF_DETECTED:" + content.fileurl);
+              setIsLoading(false);
+              return;
+            }
+            
+            if (filename.endsWith('.epub') || filename.endsWith('.epub+zip')) {
+              if (IS_DEV) console.log("[Lesson] Detected EPUB, redirecting to EPUB reader");
+              setError("EPUB_DETECTED:" + content.fileurl);
+              setIsLoading(false);
+              return;
+            }
+            
+            if (filename.match(/\.(mp3|wav|ogg|m4a|mp4|webm|m4v)$/) || mimetype.match(/audio|video/)) {
+              if (filename.match(/\.(mp3|wav|ogg|m4a)$/) || mimetype.includes('audio')) {
+                if (IS_DEV) console.log("[Lesson] Detected audio, redirecting to audio player");
+                setError("AUDIO_DETECTED:" + content.fileurl);
+                setIsLoading(false);
+                return;
+              }
+              if (IS_DEV) console.log("[Lesson] Detected video, redirecting to unified viewer");
+              setError("VIDEO_DETECTED:" + content.fileurl);
+              setIsLoading(false);
+              return;
+            }
+            
+            if (filename.endsWith('.html') || filename.endsWith('.htm') || filename.endsWith('.xhtml') || mimetype.includes('html')) {
               if (IS_DEV) console.log("[Lesson] Fetching HTML file:", content.fileurl);
               const html = await fetchWithAuth(content.fileurl);
-              if (html) {
+              if (html && !html.includes('"error"')) {
+                if (IS_DEV) console.log("[Lesson] HTML fetched successfully");
                 const baseUrl = content.fileurl.substring(0, content.fileurl.lastIndexOf('/'));
                 const processedHtml = processHtmlContent(html, baseUrl);
                 const styledHtml = wrapWithStyles(processedHtml, 1, 1);
                 setHtmlContent(styledHtml);
                 setIsLoading(false);
                 return;
+              } else if (html) {
+                if (IS_DEV) console.warn("[Lesson] HTML fetch returned error");
+              } else {
+                if (IS_DEV) console.warn("[Lesson] HTML fetch returned null (possible auth issue)");
               }
             }
 
-            if (filename.match(/\.(jpg|jpeg|png|gif|webp)$/)) {
+            if (filename.match(/\.(jpg|jpeg|png|gif|webp|svg)$/) || mimetype.includes('image')) {
               const authUrl = cleanAndAuthUrl(content.fileurl);
               const imgHtml = wrapWithStyles(
                 `<div class="image-container"><img src="${authUrl}" alt="Image" /></div>`,
@@ -298,19 +370,27 @@ export default function LessonScreen() {
               setIsLoading(false);
               return;
             }
+            
+            if (filename.endsWith('.zip') || filename.endsWith('.scorm')) {
+              if (IS_DEV) console.log("[Lesson] Detected ZIP/SCORM, redirecting to unified viewer");
+              setError("CONTENT_URL:" + content.fileurl);
+              setIsLoading(false);
+              return;
+            }
+            
+            if (content.fileurl && (content.fileurl.includes('pluginfile.php') || content.fileurl.includes('draftfile.php'))) {
+              if (IS_DEV) console.log("[Lesson] Unknown Moodle file type, redirecting to unified viewer");
+              setError("CONTENT_URL:" + content.fileurl);
+              setIsLoading(false);
+              return;
+            }
           }
         }
       }
 
       if (targetModule.url) {
-        const iframeHtml = wrapWithStyles(
-          `<div class="external-content">
-            <p>Ce contenu est disponible sur Moodle:</p>
-            <a href="${targetModule.url}" target="_blank">Ouvrir dans Moodle</a>
-          </div>`,
-          1, 1
-        );
-        setHtmlContent(iframeHtml);
+        if (IS_DEV) console.log("[Lesson] Module has URL, redirecting to unified viewer");
+        setError("CONTENT_URL:" + targetModule.url);
         setIsLoading(false);
         return;
       }
@@ -469,6 +549,20 @@ export default function LessonScreen() {
       // Ignore parse errors
     }
   };
+
+  // Handle all content type redirects to unified viewer
+  useEffect(() => {
+    if (!error) return;
+    
+    const fileUrl = error.replace(/^(PDF_DETECTED:|EPUB_DETECTED:|AUDIO_DETECTED:|VIDEO_DETECTED:|CONTENT_URL:)/, "");
+    const contentType = error.match(/^(PDF_DETECTED:|EPUB_DETECTED:|AUDIO_DETECTED:|VIDEO_DETECTED:|CONTENT_URL:)/)?.[0]?.replace(/:$/, '') || 'html';
+    
+    if (IS_DEV) console.log("[Lesson] Redirecting to unified viewer:", contentType, "| URL:", fileUrl.substring(0, 100));
+    
+    const targetModuleInstance = targetModuleRef.current?.instance;
+    
+    router.replace(`/(stacks)/(cours)/content/unified-viewer?fileUrl=${encodeURIComponent(fileUrl)}&contentType=${contentType}&moduleTitle=${encodeURIComponent(lessonTitle)}&moduleId=${moduleId}&courseId=${courseId}&lessonInstance=${targetModuleInstance || ''}` as any);
+  }, [error]);
 
   const handleContinue = () => {
     router.back();
