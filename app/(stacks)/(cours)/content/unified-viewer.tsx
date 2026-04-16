@@ -556,7 +556,7 @@ export default function UnifiedContentViewer() {
                     
                     for (let i = 1; i <= numPages; i++) {
                       const page = await pdf.getPage(i);
-                      const scale = (window.innerWidth - 20) / page.getViewport({ scale: 1 }).width * 1.5;
+                      const scale = (window.innerWidth - 20) / page.getViewport({ scale: 1 }).width * 2.5;
                       const viewport = page.getViewport({ scale });
                       
                       const canvas = document.createElement('canvas');
@@ -564,6 +564,8 @@ export default function UnifiedContentViewer() {
                       canvas.height = viewport.height;
                       
                       const context = canvas.getContext('2d');
+                      context.imageSmoothingEnabled = true;
+                      context.imageSmoothingQuality = 'high';
                       await page.render({
                         canvasContext: context,
                         viewport: viewport
@@ -573,7 +575,7 @@ export default function UnifiedContentViewer() {
                       pageDiv.className = 'page-container';
                       pageDiv.innerHTML = '<div class="page-num">Page ' + i + ' / ' + numPages + '</div>';
                       const img = document.createElement('img');
-                      img.src = canvas.toDataURL('image/jpeg', 0.9);
+                      img.src = canvas.toDataURL('image/png');
                       img.style.width = '100%';
                       img.style.height = 'auto';
                       pageDiv.appendChild(img);

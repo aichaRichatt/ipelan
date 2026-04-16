@@ -582,6 +582,15 @@ export default function LessonScreen() {
     );
   }
 
+  if (error && (error.startsWith('PDF_DETECTED:') || error.startsWith('EPUB_DETECTED:') || error.startsWith('AUDIO_DETECTED:') || error.startsWith('VIDEO_DETECTED:') || error.startsWith('CONTENT_URL:'))) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#FAF9F6] items-center justify-center">
+        <ActivityIndicator size="large" color="#002366" />
+        <Text className="mt-4 text-gray-600">Redirection...</Text>
+      </SafeAreaView>
+    );
+  }
+
   if (error) {
     return (
       <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={["top"]}>
