@@ -14,6 +14,11 @@ export function injectAbsolutePaths(html: string, baseDir: string): string {
     return `<img${attrs}src="${fixPath(src)}"`;
   });
 
+  result = result.replace(/<image([^>]+)(xlink:)?href="([^"]+)"/gi, (match, attrs, xlink, href) => {
+    const xlinkPrefix = xlink || '';
+    return `<image${attrs}${xlinkPrefix}href="${fixPath(href)}"`;
+  });
+
   result = result.replace(/<link([^>]+)href="([^"]+\.css)"/gi, (match, attrs, href) => {
     return `<link${attrs}href="${fixPath(href)}"`;
   });
@@ -131,7 +136,10 @@ export function wrapHTMLForEPUB(content: string, baseDir?: string): string {
       </script>
     </head>
     <body>
-      ${content}
+      ${(() => {
+        const bodyMatch = content.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+        return bodyMatch ? bodyMatch[1] : content;
+      })()}
     </body>
     </html>
   `;

@@ -1,16 +1,21 @@
-import { unzip } from 'react-native-zip-archive';
+import { NativeModules } from 'react-native';
 import { Directory, File } from 'expo-file-system';
+import {
+  readAsStringAsync,
+  writeAsStringAsync,
+  makeDirectoryAsync,
+  deleteAsync,
+  EncodingType,
+} from 'expo-file-system/legacy';
+import JSZip from 'jszip';
 
 const IS_DEV = process.env.NODE_ENV === "development";
 
-if (IS_DEV) {
-  console.log('[UnzipNative] Module check:', typeof unzip);
-}
+const RNZipArchive = NativeModules.RNZipArchive;
+const hasNativeUnzip = RNZipArchive != null;
 
-if (typeof unzip !== 'function') {
-  console.error('[UnzipNative] FATAL: react-native-zip-archive not initialized');
-  console.error('[UnzipNative] Solution: Run "npx expo prebuild" then "npx expo run:android"');
-  console.error('[UnzipNative] Note: This module requires native build, NOT Expo Go');
+if (IS_DEV) {
+  console.log('[UnzipService] Native module available:', hasNativeUnzip);
 }
 
 function ensureFileProtocol(path: string): string {
@@ -24,36 +29,102 @@ function stripFileProtocol(path: string): string {
   return path;
 }
 
-export async function unzipEPUB(zipPath: string, outputDir: string): Promise<string> {
-  if (IS_DEV) console.log('[UnzipNative] Starting extraction...');
+async function nativeUnzip(sourcePath: string, targetPath: string): Promise<string> {
+  const normalizeFilePath = (p: string) =>
+    p.startsWith("file://") ? p.slice(7) : p;
 
-  if (typeof unzip !== 'function') {
-    throw new Error(
-      'Native unzip module not available. ' +
-      'If using Expo Go: react-native-zip-archive requires Dev Client. ' +
-      'Solution: npx expo prebuild && npx expo run:android'
-    );
+  const result = await RNZipArchive.unzip(
+    normalizeFilePath(sourcePath),
+    normalizeFilePath(targetPath),
+    "UTF-8"
+  );
+  return result;
+}
+
+async function jszipUnzip(zipUri: string, outputDir: string): Promise<string> {
+  const safeZipPath = ensureFileProtocol(zipUri);
+  const safeOutputDir = ensureFileProtocol(outputDir);
+
+  if (IS_DEV) console.log('[UnzipService] JSZip: Reading file...');
+
+  const base64Data = await readAsStringAsync(safeZipPath, {
+    encoding: EncodingType.Base64,
+  });
+
+  if (IS_DEV) console.log('[UnzipService] JSZip: Parsing archive...');
+
+  const zip = await JSZip.loadAsync(base64Data, { base64: true });
+  const entries = Object.keys(zip.files);
+
+  if (IS_DEV) console.log('[UnzipService] JSZip: Extracting', entries.length, 'entries...');
+
+  let extracted = 0;
+  for (const entryName of entries) {
+    const entry = zip.files[entryName];
+    const outputPath = `${safeOutputDir}/${entryName}`;
+
+    if (entry.dir) {
+      await makeDirectoryAsync(outputPath, { intermediates: true });
+    } else {
+      const parentDir = outputPath.substring(0, outputPath.lastIndexOf('/'));
+      await makeDirectoryAsync(parentDir, { intermediates: true });
+
+      const content = await entry.async('base64');
+      await writeAsStringAsync(outputPath, content, {
+        encoding: EncodingType.Base64,
+      });
+
+      extracted++;
+      if (IS_DEV && extracted % 50 === 0) {
+        console.log(`[UnzipService] JSZip: ${extracted}/${entries.length} files extracted`);
+      }
+    }
   }
+
+  if (IS_DEV) console.log('[UnzipService] JSZip: Extraction complete.', extracted, 'files');
+
+  return safeOutputDir;
+}
+
+export async function unzipEPUB(zipPath: string, outputDir: string): Promise<string> {
+  if (IS_DEV) console.log('[UnzipService] Starting extraction...');
 
   const sourcePath = stripFileProtocol(ensureFileProtocol(zipPath));
   const targetPath = stripFileProtocol(ensureFileProtocol(outputDir));
 
-  if (IS_DEV) console.log('[UnzipNative] Source:', sourcePath);
-  if (IS_DEV) console.log('[UnzipNative] Target:', targetPath);
+  if (IS_DEV) console.log('[UnzipService] Source:', sourcePath);
+  if (IS_DEV) console.log('[UnzipService] Target:', targetPath);
 
   const zipFile = new File(ensureFileProtocol(zipPath));
-  if (IS_DEV) console.log('[UnzipNative] File size:', (zipFile.size / (1024 * 1024)).toFixed(2), 'MB');
+  const fileSizeMB = zipFile.size / (1024 * 1024);
+  if (IS_DEV) console.log('[UnzipService] File size:', fileSizeMB.toFixed(2), 'MB');
 
-  const outputDirectory = new Directory(ensureFileProtocol(outputDir));
-  if (outputDirectory.exists) {
-    outputDirectory.delete();
+  try {
+    await deleteAsync(ensureFileProtocol(outputDir), { idempotent: true });
+    await makeDirectoryAsync(ensureFileProtocol(outputDir), { intermediates: true });
+  } catch (err) {
+    if (IS_DEV) console.warn('[UnzipService] Failed to recreate directory:', err);
   }
-  outputDirectory.create();
 
-  if (IS_DEV) console.log('[UnzipNative] Extracting with native unzip...');
-  const resultPath = await unzip(sourcePath, targetPath);
+  if (hasNativeUnzip) {
+    if (IS_DEV) console.log('[UnzipService] Using native unzip (fast)');
+    try {
+      const resultPath = await nativeUnzip(sourcePath, targetPath);
+      if (IS_DEV) console.log('[UnzipService] Native extraction complete:', resultPath);
+      return ensureFileProtocol(resultPath);
+    } catch (err) {
+      if (IS_DEV) console.warn('[UnzipService] Native unzip failed, falling back to JSZip:', err);
+    }
+  } else {
+    if (IS_DEV) console.log('[UnzipService] Native module not available (Expo Go). Using JSZip fallback.');
+  }
 
-  if (IS_DEV) console.log('[UnzipNative] Extraction complete:', resultPath);
+  if (fileSizeMB > 100) {
+    if (IS_DEV) console.warn('[UnzipService] WARNING: Large file (' + fileSizeMB.toFixed(0) + 'MB). JSZip may be slow or crash. Consider using a Dev Client build.');
+  }
+
+  const resultPath = await jszipUnzip(zipPath, outputDir);
+  if (IS_DEV) console.log('[UnzipService] JSZip extraction complete');
   return ensureFileProtocol(resultPath);
 }
 

@@ -88,6 +88,7 @@ export interface IPELANUser {
   xp?: number; 
   coins: number;
   streak: number;
+  badges?: string[];
   modules?: string;
   notifs?: boolean;
   sons?: boolean;

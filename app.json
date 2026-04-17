@@ -8,6 +8,11 @@
     "scheme": "ipelanapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splashscreen.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
     "ios": {
       "supportsTablet": true
     },
@@ -31,7 +36,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#ffffff"
+          "backgroundColor": "#ffffff",
+          "image": "./assets/images/splashscreen.png",
+          "imageWidth": 200
         }
       ],
       "expo-sqlite",

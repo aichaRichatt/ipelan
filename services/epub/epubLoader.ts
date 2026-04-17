@@ -116,6 +116,12 @@ async function getOfflineEPUB(sourceUrl: string): Promise<{ metadata: EPUBMetada
       `SELECT * FROM epub_chapters WHERE book_id = ? ORDER BY chapter_index`,
       [result.id]
     );
+
+    if (!chapters || chapters.length === 0) {
+      if (IS_DEV) console.log('[EPUBLoader] Offline cache has 0 chapters. Invalidating cache.');
+      await db.runAsync(`DELETE FROM epub_books WHERE id = ?`, [result.id]);
+      return null;
+    }
     
     return {
       metadata: {
@@ -231,45 +237,55 @@ async function downloadAndExtractEPUB(url: string, cacheKey: string): Promise<{ 
   }
   
   const existingFile = new File(targetPath);
+  let downloadNeeded = true;
+  
   if (existingFile.exists) {
     if (IS_DEV) console.log('[EPUBLoader] File exists, checking...');
     const verified = await verifyFileExists(targetPath);
     if (verified.exists) {
       if (IS_DEV) console.log('[EPUBLoader] Using existing file');
-      const extractDir = normalizeFilePath(`${cleanCacheDir}extracted_${cacheKey}/`);
-      const existsCheck = new Directory(extractDir);
-      if (existsCheck.exists) {
-        return { realUri: targetPath, extractDir };
-      }
+      // Do not return here. Just skip the download step.
+      downloadNeeded = false;
     }
   }
   
-  if (IS_DEV) console.log('[EPUBLoader] Downloading from:', url);
-  
   const targetFile = new File(targetPath);
-  const downloadPromise = File.downloadFileAsync(url, targetFile);
   
-  let lastLoggedProgress = 0;
-  const progressInterval = setInterval(async () => {
-    if (targetFile.exists) {
-      const currentSize = targetFile.size;
-      if (IS_DEV && currentSize > 0) {
-        const estimatedPercent = Math.min(95, Math.round((currentSize / (164 * 1024 * 1024)) * 100));
-        if (estimatedPercent > lastLoggedProgress) {
-          console.log(`[EPUBLoader] Download: ${estimatedPercent}%`);
-          lastLoggedProgress = estimatedPercent;
+  if (downloadNeeded) {
+    // expo-file-system throws on unencoded spaces and other illegal characters
+    // Using encodeURI(decodeURI(url)) ensures all chars are encoded but prevents double-encoding
+    let safeUrl = url;
+    try {
+      safeUrl = encodeURI(decodeURI(url));
+    } catch {
+      safeUrl = url.replace(/ /g, '%20');
+    }
+    
+    if (IS_DEV) console.log('[EPUBLoader] Downloading from:', safeUrl);
+    const downloadPromise = File.downloadFileAsync(safeUrl, targetFile);
+    
+    let lastLoggedProgress = 0;
+    const progressInterval = setInterval(async () => {
+      if (targetFile.exists) {
+        const currentSize = targetFile.size;
+        if (IS_DEV && currentSize > 0) {
+          const estimatedPercent = Math.min(95, Math.round((currentSize / (164 * 1024 * 1024)) * 100));
+          if (estimatedPercent > lastLoggedProgress) {
+            console.log(`[EPUBLoader] Download: ${estimatedPercent}%`);
+            lastLoggedProgress = estimatedPercent;
+          }
         }
       }
+    }, 1000);
+    
+    try {
+      await downloadPromise;
+      clearInterval(progressInterval);
+      if (IS_DEV) console.log('[EPUBLoader] Download: 100%');
+    } catch (err) {
+      clearInterval(progressInterval);
+      throw new Error(`Download failed: ${err}`);
     }
-  }, 1000);
-  
-  try {
-    await downloadPromise;
-    clearInterval(progressInterval);
-    if (IS_DEV) console.log('[EPUBLoader] Download: 100%');
-  } catch (err) {
-    clearInterval(progressInterval);
-    throw new Error(`Download failed: ${err}`);
   }
   
   const realUri = targetFile.uri;
@@ -360,11 +376,11 @@ async function parseOPF(opfPath: string): Promise<ParsedOPF> {
 
 async function parseChapters(parsed: ParsedOPF, basePath: string): Promise<EPUBChapterDB[]> {
   const chapters: EPUBChapterDB[] = [];
-  const cleanBase = stripFileProtocol(basePath);
   
   for (let i = 0; i < parsed.spine.length; i++) {
     const relativePath = parsed.spine[i];
-    const chapterPath = normalizeFilePath(`${cleanBase}/${relativePath}`);
+    // spine paths are relative to the OPF directory, not the base directory
+    const chapterPath = normalizeFilePath(`${parsed.opfDir}/${relativePath}`);
     
     const chapterFile = new File(chapterPath);
     if (chapterFile.exists) {

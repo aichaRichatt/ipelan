@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { View, Text, Image, ActivityIndicator } from "react-native";
+import React, { useEffect, useRef } from "react";
+import { View, Text, Image } from "react-native";
 import { useRouter } from "expo-router";
 import Animated, { 
   FadeIn, 
@@ -7,84 +7,81 @@ import Animated, {
 } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as SplashScreen from "expo-splash-screen";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "../services/redux/store";
 import { hasValidToken, getToken, getUserData } from "../services/storage/tokenStorage";
-import { useDispatch } from "react-redux";
 import { loginSuccess } from "../services/redux/slices/authSlice";
 
 const LOGO = require("../assets/images/logo_ipelan.png"); 
 const MASCOT = require("../assets/images/mascot_parrot.png");
 
+// Prevent native splash screen from hiding automatically
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
 export default function Index() {
   const router = useRouter();
   const dispatch = useDispatch();
   const { isAuthenticated } = useSelector((state: RootState) => state.auth);
-  const [isReady, setIsReady] = useState(false);
-  const [authRestored, setAuthRestored] = useState(false);
+  const isAuthenticatedRef = useRef(isAuthenticated);
+
+  // Keep ref up to date with Redux state
+  useEffect(() => {
+    isAuthenticatedRef.current = isAuthenticated;
+  }, [isAuthenticated]);
 
   useEffect(() => {
-    const init = async () => {
+    let isMounted = true;
+
+    // Async block to attempt auth restoration and hide native splash
+    const prepareApp = async () => {
       try {
-        await SplashScreen.preventAutoHideAsync();
-        
         const hasToken = await hasValidToken();
-        console.log("[Index] hasValidToken:", hasToken);
-        
         if (hasToken) {
           const token = await getToken();
           const userData = await getUserData();
-          
-          if (token && userData) {
-            console.log("[Index] Restoring auth from storage...");
+          if (token && userData && isMounted) {
             dispatch(loginSuccess({ user: userData, token }));
-            setAuthRestored(true);
-          } else {
-            console.log("[Index] No user data found, going to onboarding");
-            setAuthRestored(true);
           }
-        } else {
-          console.log("[Index] No token found, going to onboarding");
-          setAuthRestored(true);
         }
       } catch (error) {
-        console.log("[Index] Error:", error);
-        setAuthRestored(true);
+        console.error("[Index] Auth check error:", error);
+      } finally {
+        // IMPORTANT: Hide the native splash screen immediately!
+        // This allows the user to see the animated JS splash screen below.
+        try {
+          // Add a small 500ms delay before hiding native splash 
+          // just to avoid any immediate JS blocking flashes
+          setTimeout(async () => {
+            if (isMounted) await SplashScreen.hideAsync();
+          }, 500);
+        } catch (e) {
+          // Ignore
+        }
       }
     };
 
-    init();
-  }, [dispatch]);
+    prepareApp();
 
-  useEffect(() => {
-    const navigate = async () => {
-      if (!authRestored) return;
-      
-      const hasToken = await hasValidToken();
-      console.log("[Index] authRestored:", authRestored, "hasToken:", hasToken, "isAuthenticated:", isAuthenticated);
-      
-      if (hasToken && isAuthenticated) {
-        console.log("[Index]  Valid token and authenticated, going to home");
-        router.replace("/(tabs)/(home)");
-      } else {
-        console.log("[Index]  Not authenticated, going to onboarding");
-        router.replace("/(auth)/onboarding");
+    // Trigger navigation exactly after 5 seconds of showing our JS animations
+    const timer = setTimeout(() => {
+      if (!isMounted) return;
+
+      try {
+        if (isAuthenticatedRef.current) {
+          router.replace("/(tabs)/(home)");
+        } else {
+          router.replace("/(auth)/onboarding");
+        }
+      } catch (navigationError) {
+        console.error("[Index] Navigation failed:", navigationError);
       }
-      
-      setIsReady(true);
-      await SplashScreen.hideAsync();
+    }, 5000);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
     };
-
-    navigate();
-  }, [authRestored, isAuthenticated, router]);
-
-  if (!isReady) {
-    return (
-      <SafeAreaView className="flex-1 bg-white items-center justify-center">
-        <ActivityIndicator size="large" color="#002366" />
-      </SafeAreaView>
-    );
-  }
+  }, [dispatch, router]);
 
   return (
     <SafeAreaView className="flex-1 bg-white">

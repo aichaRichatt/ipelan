@@ -76,6 +76,10 @@ export default function UnifiedContentViewer() {
   const [position, setPosition] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
 
+  const [epubChapters, setEpubChapters] = useState<any[]>([]);
+  const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
+  const [opfDirectory, setOpfDirectory] = useState<string>("");
+
   const detectContentType = useCallback(
     (filename: string, mimeType?: string, url?: string): ContentType => {
       const lower = (filename || "").toLowerCase();
@@ -339,7 +343,7 @@ export default function UnifiedContentViewer() {
     try {
       const epubLoader = await import('../../../../services/epub/epubLoader');
       
-      const result = await epubLoader.loadEPUB(url, token || undefined, { removeAudio: true });
+      const result = await epubLoader.loadEPUB(url, token || undefined);
       
       if (IS_DEV) {
         console.log("[UnifiedViewer] EPUB loaded:", result.parsed.title || 'Untitled');
@@ -349,10 +353,13 @@ export default function UnifiedContentViewer() {
       }
       
       if (result.chapters.length > 0) {
+        setEpubChapters(result.chapters);
+        setOpfDirectory(result.parsed.opfDir);
+        setCurrentChapterIndex(0);
+        
         const chapterContent = result.chapters[0].content;
-        const opfDir = result.parsed.opfDir;
-        const normalizedContent = injectAbsolutePaths(chapterContent, opfDir);
-        const wrappedHtml = wrapHTMLForEPUB(normalizedContent, opfDir);
+        const normalizedContent = injectAbsolutePaths(chapterContent, result.parsed.opfDir);
+        const wrappedHtml = wrapHTMLForEPUB(normalizedContent, result.parsed.opfDir);
         
         setHtmlContent(wrappedHtml);
         setEpubLocalPath(result.localPath);
@@ -451,6 +458,29 @@ export default function UnifiedContentViewer() {
         Alert.alert("Lien externe", "Ce lien ne peut pas être ouvert.");
       }
     } catch {}
+  };
+
+  const loadChapter = (index: number) => {
+    try {
+      if (!epubChapters || !epubChapters[index]) {
+        console.warn("[UnifiedViewer] Chapter " + index + " not found");
+        return;
+      }
+      const chapterContent = epubChapters[index].content;
+      if (!chapterContent) {
+         console.warn("[UnifiedViewer] Chapter " + index + " has no content");
+         return;
+      }
+      const normalizedContent = injectAbsolutePaths(chapterContent, opfDirectory || "");
+      const wrappedHtml = wrapHTMLForEPUB(normalizedContent, opfDirectory || "");
+      
+      setHtmlContent(wrappedHtml);
+      setCurrentChapterIndex(index);
+      if (epubDataRef.current) epubDataRef.current.currentChapter = index;
+    } catch (err: any) {
+      if (IS_DEV) console.error("[UnifiedViewer] loadChapter error:", err);
+      Alert.alert("Erreur de chapitre", err.message || "Impossible de charger ce chapitre");
+    }
   };
 
   if (loading) {
@@ -685,13 +715,14 @@ export default function UnifiedContentViewer() {
 
       case "epub":
         if (htmlContent) {
-          const webViewBaseUrl = epubLocalPath ? `file://${epubLocalPath}/` : undefined;
+          const webViewBaseUrl = epubLocalPath ? (epubLocalPath.endsWith('/') ? epubLocalPath : epubLocalPath + '/') : undefined;
           if (IS_DEV && webViewBaseUrl) {
             console.log("[UnifiedViewer] EPUB WebView baseUrl:", webViewBaseUrl);
           }
           return (
             <View className="flex-1">
               <WebView
+                key={`webview-${currentChapterIndex}`}
                 source={{ html: htmlContent, baseUrl: webViewBaseUrl }}
                 style={{ flex: 1 }}
                 javaScriptEnabled={true}
@@ -704,6 +735,27 @@ export default function UnifiedContentViewer() {
                 allowFileAccessFromFileURLs={true}
                 mixedContentMode="always"
               />
+              {epubChapters.length > 1 && (
+                <View className="flex-row items-center justify-between p-4 bg-white border-t border-gray-200 mb-4">
+                  <Pressable
+                    onPress={() => loadChapter(currentChapterIndex - 1)}
+                    disabled={currentChapterIndex === 0}
+                    className={`px-4 py-2 rounded-lg ${currentChapterIndex === 0 ? 'bg-gray-200' : 'bg-[#002366]'}`}
+                  >
+                    <Text className={currentChapterIndex === 0 ? 'text-gray-400' : 'text-white'}>Précédent</Text>
+                  </Pressable>
+                  <Text className="text-gray-500 font-medium text-sm">
+                    {currentChapterIndex + 1} / {epubChapters.length}
+                  </Text>
+                  <Pressable
+                    onPress={() => loadChapter(currentChapterIndex + 1)}
+                    disabled={currentChapterIndex === epubChapters.length - 1}
+                    className={`px-4 py-2 rounded-lg ${currentChapterIndex === epubChapters.length - 1 ? 'bg-gray-200' : 'bg-[#002366]'}`}
+                  >
+                    <Text className={currentChapterIndex === epubChapters.length - 1 ? 'text-gray-400' : 'text-white'}>Suivant</Text>
+                  </Pressable>
+                </View>
+              )}
             </View>
           );
         }

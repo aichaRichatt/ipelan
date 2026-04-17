@@ -1,7 +1,7 @@
 import { openDatabaseAsync, SQLiteDatabase } from 'expo-sqlite';
 import { IPELANUser, CourseCategory, CourseSection, CourseModule, ModuleContent } from '../../types';
 
-export type UserDB = Pick<IPELANUser, 'id' | 'username' | 'email' | 'firstname' | 'lastname' | 'fullname' | 'ipelan_xp' | 'coins' | 'streak'> & { token: string };
+export type UserDB = Pick<IPELANUser, 'id' | 'username' | 'email' | 'firstname' | 'lastname' | 'fullname' | 'ipelan_xp' | 'coins' | 'streak'> & { token: string; badges?: string };
 
 export interface CourseDB {
   id: number;
@@ -44,6 +44,7 @@ export const createTables = async (db: SQLiteDatabase) => {
         ipelan_xp INTEGER DEFAULT 0,
         coins INTEGER DEFAULT 0,
         streak INTEGER DEFAULT 0,
+        badges TEXT DEFAULT '[]',
         token TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS courses(
@@ -111,11 +112,12 @@ export const createTables = async (db: SQLiteDatabase) => {
         title TEXT,
         author TEXT,
         source_url TEXT UNIQUE,
-        cover_path TEXT,
+        local_path TEXT,
         total_chapters INTEGER DEFAULT 0,
         downloaded_at INTEGER,
         last_read_at INTEGER,
-        last_chapter INTEGER DEFAULT 0
+        last_chapter INTEGER DEFAULT 0,
+        size INTEGER DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS epub_chapters(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -133,11 +135,12 @@ export interface EPUBBookDB {
   title: string;
   author?: string;
   source_url: string;
-  cover_path?: string;
+  local_path?: string;
   total_chapters: number;
   downloaded_at: number;
   last_read_at?: number;
   last_chapter: number;
+  size?: number;
 }
 
 export interface EPUBChapterDB {
@@ -152,7 +155,8 @@ export const saveEPUBBook = async (db: SQLiteDatabase, book: {
   title: string;
   author?: string;
   source_url: string;
-  cover_path?: string;
+  local_path?: string;
+  size?: number;
   total_chapters: number;
   chapters: Array<{ index: number; title?: string; content: string }>;
 }): Promise<number> => {
@@ -161,8 +165,8 @@ export const saveEPUBBook = async (db: SQLiteDatabase, book: {
 
   const now = Date.now();
   const result = await db.runAsync(
-    `INSERT INTO epub_books(title, author, source_url, cover_path, total_chapters, downloaded_at, last_chapter) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [book.title, book.author || null, book.source_url, book.cover_path || null, book.total_chapters, now, 0]
+    `INSERT INTO epub_books(title, author, source_url, local_path, total_chapters, downloaded_at, last_chapter, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [book.title, book.author || null, book.source_url, book.local_path || null, book.total_chapters, now, 0, book.size || 0]
   );
 
   const bookId = typeof result.lastInsertRowId === 'number' ? result.lastInsertRowId : 0;
@@ -214,8 +218,8 @@ export const getAllEPUBBooks = async (db: SQLiteDatabase): Promise<EPUBBookDB[]>
 export const saveUser = async (db: SQLiteDatabase, user: UserDB) => {
    await db.runAsync(`DELETE FROM users`);
   
-  const query = `INSERT OR REPLACE INTO users(id, username, email, firstname, lastname, fullname, ipelan_xp, coins, streak, token) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  const query = `INSERT OR REPLACE INTO users(id, username, email, firstname, lastname, fullname, ipelan_xp, coins, streak, badges, token) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   await db.runAsync(query, [
     user.id, 
     user.username, 
@@ -226,12 +230,22 @@ export const saveUser = async (db: SQLiteDatabase, user: UserDB) => {
     user.ipelan_xp, 
     user.coins, 
     user.streak, 
+    user.badges || '[]',
     user.token
   ]);
 };
 
 export const getUser = async (db: SQLiteDatabase, id: number): Promise<UserDB | null> => {
   return await db.getFirstAsync<UserDB>(`SELECT * FROM users WHERE id = ?`, [id]);
+};
+
+export const saveUserXP = async (db: SQLiteDatabase, userId: number, xp: number): Promise<void> => {
+  await db.runAsync('UPDATE users SET ipelan_xp = ? WHERE id = ?', [xp, userId]);
+};
+
+export const getUserXP = async (db: SQLiteDatabase, userId: number): Promise<number> => {
+  const row = await db.getFirstAsync<{ ipelan_xp: number }>('SELECT ipelan_xp FROM users WHERE id = ?', [userId]);
+  return row?.ipelan_xp ?? 0;
 };
 
 export const saveCourses = async (db: SQLiteDatabase, courses: CourseDB[]) => {
