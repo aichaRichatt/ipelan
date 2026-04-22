@@ -1,23 +1,18 @@
 import { Feather } from "@expo/vector-icons";
-import React, { useState, useEffect } from "react";
-import { Pressable, Text, TextInput, View, ScrollView } from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useSelector } from "react-redux";
+import { DictationData, useActivityContent } from "../../../hooks/useActivityContent";
 import { audioService } from "../../../services/audio/audioService";
+import { RootState } from "../../../services/redux/store";
 
-interface DictationWord {
-  id: number;
-  word: string;
-  hint: string;
-}
-
-const DICTATION_WORDS: DictationWord[] = [
-  { id: 1, word: "Jaarama", hint: "Salutation (bonjour)" },
-  { id: 2, word: "Baadi", hint: "Au revoir" },
-  { id: 3, word: "Ndeyni", hint: "Merci" },
-  { id: 4, word: "Min yaha", hint: "Comment vas-tu ?" },
-  { id: 5, word: "Alhambulilah", hint: "Praise to God" },
-];
+const EMPTY_DICTATION: DictationData = {
+  id: 0,
+  title: "Aucune dictée",
+  words: [],
+};
 
 export default function DictationScreen() {
   const router = useRouter();
@@ -26,16 +21,37 @@ export default function DictationScreen() {
     moduleTitle?: string;
     courseId?: string;
     returnRoute?: string;
+    cmid?: string;
+    instanceId?: string;
   }>();
+  
+  const token = useSelector((state: RootState) => state.auth.token);
+  const moduleId = parseInt(params.moduleId || "0", 10);
+  const instanceId = parseInt(params.instanceId || params.moduleId || "0", 10);
+  const cmid = parseInt(params.cmid || "0", 10);
+  const courseId = parseInt(params.courseId || "0", 10);
+  
+  const { dictation, isLoading, error } = useActivityContent(
+    token || '',
+    moduleId,
+    instanceId,
+    'assign',
+    cmid || instanceId,
+    courseId
+  );
+
   const [currentWordIndex, setCurrentWordIndex] = useState(0);
   const [userInput, setUserInput] = useState("");
   const [score, setScore] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentAnswer, setCurrentAnswer] = useState<boolean | null>(null);
-  const [answers, setAnswers] = useState<{ word: string; correct: boolean }[]>([]);
+  const [answers, setAnswers] = useState<Array<{ word: string; correct: boolean }>>([]);
 
-  const currentWord = DICTATION_WORDS[currentWordIndex];
-  const progress = ((currentWordIndex + 1) / DICTATION_WORDS.length) * 100;
+  const currentDictation = dictation?.words?.length ? dictation : null;
+  const words = currentDictation?.words || [];
+  const currentWord = words[currentWordIndex] || { word: "", hint: "" };
+  const progress = words.length > 0 ? ((currentWordIndex + 1) / words.length) * 100 : 0;
+  const totalWords = words.length;
 
   useEffect(() => {
     return () => {
@@ -44,12 +60,22 @@ export default function DictationScreen() {
   }, []);
 
   const handlePlayAudio = async () => {
-    setIsPlaying(true);
-    try {
-      await audioService.playAndAutoStop(2000);
-      setIsPlaying(false);
-    } catch {
-      setIsPlaying(false);
+    if (dictation?.audioUrl) {
+      setIsPlaying(true);
+      try {
+        await audioService.play(dictation.audioUrl);
+        setIsPlaying(false);
+      } catch {
+        setIsPlaying(false);
+      }
+    } else {
+      setIsPlaying(true);
+      try {
+        await audioService.playAndAutoStop(2000);
+        setIsPlaying(false);
+      } catch {
+        setIsPlaying(false);
+      }
     }
   };
 
@@ -64,7 +90,7 @@ export default function DictationScreen() {
     setAnswers(prev => [...prev, { word: currentWord.word, correct: isCorrect }]);
 
     setTimeout(() => {
-      if (currentWordIndex < DICTATION_WORDS.length - 1) {
+      if (currentWordIndex < totalWords - 1) {
         setCurrentWordIndex(prev => prev + 1);
         setUserInput("");
         setCurrentAnswer(null);
@@ -75,9 +101,10 @@ export default function DictationScreen() {
   };
 
   const navigateToResult = () => {
-    const totalQuestions = DICTATION_WORDS.length;
+    const totalQuestions = totalWords;
     const earnedXp = score * 20;
     const returnRoute = params.returnRoute || `/(stacks)/(cours)/${params.courseId}`;
+    const instanceId = params.instanceId || params.moduleId || '0';
     
     router.push({
       pathname: "/(stacks)/(cours)/result",
@@ -88,11 +115,113 @@ export default function DictationScreen() {
         xp: earnedXp.toString(),
         courseId: params.courseId || '',
         moduleId: params.moduleId || '',
+        instanceId: instanceId,
         moduleTitle: params.moduleTitle || '',
         returnRoute: encodeURIComponent(returnRoute),
       }
     } as any);
   };
+
+  if (isLoading) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
+        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
+          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+            <Feather name="arrow-left" size={24} color="black" />
+          </Pressable>
+          <Text className="text-lg font-bold text-gray-900">Dictée audio</Text>
+        </View>
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color="#002366" />
+          <Text className="mt-4 text-gray-500">Chargement depuis Moodle...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ✅ AFFICHER LES ERREURS EXPLICITEMENT
+  if (error || !dictation) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
+        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
+          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+            <Feather name="arrow-left" size={24} color="black" />
+          </Pressable>
+          <Text className="text-lg font-bold text-gray-900">Dictée audio</Text>
+        </View>
+        <View className="flex-1 items-center justify-center px-5">
+          <View className="bg-red-50 rounded-3xl p-8 items-center border border-red-200">
+            <Feather name="alert-circle" size={64} color="#EF4444" />
+            <Text className="text-xl font-bold text-red-900 mt-4 text-center">
+              Impossible de charger la dictée
+            </Text>
+            <Text className="text-red-700 text-center mt-2 text-sm">
+              {error || 'Cette activité n\'est pas disponible'}
+            </Text>
+            <Text className="text-gray-500 text-center mt-4 text-xs">
+              Assurez-vous que vous avez une connexion Internet et que l&apos;activité existe dans Moodle.
+            </Text>
+            <Pressable
+              onPress={() => router.back()}
+              className="bg-red-500 rounded-full px-6 py-3 mt-6"
+            >
+              <Text className="text-white font-bold">Retour</Text>
+            </Pressable>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+  
+  if (isLoading) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
+        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
+          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+            <Feather name="arrow-left" size={24} color="black" />
+          </Pressable>
+          <Text className="text-lg font-bold text-gray-900">Dictée audio</Text>
+        </View>
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color="#002366" />
+          <Text className="mt-4 text-gray-500">Chargement depuis Moodle...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (error || (!dictation && !EMPTY_DICTATION.words.length)) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
+        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
+          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+            <Feather name="arrow-left" size={24} color="black" />
+          </Pressable>
+          <Text className="text-lg font-bold text-gray-900">Dictée audio</Text>
+        </View>
+        <View className="flex-1 items-center justify-center px-5">
+          <View className="bg-white rounded-3xl p-8 items-center border border-gray-200">
+            <View className="w-16 h-16 rounded-full bg-red-100 items-center justify-center mb-4">
+              <Feather name="alert-circle" size={32} color="#EF4444" />
+            </View>
+            <Text className="text-xl font-bold text-gray-900 mb-2 text-center">
+              Aucune activité trouvée
+            </Text>
+            <Text className="text-gray-500 text-center mb-6">
+              Ce contenu n&apos;est pas disponible sur Moodle.{'\n'}
+              {error && `Erreur: ${error}`}
+            </Text>
+            <Pressable
+              onPress={() => router.back()}
+              className="bg-[#002366] rounded-full px-8 py-3"
+            >
+              <Text className="text-white font-bold">Retour au cours</Text>
+            </Pressable>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
@@ -103,7 +232,7 @@ export default function DictationScreen() {
         <View className="flex-1">
           <Text className="text-lg font-bold text-gray-900">Dictée audio</Text>
           <Text className="text-gray-500 text-xs">
-            Mot {currentWordIndex + 1}/{DICTATION_WORDS.length}
+            Mot {currentWordIndex + 1}/{totalWords}
           </Text>
         </View>
         <View className="bg-[#F59E0B] px-3 py-1 rounded-full">

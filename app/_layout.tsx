@@ -1,5 +1,5 @@
 import { Stack } from "expo-router";
-import React from "react";
+import React, { useEffect } from "react";
 import { Provider } from "react-redux";
 import { store } from "../services/redux/store";
 import "../global.css";
@@ -7,9 +7,25 @@ import "../global.css";
 import { useFonts } from "expo-font";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { useAuthRestore } from "../hooks/useAuthRestore";
+import { getDBConnection, createTables } from "../services/storage/db-service";
 
 function AuthRestoreWrapper() {
   useAuthRestore();
+  return null;
+}
+
+function DatabaseInitializer() {
+  useEffect(() => {
+    const initDB = async () => {
+      try {
+        const db = await getDBConnection();
+        await createTables(db);
+      } catch (err) {
+        console.warn("Failed to initialize database:", err);
+      }
+    };
+    initDB();
+  }, []);
   return null;
 }
 
@@ -24,6 +40,7 @@ export default function RootLayout() {
 
   return (
     <Provider store={store}>
+      <DatabaseInitializer />
       <AuthRestoreWrapper />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" options={{ headerShown: false }} />

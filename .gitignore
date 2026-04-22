@@ -12,6 +12,7 @@ expo-env.d.ts
 # Native
 .kotlin/
 *.orig.*
+Avancement.md
 *.jks
 *.p8
 *.p12
@@ -25,7 +26,13 @@ expo-env.d.ts
 npm-debug.*
 yarn-debug.*
 yarn-error.*
-
+COURSE_STRUCTURE_GUIDE.md
+DEEP_ANALYSIS_SYNC_ISSUES.md
+FIXES_IMPLEMENTATION_GUIDE.md
+RESUME_FRANCAIS.md
+ACTION_PLAN_SUMMARY.md
+VISUAL_GUIDE_DIAGRAMS.md
+QUICK_START_CHECKLIST.md
 # macOS
 .DS_Store
 *.pem

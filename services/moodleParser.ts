@@ -186,10 +186,6 @@ export function groupSectionContents(section: ParsedSection): {
     const mapped = mapModuleToContentType(module);
 
     switch (mapped.type) {
-      case 'lesson':
-      case 'html':
-        lessons.push(module);
-        break;
       case 'quiz':
         quizzes.push(module);
         activities.push(module);
@@ -202,17 +198,18 @@ export function groupSectionContents(section: ParsedSection): {
       case 'wordOrder':
         activities.push(module);
         break;
-      case 'html':
-        if (mapped.audioUrl) {
-          audioContent.push(module);
-        } else if (mapped.pdfUrl || mapped.epubUrl) {
-          documents.push(module);
-        } else {
-          lessons.push(module);
-        }
-        break;
       default:
-        other.push(module);
+        if (mapped.type === 'lesson' || mapped.type === 'html') {
+          if (mapped.audioUrl) {
+            audioContent.push(module);
+          } else if (mapped.pdfUrl || mapped.epubUrl) {
+            documents.push(module);
+          } else {
+            lessons.push(module);
+          }
+        } else {
+          other.push(module);
+        }
     }
   }
 

@@ -1,5 +1,5 @@
 import { AntDesign, Feather } from "@expo/vector-icons";
-import React from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -7,8 +7,17 @@ import { useSelector } from "react-redux";
 import { RootState } from "../../../services/redux/store";
 import { useCourseContent } from "../../../hooks/useCourseContent";
 import { getContentTypeIcon, getContentTypeColor, getContentTypeLabel, MappedContent } from "../../../utils/contentMapper";
-import { ActivityType } from "../../../utils/xpCalculator";
+import { ActivityType, XP_CONFIG } from "../../../utils/xpCalculator";
 import { isEpubFile } from "../../../services/contentLoader";
+import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
+import { syncCourseProgress, checkInternetConnection } from "../../../services/sync/progressSync";
+import { ActivityCard } from "@/components/ActivityCard";
+import { ActivityTabs } from "@/components/ActivityTabs";
+import { EmptyState } from "@/components/EmptyState";
+import { FilterTab, PaginationState, ActivityWithProgress } from "@/types/activity";
+
+const ACTIVITY_TYPES: ActivityType[] = ['quiz', 'dictation', 'listening', 'association', 'wordOrder'];
+const ITEMS_PER_PAGE = 10;
 
 interface Lesson {
   id: number;
@@ -39,6 +48,220 @@ export default function ModuleDetailScreen() {
     error,
     getModuleContent,
   } = useCourseContent(token || "", courseId);
+
+  const [activeTab, setActiveTab] = useState<FilterTab>('all');
+  const [progressData, setProgressData] = useState<Map<number, ActivityWithProgress['progress']>>(new Map());
+  const [progressError, setProgressError] = useState<string | null>(null);
+  const [pagination, setPagination] = useState<PaginationState>({
+    page: 0,
+    totalPages: 0,
+    itemsPerPage: ITEMS_PER_PAGE,
+    hasMore: false,
+  });
+
+  useEffect(() => {
+    const loadProgress = async () => {
+      if (!courseId || !token) {
+        setProgressError("Connectez-vous pour voir votre progression");
+        return;
+      }
+      try {
+        const scores = await getAllScoresForCourse(courseId);
+        const progressMap = new Map<number, ActivityWithProgress['progress']>();
+        
+        scores.forEach((scoreData, moduleId) => {
+          progressMap.set(moduleId, {
+            moduleId: scoreData.moduleId,
+            courseId: scoreData.courseId,
+            type: scoreData.type,
+            bestScore: scoreData.bestScore,
+            totalScore: scoreData.totalScore,
+            attempts: scoreData.attemptsCount,
+            isCompleted: scoreData.isCompleted,
+            lastAttempt: scoreData.lastAttempt,
+            xpEarned: scoreData.xpEarned,
+          });
+        });
+        
+        setProgressData(progressMap);
+        
+        console.log('[ModuleDetail] Loaded scores for', scores.size, 'activities from SQLite');
+        
+        const MODNAME_TO_ACTIVITY: Record<string, ActivityType> = {
+          quiz: 'quiz',
+          assign: 'dictation',
+          choice: 'listening',
+          lesson: 'association',
+          glossary: 'association',
+        };
+        
+        const totalActivities = sections?.reduce((sum, s) => sum + (s.modules?.filter(m => {
+          const modname = (m.modname || '').toLowerCase();
+          return MODNAME_TO_ACTIVITY[modname] !== undefined;
+        }).length || 0), 0) || 0;
+        
+        console.log('[ModuleDetail] Total activities in course:', totalActivities);
+        
+        const isConnected = await checkInternetConnection();
+        if (isConnected) {
+          console.log('[ModuleDetail] Online - syncing with Moodle in background...');
+          syncCourseProgress(token, courseId, totalActivities).then(syncResult => {
+            if (syncResult.success) {
+              console.log('[ModuleDetail] Sync completed, reloading scores...');
+              getAllScoresForCourse(courseId).then(updatedScores => {
+                const updatedMap = new Map<number, ActivityWithProgress['progress']>();
+                updatedScores.forEach((scoreData, modId) => {
+                  updatedMap.set(modId, {
+                    moduleId: scoreData.moduleId,
+                    courseId: scoreData.courseId,
+                    type: scoreData.type,
+                    bestScore: scoreData.bestScore,
+                    totalScore: scoreData.totalScore,
+                    attempts: scoreData.attemptsCount,
+                    isCompleted: scoreData.isCompleted,
+                    lastAttempt: scoreData.lastAttempt,
+                    xpEarned: scoreData.xpEarned,
+                  });
+                });
+                setProgressData(updatedMap);
+                console.log('[ModuleDetail] Updated scores after sync:', updatedScores.size);
+              });
+            }
+          });
+        } else {
+          console.log('[ModuleDetail] Offline - skipping Moodle sync');
+        }
+      } catch (err) {
+        console.warn('Failed to load progress:', err);
+        setProgressError("Erreur lors du chargement de la progression");
+      }
+    };
+    loadProgress();
+  }, [courseId, token, sections]);
+
+  const activities = useMemo(() => {
+    const result: ActivityWithProgress[] = [];
+    let order = 0;
+
+    if (!sections || sections.length === 0) {
+      return result;
+    }
+
+    for (const section of sections) {
+      const sectionModules = section.modules || [];
+      for (const mod of sectionModules) {
+        const modname = mod.modname?.toLowerCase() || '';
+        let type: ActivityType | null = null;
+        
+        if (modname === 'quiz') {
+          type = 'quiz';
+        } else if (modname === 'assign' || modname === 'assignment') {
+          type = 'dictation';
+        } else if (modname === 'choice') {
+          type = 'listening';
+        } else if (modname === 'lesson') {
+          type = 'association';
+        } else if (modname === 'glossary') {
+          type = 'association';
+        }
+        
+        if (type && ACTIVITY_TYPES.includes(type)) {
+          const xp = XP_CONFIG[type]?.baseXP || 10;
+          const progress = progressData.get(mod.id);
+          
+          result.push({
+            id: mod.id,
+            instanceId: mod.instance || mod.id,
+            title: mod.name || `Activité ${mod.id}`,
+            type,
+            xp,
+            order: order++,
+            sectionId: section.id,
+            sectionName: section.title,
+            progress: progress || undefined,
+          });
+        }
+      }
+    }
+
+    if (activeTab !== 'all') {
+      return result.filter(a => a.type === activeTab);
+    }
+    return result;
+  }, [sections, activeTab, progressData]);
+
+  const tabCounts = useMemo(() => {
+    const counts: Record<FilterTab, number> = {
+      all: activities.length,
+      quiz: 0,
+      dictation: 0,
+      listening: 0,
+      association: 0,
+      wordOrder: 0,
+    };
+    
+    activities.forEach(a => {
+      if (counts[a.type] !== undefined) {
+        counts[a.type]++;
+      }
+    });
+    
+    return counts;
+  }, [activities]);
+
+  const paginatedActivities = useMemo(() => {
+    const start = pagination.page * pagination.itemsPerPage;
+    return activities.slice(start, start + pagination.itemsPerPage);
+  }, [activities, pagination.page]);
+
+  const totalPages = Math.ceil(activities.length / pagination.itemsPerPage);
+
+  useEffect(() => {
+    setPagination(prev => ({
+      ...prev,
+      totalPages,
+      hasMore: (prev.page + 1) * prev.itemsPerPage < activities.length,
+    }));
+  }, [activities.length]);
+
+  const loadMore = () => {
+    if (pagination.hasMore) {
+      setPagination(prev => ({
+        ...prev,
+        page: prev.page + 1,
+      }));
+    }
+  };
+
+  const handleActivityPress = (activity: ActivityWithProgress) => {
+    const params = { 
+      moduleId: String(activity.id), 
+      moduleTitle: activity.title, 
+      courseId: String(courseId),
+      instanceId: String(activity.instanceId || activity.id),
+      cmid: String(activity.id)
+    };
+
+    switch (activity.type) {
+      case 'quiz':
+        router.push({ pathname: '/quiz', params } as any);
+        break;
+      case 'dictation':
+        router.push({ pathname: '/(stacks)/(cours)/dictation', params } as any);
+        break;
+      case 'listening':
+        router.push({ pathname: '/(stacks)/(cours)/listening', params } as any);
+        break;
+      case 'association':
+        router.push({ pathname: '/(stacks)/(cours)/association', params } as any);
+        break;
+      case 'wordOrder':
+        router.push({ pathname: '/(stacks)/(cours)/game', params } as any);
+        break;
+      default:
+        console.warn('[handleActivityPress] Unknown activity type:', activity.type);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -141,7 +364,7 @@ export default function ModuleDetailScreen() {
     const handleLessonPress = (lesson: Lesson) => {
     if (lesson.isLocked) return;
 
-    const params = `?moduleId=${lesson.id}&moduleTitle=${encodeURIComponent(lesson.title)}&courseId=${courseId}`;
+    const params = `?moduleId=${lesson.id}&moduleTitle=${encodeURIComponent(lesson.title)}&courseId=${courseId}&cmid=${lesson.id}&instanceId=${lesson.id}`;
 
     if (lesson.epubUrl) {
       router.push(`/(stacks)/(cours)/epub/epub-reader?epubUrl=${encodeURIComponent(lesson.epubUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
@@ -149,18 +372,18 @@ export default function ModuleDetailScreen() {
     }
 
     if (lesson.pdfUrl) {
-      router.push(`/(stacks)/(cours)/pdf/pdf-viewer?pdfUrl=${encodeURIComponent(lesson.pdfUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
+      router.push(`/(stacks)/(cours)/pdf/pdf-viewer?pdfUrl=${encodeURIComponent(lesson.pdfUrl)}&title=${encodeURIComponent(lesson.title)}` );
       return;
     }
 
     if (lesson.audioUrl) {
-      router.push(`/(stacks)/(cours)/audio-player?audioUrl=${encodeURIComponent(lesson.audioUrl)}&moduleId=${lesson.id}&title=${encodeURIComponent(lesson.title)}&courseId=${courseId}` as any);
+      router.push(`/(stacks)/(cours)/audio-player?audioUrl=${encodeURIComponent(lesson.audioUrl)}&moduleId=${lesson.id}&title=${encodeURIComponent(lesson.title)}&courseId=${courseId}` );
       return;
     }
 
     switch (lesson.type) {
       case 'quiz':
-        router.push(`/(quiz)/index${params}` as any);
+        router.push({ pathname: '/quiz', params } as any);
         break;
       case 'dictation':
         router.push(`/(stacks)/(cours)/dictation${params}` as any);
@@ -174,8 +397,18 @@ export default function ModuleDetailScreen() {
       case 'wordOrder':
         router.push(`/(stacks)/(cours)/game${params}` as any);
         break;
+      case 'resource':
+      case 'folder':
       case 'lesson':
       case 'html':
+        if (lesson.epubUrl) {
+          router.push(`/(stacks)/(cours)/epub/epub-reader?epubUrl=${encodeURIComponent(lesson.epubUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
+        } else if (lesson.pdfUrl) {
+          router.push(`/(stacks)/(cours)/pdf/pdf-viewer?pdfUrl=${encodeURIComponent(lesson.pdfUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
+        } else {
+          router.push(`/(stacks)/(cours)/lesson/${lesson.id}?courseId=${courseId}` as any);
+        }
+        break;
       default:
         router.push(`/(stacks)/(cours)/lesson/${lesson.id}?courseId=${courseId}` as any);
         break;
@@ -246,6 +479,52 @@ export default function ModuleDetailScreen() {
           </View>
         </View>
 
+        <View className="px-5 mb-4">
+          <Text className="text-lg font-bold text-gray-900 mb-3">Activités</Text>
+          
+          <ActivityTabs
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            counts={tabCounts}
+          />
+        </View>
+
+        <View className="px-5 mb-4">
+          {activities.length === 0 ? (
+            <EmptyState
+              title="Aucune activité trouvée"
+              message="Ce cours ne contient pas d'activités de type quiz, dictée, listening, association ou ordre des mots."
+              actionLabel="Retour"
+              onAction={() => router.back()}
+            />
+          ) : (
+            <>
+              {paginatedActivities.map((activity) => (
+                <ActivityCard
+                  key={activity.id}
+                  activity={activity}
+                  onPress={() => handleActivityPress(activity)}
+                />
+              ))}
+              
+              {pagination.hasMore && (
+                <Pressable
+                  onPress={loadMore}
+                  className="bg-white border border-gray-200 rounded-xl py-3 items-center mt-2"
+                >
+                  <Text className="text-[#002366] font-medium">Charger plus</Text>
+                </Pressable>
+              )}
+              
+              {!pagination.hasMore && activities.length > pagination.itemsPerPage && (
+                <Text className="text-center text-gray-400 text-sm mt-2">
+                  Fin des activités
+                </Text>
+              )}
+            </>
+          )}
+        </View>
+
         {sections.map((section) => (
           <View key={section.id} className="px-5 mb-4">
             <View className="flex-row items-center mb-3">
@@ -268,7 +547,7 @@ export default function ModuleDetailScreen() {
 
             {section.modules.map((mod, idx) => {
               const content = getModuleContent(mod.id);
-              const type = content?.type || 'html';
+              const type = content?.type || (mod.modname === 'quiz' ? 'quiz' : mod.modname === 'resource' ? 'resource' : 'html');
               const { icon, color } = getLessonIcon(type);
               const typeLabel = getContentTypeLabel(type);
               const isCompleted = mod.completiondata?.completionstate === 2;
@@ -289,6 +568,9 @@ export default function ModuleDetailScreen() {
                         isLocked,
                         moduleName: mod.name || "",
                         modname: mod.modname || "unknown",
+                        epubUrl: content?.epubUrl,
+                        pdfUrl: content?.pdfUrl,
+                        audioUrl: content?.audioUrl,
                       };
                       handleLessonPress(lesson);
                     }

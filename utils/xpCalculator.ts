@@ -1,4 +1,4 @@
-export type ActivityType = 'quiz' | 'dictation' | 'listening' | 'association' | 'wordOrder' | 'lesson' | 'html';
+export type ActivityType = 'quiz' | 'dictation' | 'listening' | 'association' | 'wordOrder' | 'lesson' | 'html' | 'resource' | 'folder' | 'book' | 'label';
 
 export interface XPConfig {
   baseXP: number;

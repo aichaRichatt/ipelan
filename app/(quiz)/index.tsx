@@ -26,6 +26,8 @@ export default function QuizScreen() {
   const moduleId = parseInt(params.moduleId || "0", 10);
   const courseId = parseInt(params.courseId || "0", 10);
   
+  console.log('[Quiz] Loading quiz - moduleId:', moduleId, 'courseId:', courseId);
+  
   const { quiz, questions: dynamicQuestions, isLoading, error } = useQuizContent(token || '', moduleId, courseId);
   
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
@@ -36,10 +38,15 @@ export default function QuizScreen() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [showResult, setShowResult] = useState(false);
 
+  console.log('[Quiz] Current state - quiz:', quiz?.name, 'questions:', questions.length, 'error:', error);
+
   useEffect(() => {
+    console.log('[Quiz] Raw dynamicQuestions:', JSON.stringify(dynamicQuestions, null, 2));
+    
     if (dynamicQuestions && dynamicQuestions.length > 0) {
       const converted: QuizQuestion[] = dynamicQuestions.map(q => {
         const { options, newCorrectIndex } = shuffleOptions(q.options || [], q.correctAnswer ?? 0);
+        console.log(`[Quiz] Question ${q.id}:`, { question: q.question, options, correctIndex: newCorrectIndex });
         return {
           id: q.id,
           type: q.audioUrl ? 'audio-mcq' as const : 'text-mcq' as const,
@@ -50,7 +57,9 @@ export default function QuizScreen() {
         };
       });
       setQuestions(converted);
+      console.log('[Quiz] Converted questions:', converted.length);
     } else {
+      console.log('[Quiz] Using default questions (fallback)');
       setQuestions(generateDefaultQuestions());
     }
   }, [dynamicQuestions]);
@@ -189,7 +198,8 @@ export default function QuizScreen() {
               <View className="flex-row w-full">
                 <Pressable
                   onPress={() => {
-                    const resultParams = `?activity=Quiz&score=${score}&total=${questions.length}&xp=${score * 20}&moduleId=${params.moduleId || ''}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Quiz')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
+                    const instanceId = params.instanceId || params.moduleId || '0';
+                    const resultParams = `?activity=Quiz&score=${score}&total=${questions.length}&xp=${score * 20}&moduleId=${params.moduleId || ''}&instanceId=${instanceId}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Quiz')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
                     router.push(`/(stacks)/(cours)/result${resultParams}` as any);
                   }}
                   className="flex-1 bg-gray-200 py-4 rounded-xl mr-2"

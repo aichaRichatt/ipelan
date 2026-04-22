@@ -6,13 +6,19 @@ import { useRouter } from "expo-router";
 import { useLogin } from "../../../hooks/useLogin";
 import { useSelector } from "react-redux";
 import { RootState } from "../../../services/redux/store";
-import { getEnrolledCoursesByTimeline } from "../../../services/api/courseService";
+import { getEnrolledCoursesByTimeline, getCourseContents } from "../../../services/api/courseService";
+import { getUserBadges } from "../../../services/api/badgeService";
+import { getAllCourseProgress, CourseProgressData } from "../../../services/storage/course-progress";
+import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
 
 interface UserCourse {
   id: number;
   fullname: string;
   progress: number;
   visible: boolean;
+  lessonsCount: number;
+  dbProgress?: CourseProgressData;
+  totalScore?: string;
 }
 
 export default function ProgressScreen() {
@@ -21,6 +27,7 @@ export default function ProgressScreen() {
   const token = useSelector((state: RootState) => state.auth.token);
   const [courses, setCourses] = useState<UserCourse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [badgesCount, setBadgesCount] = useState(0);
 
   useEffect(() => {
     const fetchCourses = async () => {
@@ -31,7 +38,47 @@ export default function ProgressScreen() {
       try {
         const response = await getEnrolledCoursesByTimeline(token);
         if (response?.courses) {
-          setCourses(response.courses.filter((c: any) => c.visible !== false));
+          const visible = response.courses.filter((c: any) => c.visible !== false);
+          const allProgress = await getAllCourseProgress();
+          const progressMap = new Map(allProgress.map(p => [p.courseId, p]));
+          
+          const enriched: UserCourse[] = await Promise.all(
+            visible.map(async (c: any) => {
+              let lessonsCount = 0;
+              let dbProgress = progressMap.get(c.id);
+              let totalScore: string | undefined;
+              
+              try {
+                const sections = await getCourseContents(token, c.id);
+                if (Array.isArray(sections)) {
+                  sections.forEach((s: any) => { if (s.modules) lessonsCount += s.modules.length; });
+                }
+              } catch { }
+              
+              if (dbProgress) {
+                const scores = await getAllScoresForCourse(c.id);
+                if (scores.size > 0) {
+                  let best = 0, total = 0;
+                  scores.forEach(s => { best += s.bestScore; total += s.totalScore; });
+                  if (total > 0) totalScore = `${best}/${total}`;
+                }
+              }
+              
+              return { 
+                id: c.id, 
+                fullname: c.fullname, 
+                progress: dbProgress && dbProgress.totalActivities > 0 
+                  ? Math.round((dbProgress.completedActivities / dbProgress.totalActivities) * 100)
+                  : c.progress || 0, 
+                visible: c.visible ?? true, 
+                lessonsCount,
+                dbProgress,
+                totalScore
+              };
+            })
+          );
+          console.log('[Progress] Loaded', enriched.length, 'courses with progress from DB');
+          setCourses(enriched);
         }
       } catch (error) {
         console.error("Failed to fetch courses:", error);
@@ -42,8 +89,15 @@ export default function ProgressScreen() {
     fetchCourses();
   }, [token]);
 
-  const totalLessons = courses.length * 5;
-  const completedLessons = Math.floor(courses.reduce((sum, c) => sum + (c.progress / 100), 0) * 5);
+  useEffect(() => {
+    if (!user?.id || !token) return;
+    getUserBadges(token, user.id)
+      .then(b => setBadgesCount(b.length))
+      .catch(() => setBadgesCount(0));
+  }, [user?.id, token]);
+
+  const totalLessons = courses.reduce((sum, c) => sum + c.lessonsCount, 0);
+  const completedLessons = courses.reduce((sum, c) => sum + Math.floor((c.progress / 100) * c.lessonsCount), 0);
   const completedCourses = courses.filter(c => c.progress === 100).length;
   const inProgressCourses = courses.filter(c => c.progress > 0 && c.progress < 100).length;
 
@@ -274,6 +328,45 @@ export default function ProgressScreen() {
             </View>
             <View className="h-2 bg-gray-200 rounded-full overflow-hidden">
               <View className="h-full bg-yellow-400 rounded-full" style={{ width: `${Math.min((userCoins / 500) * 100, 100)}%` }} />
+            </View>
+          </View>
+
+          <View className="bg-white rounded-2xl p-4 border border-gray-200 mt-3">
+            <View className="flex-row justify-between items-center mb-2">
+              <Text className="text-sm font-medium text-gray-700">Score total activités</Text>
+              {(() => {
+                let totalBest = 0, totalMax = 0;
+                courses.forEach(c => {
+                  if (c.totalScore) {
+                    const [best, max] = c.totalScore.split('/').map(Number);
+                    totalBest += best;
+                    totalMax += max;
+                  }
+                });
+                return (
+                  <Text className="text-sm font-bold text-green-600">
+                    {totalMax > 0 ? `${totalBest}/${totalMax}` : '-'}
+                  </Text>
+                );
+              })()}
+            </View>
+            <View className="h-2 bg-gray-200 rounded-full overflow-hidden">
+              {(() => {
+                let totalBest = 0, totalMax = 0;
+                courses.forEach(c => {
+                  if (c.totalScore) {
+                    const [best, max] = c.totalScore.split('/').map(Number);
+                    totalBest += best;
+                    totalMax += max;
+                  }
+                });
+                return (
+                  <View 
+                    className="h-full bg-green-500 rounded-full" 
+                    style={{ width: `${totalMax > 0 ? (totalBest / totalMax) * 100 : 0}%` }} 
+                  />
+                );
+              })()}
             </View>
           </View>
         </View>

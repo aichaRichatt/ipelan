@@ -1,28 +1,175 @@
+import { getCourseContents } from "@/services/api/courseService";
+import { RootState } from "@/services/redux/store";
+import { getBestScore, saveActivityScore } from "@/services/storage/activity-progress";
+import { updateCourseProgressFromActivities } from "@/services/storage/course-progress";
+import { syncAfterActivity } from "@/services/sync/progressSync";
+import { ActivityType } from "@/utils/xpCalculator";
 import { Feather } from "@expo/vector-icons";
-import React from "react";
-import { Pressable, Text, View, ScrollView } from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useSelector } from "react-redux";
+
+const IS_DEV = process.env.NODE_ENV === "development";
+
+const activityTypeMap: Record<string, ActivityType> = {
+  'Quiz': 'quiz',
+  'Dictée audio': 'dictation',
+  'Listening': 'listening',
+  'Association': 'association',
+  'Ordre des mots': 'wordOrder',
+};
 
 export default function ResultScreen() {
   const router = useRouter();
+  const token = useSelector((state: RootState) => state.auth.token);
   const params = useLocalSearchParams<{
     activity?: string;
     score?: string;
     total?: string;
     xp?: string;
     moduleId?: string;
+    instanceId?: string;
     moduleTitle?: string;
     courseId?: string;
     returnRoute?: string;
+    totalActivities?: string;
   }>();
   
   const score = parseInt(params.score || "0", 10);
   const total = parseInt(params.total || "1", 10);
   const xp = parseInt(params.xp || "0", 10);
   const coins = Math.round(xp / 5);
+  const moduleId = parseInt(params.moduleId || "0", 10);
+  const instanceId = parseInt(params.instanceId || params.moduleId || "0", 10);
+  const courseId = parseInt(params.courseId || "0", 10);
+  const activityType = activityTypeMap[params.activity || ''] || 'quiz';
   
   const percentage = Math.round((score / Math.max(total, 1)) * 100);
+  const isCompleted = percentage >= 50;
+
+  // ✅ État de synchronisation
+  const [syncStatus, setSyncStatus] = useState<'pending' | 'syncing' | 'success' | 'error'>('pending');
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const saveProgress = async () => {
+      if (!moduleId || !courseId) {
+        if (IS_DEV) console.log('[Result] Missing moduleId or courseId');
+        return;
+      }
+
+      let activityCount = 0;
+      try {
+        const sections = await getCourseContents(token || '', courseId);
+        if (sections && sections.length > 0) {
+          activityCount = sections.reduce((sum, s) => sum + (s.modules?.length || 0), 0);
+        }
+      } catch (err) {
+        if (IS_DEV) console.warn('[Result] Failed to get course contents:', err);
+        activityCount = 1;
+      }
+
+      if (IS_DEV) {
+        console.log('[Result] Saving progress:', {
+          moduleId,
+          courseId,
+          activityType,
+          score,
+          total,
+          xp,
+          isCompleted,
+          totalActivities: activityCount,
+        });
+      }
+
+      try {
+        // ✅ Étape 1 : Sauvegarder localement en SQLite
+        setSyncStatus('pending');
+        setSyncMessage('Sauvegarde en cours...');
+
+        await saveActivityScore(moduleId, courseId, activityType, score, total, xp);
+
+        await updateCourseProgressFromActivities(courseId, activityCount);
+
+        if (IS_DEV) {
+          console.log('[Result] ✅ Local save successful');
+        }
+
+        // ✅ Étape 2 : Synchroniser avec Moodle (async, ne pas bloquer)
+        if (token) {
+          setSyncStatus('syncing');
+          setSyncMessage('Synchronisation avec Moodle...');
+
+          if (IS_DEV) {
+            console.log('[Result] Starting Moodle sync:', {
+              instanceId,
+              moduleId,
+              token: '***',
+            });
+          }
+
+          syncAfterActivity(moduleId, courseId, activityType, score, total, xp, instanceId)
+            .then((syncResult) => {
+              if (syncResult.success) {
+                setSyncStatus('success');
+                setSyncMessage('✅ Synchronisé avec Moodle');
+
+                if (IS_DEV) {
+                  console.log('[Result] ✅ Moodle sync successful:', syncResult);
+                }
+
+                // Masquer le message après 2s
+                setTimeout(() => {
+                  setSyncMessage(null);
+                }, 2000);
+              } else {
+                setSyncStatus('error');
+                setSyncMessage('⚠️ Sync Moodle en attente (vous êtes hors ligne ?)');
+
+                if (IS_DEV) {
+                  console.warn('[Result] Moodle sync failed:', syncResult);
+                }
+              }
+            })
+            .catch((err) => {
+              setSyncStatus('error');
+              setSyncMessage(`⚠️ Erreur: ${err.message || 'Sync échouée'}`);
+
+              if (IS_DEV) {
+                console.error('[Result] Moodle sync exception:', err);
+              }
+            });
+        } else {
+          setSyncStatus('pending');
+          setSyncMessage('Mode hors ligne (sync au redémarrage)');
+
+          if (IS_DEV) {
+            console.log('[Result] No token, offline mode');
+          }
+        }
+
+        // Afficher la progression sauvegardée
+        const savedProgress = await getBestScore(moduleId, courseId);
+        if (IS_DEV) {
+          console.log('[Result] Best score saved:', {
+            bestScore: savedProgress?.bestScore,
+            totalScore: savedProgress?.totalScore,
+            xpEarned: savedProgress?.xpEarned,
+          });
+        }
+      } catch (err) {
+        setSyncStatus('error');
+        setSyncMessage(`Erreur: ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+
+        if (IS_DEV) {
+          console.error('[Result] Failed to save activity progress:', err);
+        }
+      }
+    };
+    saveProgress();
+  }, [moduleId, courseId, activityType, score, total, isCompleted, xp, instanceId, token]);
   
   const getGrade = () => {
     if (percentage >= 90) return { text: "Excellent !", color: "#10B981" };
@@ -34,7 +181,6 @@ export default function ResultScreen() {
   const grade = getGrade();
   
   const decodedReturnRoute = params.returnRoute ? decodeURIComponent(params.returnRoute) : `/(stacks)/(cours)/${params.courseId || ''}`;
-  const decodedModuleTitle = params.moduleTitle ? decodeURIComponent(params.moduleTitle) : "Exercice";
 
   const handleContinue = () => {
     if (decodedReturnRoute.startsWith("/(")) {
@@ -90,6 +236,40 @@ export default function ResultScreen() {
                 <Text className="text-yellow-700 font-bold text-lg">+{coins}</Text>
               </View>
             </View>
+
+            {/* ✅ AFFICHER L'ÉTAT DE SYNCHRONISATION */}
+            {syncMessage && (
+              <View
+                className={`w-full rounded-2xl p-4 mb-6 flex-row items-center ${
+                  syncStatus === 'success'
+                    ? 'bg-green-100'
+                    : syncStatus === 'syncing'
+                      ? 'bg-blue-100'
+                      : 'bg-orange-100'
+                }`}
+              >
+                {syncStatus === 'syncing' && (
+                  <ActivityIndicator size="small" color="#002366" style={{ marginRight: 12 }} />
+                )}
+                {syncStatus === 'success' && (
+                  <Feather name="check-circle" size={20} color="#10B981" style={{ marginRight: 12 }} />
+                )}
+                {syncStatus === 'error' && (
+                  <Feather name="alert-circle" size={20} color="#F59E0B" style={{ marginRight: 12 }} />
+                )}
+                <Text
+                  className={`flex-1 text-sm font-medium ${
+                    syncStatus === 'success'
+                      ? 'text-green-700'
+                      : syncStatus === 'syncing'
+                        ? 'text-blue-700'
+                        : 'text-orange-700'
+                  }`}
+                >
+                  {syncMessage}
+                </Text>
+              </View>
+            )}
 
             {percentage >= 70 && (
               <View className="bg-gradient-to-r from-[#002366] to-[#4a90e2] rounded-2xl p-6 w-full mb-6 items-center">

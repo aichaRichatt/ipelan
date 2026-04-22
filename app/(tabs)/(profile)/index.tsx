@@ -1,13 +1,32 @@
-import { View, Text, Pressable, ScrollView, Alert, SafeAreaView as RNSafeAreaView } from "react-native";
-import React from "react";
+import { View, Text, Pressable, ScrollView, Alert } from "react-native";
+import React, { useState, useEffect } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLogin } from "../../../hooks/useLogin";
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { getUserBadges } from "../../../services/api/badgeService";
 
 export default function ProfileScreen() {
   const { user, logoutUser, token } = useLogin();
   const router = useRouter();
+  const [badgesCount, setBadgesCount] = useState(0);
+
+  const getLevelFromXP = (xp: number): number => {
+    if (xp < 100) return 1;
+    if (xp < 300) return 2;
+    if (xp < 600) return 3;
+    if (xp < 1000) return 4;
+    return 5;
+  };
+
+  const userLevel = getLevelFromXP(user?.ipelan_xp || 0);
+
+  useEffect(() => {
+    if (!user?.id || !token) return;
+    getUserBadges(token, user.id)
+      .then(b => setBadgesCount(b.length))
+      .catch(() => setBadgesCount(0));
+  }, [user?.id, token]);
 
   const handleLogout = () => {
     Alert.alert(
@@ -64,7 +83,7 @@ export default function ProfileScreen() {
           
           <View className="bg-white w-[48%] rounded-2xl p-4 items-center border border-gray-100 mb-4 shadow-sm" style={{ shadowColor: '#000', shadowOpacity: 0.02, elevation: 1 }}>
             <Feather name="award" size={28} color="#10B981" className="mb-2" />
-            <Text className="font-bold text-gray-800 text-lg">1</Text>
+            <Text className="font-bold text-gray-800 text-lg">{userLevel}</Text>
             <Text className="text-xs text-gray-500 font-bold uppercase tracking-tighter">NIVEAU</Text>
           </View>
 
@@ -76,7 +95,7 @@ export default function ProfileScreen() {
           
           <View className="bg-white w-[48%] rounded-2xl p-4 items-center border border-gray-100 shadow-sm" style={{ shadowColor: '#000', shadowOpacity: 0.02, elevation: 1 }}>
             <Ionicons name="medal" size={28} color="#8B5CF6" className="mb-2" />
-            <Text className="font-bold text-gray-800 text-lg">3</Text>
+            <Text className="font-bold text-gray-800 text-lg">{badgesCount}</Text>
             <Text className="text-xs text-gray-500 font-bold uppercase tracking-tighter">BADGES</Text>
           </View>
 

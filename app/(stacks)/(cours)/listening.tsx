@@ -1,101 +1,73 @@
-import { Feather } from "@expo/vector-icons";
-import React, { useState, useEffect } from "react";
-import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { audioService } from "../../../services/audio/audioService";
-import { useSelector } from "react-redux";
+import { ListeningData, useActivityContent } from "@/hooks/useActivityContent";
 import { RootState } from "@/services/redux/store";
-import { getEnrolledCoursesByTimeline, getCourseSections } from "@/services/api/courseService";
-
-interface ListeningExercise {
-  id: number;
-  word: string;
-  translation: string;
-  audioUrl?: string;
-  courseName: string;
-}
+import { Feather } from "@expo/vector-icons";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useSelector } from "react-redux";
+import { audioService } from "../../../services/audio/audioService";
 
 export default function ListeningScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ moduleId?: string; moduleTitle?: string; courseId?: string }>();
+  const params = useLocalSearchParams<{ moduleId?: string; moduleTitle?: string; courseId?: string; cmid?: string; instanceId?: string }>();
   const token = useSelector((state: RootState) => state.auth.token);
   
-  const [exercises, setExercises] = useState<ListeningExercise[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const moduleId = parseInt(params.moduleId || "0", 10);
+  const instanceId = parseInt(params.instanceId || params.moduleId || "0", 10);
+  const cmid = parseInt(params.cmid || "0", 10);
+  const courseId = parseInt(params.courseId || "0", 10);
+  
+  const { listening: listeningData, isLoading, error } = useActivityContent(
+    token || '',
+    moduleId,
+    instanceId,
+    'choice',
+    cmid || instanceId,
+    courseId
+  );
+  
+  const [exercises, setExercises] = useState<ListeningData[]>([]);
   const [currentExercise, setCurrentExercise] = useState(0);
   const [score, setScore] = useState(0);
   const [answers, setAnswers] = useState<boolean[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [showResult, setShowResult] = useState(false);
-
-  const handleContinue = () => {
-    const resultParams = `?activity=Listening&score=${score}&total=${exercises.length}&xp=${score * 15}&moduleId=${params.moduleId || ''}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Exercice')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
-    router.push(`/(stacks)/(cours)/result${resultParams}` as any);
-  };
+  const [localIsLoading, setLocalIsLoading] = useState(true);
 
   useEffect(() => {
-    const fetchListeningData = async () => {
-      if (!token) {
-        setIsLoading(false);
-        return;
-      }
+    if (listeningData?.options?.length) {
+      const generated: ListeningData[] = [];
+      listeningData.options.forEach((opt, idx) => {
+        generated.push({
+          id: idx,
+          title: listeningData.title,
+          audioUrl: listeningData.audioUrl,
+          question: listeningData.question,
+          options: listeningData.options,
+          correctIndex: listeningData.correctIndex,
+          translation: opt,
+          courseName: listeningData.courseName || "Pulaar",
+        });
+      });
+      setExercises(generated.slice(0, 5));
+    } else {
+      setExercises([]);
+    }
+    setLocalIsLoading(false);
+  }, [listeningData]);
 
-      try {
-        const coursesResponse = await getEnrolledCoursesByTimeline(token);
-        const courses = coursesResponse?.courses || [];
-        
-        const generatedExercises: ListeningExercise[] = [];
-        
-        for (const course of courses.slice(0, 2)) {
-          try {
-            const sectionsResponse = await getCourseSections(token, course.id);
-            if (Array.isArray(sectionsResponse)) {
-              const modules = sectionsResponse.flatMap((s: any) => s.modules || []);
-              
-              modules.slice(0, 3).forEach((mod: any, idx: number) => {
-                generatedExercises.push({
-                  id: generatedExercises.length + 1,
-                  word: `${mod.name || `Leçon ${idx + 1}`}`,
-                  translation: course.fullname,
-                  courseName: course.fullname,
-                });
-              });
-            }
-          } catch (e) {
-            console.log("Error fetching sections", e);
-          }
-        }
-
-        if (generatedExercises.length === 0) {
-          setExercises(generateDefaultExercises());
-        } else {
-          setExercises(generatedExercises.slice(0, 5));
-        }
-      } catch (error) {
-        console.error("Failed to fetch data:", error);
-        setExercises(generateDefaultExercises());
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchListeningData();
-  }, [token]);
-
-  const generateDefaultExercises = (): ListeningExercise[] => [
-    { id: 1, word: "Mbour", translation: "Ville", courseName: "Pulaar" },
-    { id: 2, word: "Ndma", translation: "Jour", courseName: "Pulaar" },
-    { id: 3, word: "Baba", translation: "Père", courseName: "Pulaar" },
-    { id: 4, word: "Yalla", translation: "Dieu", courseName: "Pulaar" },
-    { id: 5, word: "Jamm", translation: "Paix", courseName: "Pulaar" },
-  ];
+  const handleContinue = () => {
+    const instanceId = params.instanceId || params.moduleId || '0';
+    const resultParams = `?activity=Listening&score=${score}&total=${exercises.length}&xp=${score * 15}&moduleId=${params.moduleId || ''}&instanceId=${instanceId}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Exercice')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
+    router.push(`/(stacks)/(cours)/result${resultParams}` as any);
+  };
 
   const exercise = exercises[currentExercise];
   const progress = exercises.length > 0 ? ((currentExercise + 1) / exercises.length) * 100 : 0;
 
   const getWrongTranslation = () => {
-    const alternatives = ["Maison", "Eau", "Pain", "Ami", " Ecole", "Livre", "Main", "Pied"];
+    const alternatives = ["Maison", "Eau", "Pain", "Ami", "École", "Livre", "Main", "Pied"];
     return alternatives[Math.floor(Math.random() * alternatives.length)];
   };
 
@@ -108,12 +80,22 @@ export default function ListeningScreen() {
   }, []);
 
   const handlePlayAudio = async () => {
-    setIsPlaying(true);
-    try {
-      await audioService.playAndAutoStop(2000);
-      setIsPlaying(false);
-    } catch (error) {
-      setIsPlaying(false);
+    if (exercise?.audioUrl) {
+      setIsPlaying(true);
+      try {
+        await audioService.play(exercise.audioUrl);
+        setIsPlaying(false);
+      } catch {
+        setIsPlaying(false);
+      }
+    } else {
+      setIsPlaying(true);
+      try {
+        await audioService.playAndAutoStop(2000);
+        setIsPlaying(false);
+      } catch {
+        setIsPlaying(false);
+      }
     }
   };
 
@@ -143,12 +125,69 @@ export default function ListeningScreen() {
     return "📚";
   };
 
-  if (isLoading) {
+  if (localIsLoading || isLoading) {
     return (
       <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
+        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
+          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+            <Feather name="arrow-left" size={24} color="black" />
+          </Pressable>
+          <Text className="text-lg font-bold text-gray-900">Exercice d&apos;Écoute</Text>
+        </View>
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator size="large" color="#002366" />
-          <Text className="text-gray-500 mt-4">Chargement...</Text>
+          <Text className="text-gray-500 mt-4">Chargement depuis Moodle...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ✅ AFFICHER LES ERREURS EXPLICITEMENT
+  if (error) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
+        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
+          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+            <Feather name="arrow-left" size={24} color="black" />
+          </Pressable>
+          <Text className="text-lg font-bold text-gray-900">Exercice d&apos;Écoute</Text>
+        </View>
+        <View className="flex-1 items-center justify-center px-5">
+          <View className="bg-red-50 rounded-3xl p-8 items-center border border-red-200">
+            <Feather name="alert-circle" size={64} color="#EF4444" />
+            <Text className="text-xl font-bold text-red-900 mt-4 text-center">
+              Impossible de charger l&apos;exercice
+            </Text>
+            <Text className="text-red-700 text-center mt-2 text-sm">
+              {error}
+            </Text>
+            <Text className="text-gray-500 text-center mt-4 text-xs">
+              Assurez-vous que vous avez une connexion Internet et que l&apos;activité existe dans Moodle.
+            </Text>
+            <Pressable
+              onPress={() => router.back()}
+              className="bg-red-500 rounded-full px-6 py-3 mt-6"
+            >
+              <Text className="text-white font-bold">Retour</Text>
+            </Pressable>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (localIsLoading || isLoading) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
+        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
+          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+            <Feather name="arrow-left" size={24} color="black" />
+          </Pressable>
+          <Text className="text-lg font-bold text-gray-900">Exercice d&apos;Écoute</Text>
+        </View>
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color="#002366" />
+          <Text className="text-gray-500 mt-4">Chargement depuis Moodle...</Text>
         </View>
       </SafeAreaView>
     );
@@ -284,7 +323,7 @@ export default function ListeningScreen() {
           </Pressable>
           
           <Text className="text-center text-gray-600 font-medium text-lg mt-4 mb-2">
-            &ldquo;{exercise.word}&rdquo;
+            &ldquo;{exercise.translation}&rdquo;
           </Text>
           <Text className="text-center text-gray-400 text-sm">{exercise.courseName}</Text>
         </View>

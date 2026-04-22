@@ -1,11 +1,14 @@
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React from "react";
+import { useState, useEffect } from "react";
 import { Pressable, ScrollView, Text, View, Image, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useMoodleCourses } from "../../../hooks/useMoodleCourses";
 import { useSelector } from "react-redux";
 import { RootState } from "../../../services/redux/store";
+import { getUserBadges } from "../../../services/api/badgeService";
+import { getAllCourseProgress } from "../../../services/storage/course-progress";
+import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
 
 interface ModuleData {
   id: string;
@@ -54,7 +57,56 @@ export default function HomeScreen() {
   const loggedUser = reduxUser;
   const activeToken = reduxToken || "";
   
-  const { courses, isLoading, error } = useMoodleCourses(activeToken);
+const { courses, isLoading, error } = useMoodleCourses(activeToken);
+  const [badgesCount, setBadgesCount] = useState(0);
+  const [courseProgressMap, setCourseProgressMap] = useState<any>({});
+  const [courseScoreMap, setCourseScoreMap] = useState<any>({});
+
+  useEffect(() => {
+    if (!loggedUser?.id || !activeToken) return;
+    getUserBadges(activeToken, loggedUser.id)
+      .then(b => setBadgesCount(b.length))
+      .catch(() => setBadgesCount(0));
+  }, [loggedUser?.id, activeToken]);
+
+  useEffect(() => {
+    const loadProgress = async () => {
+      if (!courses || courses.length === 0) {
+        setCourseProgressMap({});
+        setCourseScoreMap({});
+        return;
+      }
+      
+      try {
+        const allCourseProgress = await getAllCourseProgress();
+        const progressMap: any = {};
+        
+        for (const cp of allCourseProgress) {
+          progressMap[cp.courseId] = {
+            completed: cp.completedActivities,
+            total: cp.totalActivities,
+            xp: cp.totalXP,
+            bestScore: cp.bestScore,
+          };
+        }
+        
+        for (const course of courses) {
+          if (course.id) {
+            const scores = await getAllScoresForCourse(course.id);
+            setCourseScoreMap((prev: any) => ({ ...prev, [course.id]: scores }));
+          }
+        }
+        
+        setCourseProgressMap(progressMap);
+        console.log('[Home] Loaded progress for', Object.keys(progressMap).length, 'courses');
+      } catch (err) {
+        console.warn('[Home] Failed to load progress:', err);
+        setCourseProgressMap({});
+        setCourseScoreMap({});
+      }
+    };
+    loadProgress();
+  }, [courses, activeToken]);
 
   const handleSettingsPress = () => {
     router.push("/(settings)/index" as any);
@@ -64,10 +116,34 @@ export default function HomeScreen() {
     router.push(`/(stacks)/(cours)/${courseId}` as any);
   };
 
-  const getCourseProgress = (course: any) => course.progress || 0;
-  const getCourseLessonsCount = (course: any) => {
-    return Math.floor(Math.random() * 10) + 5;
+  const getCourseProgress = (course: any) => {
+    const dbProgress = courseProgressMap[course.id];
+    if (dbProgress && dbProgress.total > 0) {
+      return Math.round((dbProgress.completed / dbProgress.total) * 100);
+    }
+    return course.progress || 0;
   };
+  
+  const getCourseScore = (courseId: number) => {
+    const scores = courseScoreMap[courseId];
+    if (!scores) return null;
+    
+    let totalBest = 0;
+    let totalMax = 0;
+    if (scores.forEach) {
+      scores.forEach((score: any) => {
+        totalBest += score.bestScore;
+        totalMax += score.totalScore;
+      });
+    }
+    
+    if (totalMax > 0) {
+      return `${totalBest}/${totalMax}`;
+    }
+    return null;
+  };
+
+  const getCourseLessonsCount = (course: any): number => course.lessonsCount || 0;
   const getCompletedLessons = (course: any) => {
     const progress = getCourseProgress(course);
     const total = getCourseLessonsCount(course);
@@ -85,7 +161,6 @@ export default function HomeScreen() {
   const currentCourse = courses.find((c: any) => (c.progress || 0) > 0 && (c.progress || 0) < 100) || courses[0];
   const totalXP = loggedUser?.ipelan_xp || 0;
   const streak = loggedUser?.streak || 0;
-  const badges = 3;
 
   return (  
     <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
@@ -122,7 +197,7 @@ export default function HomeScreen() {
               </View>
               <View className="flex-row items-center bg-white px-2 py-1 rounded-full border border-gray-100 shadow-sm">
                 <Ionicons name="medal" size={14} color="#8B5CF6" />
-                <Text className="font-bold text-xs text-[#8B5CF6] ml-1">3</Text>
+                <Text className="font-bold text-xs text-[#8B5CF6] ml-1">{badgesCount}</Text>
               </View>
               <Pressable onPress={handleSettingsPress} className="p-2 bg-white rounded-full border border-gray-100 shadow-sm">
                 <Feather name="settings" size={18} color="#374151" />
@@ -147,7 +222,7 @@ export default function HomeScreen() {
             />
             <StatsCard 
               label="Badges" 
-              value={`${badges}`} 
+              value={`${badgesCount}`} 
               icon={<Ionicons name="medal" size={16} color="#8B5CF6" />}
               bgColor="bg-purple-50"
               textColor="text-purple-600"
@@ -193,14 +268,19 @@ export default function HomeScreen() {
                 <View className="mb-4">
                   <View className="flex-row justify-between items-center mb-1.5">
                     <Text className="text-white/80 text-xs">Progression</Text>
-                    <Text className="text-white text-xs font-bold">{currentCourse.progress}%</Text>
+                    <Text className="text-white text-xs font-bold">{getCourseProgress(currentCourse)}%</Text>
                   </View>
                   <View className="h-2 bg-white/20 rounded-full overflow-hidden">
-                    <View className="h-full bg-orange-400 rounded-full" style={{ width: `${currentCourse.progress}%` }} />
+                    <View className="h-full bg-orange-400 rounded-full" style={{ width: `${getCourseProgress(currentCourse)}%` }} />
                   </View>
                 </View>
 
                 <View className="flex-row justify-between items-center">
+                  {getCourseScore(currentCourse.id) && (
+                    <View className="bg-green-500 px-3 py-1 rounded-full">
+                      <Text className="text-white font-bold text-xs">★ {getCourseScore(currentCourse.id)}</Text>
+                    </View>
+                  )}
                   <View className="flex-row -space-x-2">
                   </View>
                   <View className="bg-white px-4 py-2 rounded-full">

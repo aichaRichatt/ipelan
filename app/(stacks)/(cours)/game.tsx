@@ -1,24 +1,33 @@
 import { Feather } from "@expo/vector-icons";
 import React, { useState } from "react";
-import { Pressable, Text, View, ScrollView } from "react-native";
+import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
-
-interface Sentence {
-  id: number;
-  words: string[];
-  translation: string;
-}
-
-const SENTENCES: Sentence[] = [
-  { id: 1, words: ["Jaa", "maa", "hi"], translation: "Bonjour à toi" },
-  { id: 2, words: ["Ndeyni", "bii"], translation: "Merci pour l'eau" },
-  { id: 3, words: ["Mi", "yoppi"], translation: "Je vais bien" },
-];
+import { useSelector } from "react-redux";
+import { RootState } from "@/services/redux/store";
+import { useActivityContent, WordOrderData } from "@/hooks/useActivityContent";
 
 export default function GameScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ moduleId?: string; moduleTitle?: string; courseId?: string }>();
+  const params = useLocalSearchParams<{ moduleId?: string; moduleTitle?: string; courseId?: string; cmid?: string; instanceId?: string }>();
+  const token = useSelector((state: RootState) => state.auth.token);
+  
+  const moduleId = parseInt(params.moduleId || "0", 10);
+  const instanceId = parseInt(params.instanceId || params.moduleId || "0", 10);
+  const cmid = parseInt(params.cmid || "0", 10);
+  const courseId = parseInt(params.courseId || "0", 10);
+  
+  const { wordOrder: wordOrderData, isLoading, error } = useActivityContent(
+    token || '',
+    moduleId,
+    instanceId,
+    'lesson',
+    cmid || instanceId,
+    courseId
+  );
+  
+  const sentences = wordOrderData?.sentences?.length ? wordOrderData.sentences : [];
+  
   const [currentSentenceIndex, setCurrentSentenceIndex] = useState(0);
   const [placedWords, setPlacedWords] = useState<string[]>([]);
   const [availableWords, setAvailableWords] = useState<string[]>([]);
@@ -26,18 +35,18 @@ export default function GameScreen() {
   const [score, setScore] = useState(0);
   const [wrongAttempts, setWrongAttempts] = useState(0);
   const [showAnswer, setShowAnswer] = useState(false);
-  const [isCorrect, setIsCorrect] = useState(false);
 
-  const sentence = SENTENCES[currentSentenceIndex];
+  const sentence = sentences[currentSentenceIndex] || { words: [], translation: "" };
 
   const handleContinue = () => {
-    const resultParams = `?activity=Ordre+des+mots&score=${score}&total=${SENTENCES.length}&xp=${score * 25}&moduleId=${params.moduleId || ''}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Exercice')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
+    const instanceId = params.instanceId || params.moduleId || '0';
+    const resultParams = `?activity=Ordre+des+mots&score=${score}&total=${sentences.length}&xp=${score * 25}&moduleId=${params.moduleId || ''}&instanceId=${instanceId}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Exercice')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
     router.push(`/(stacks)/(cours)/result${resultParams}` as any);
   };
 
   React.useEffect(() => {
     initSentence();
-  }, []);
+  }, [currentSentenceIndex]);
 
   const initSentence = () => {
     const shuffled = [...sentence.words].sort(() => Math.random() - 0.5);
@@ -61,12 +70,11 @@ export default function GameScreen() {
 
   const checkOrder = () => {
     const correct = placedWords.join(' ') === sentence.words.join(' ');
-    setIsCorrect(correct);
     
     if (correct) {
       setScore(score + 1);
       setTimeout(() => {
-        if (currentSentenceIndex < SENTENCES.length - 1) {
+        if (currentSentenceIndex < sentences.length - 1) {
           setCurrentSentenceIndex(currentSentenceIndex + 1);
           initSentence();
         } else {
@@ -87,14 +95,14 @@ export default function GameScreen() {
   };
 
   const getScoreEmoji = () => {
-    const percentage = (score / SENTENCES.length) * 100;
+    const percentage = (score / sentences.length) * 100;
     if (percentage === 100) return "🏆";
     if (percentage >= 66) return "🌟";
     return "👏";
   };
 
   if (showResult) {
-    const percentage = Math.round((score / SENTENCES.length) * 100);
+    const percentage = Math.round((score / sentences.length) * 100);
     
     return (
       <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top', 'bottom']}>
@@ -106,7 +114,7 @@ export default function GameScreen() {
                 {percentage >= 66 ? "Bravo !" : "Continue tes efforts !"}
               </Text>
               <Text className="text-gray-500 text-center mb-6">
-                Tu as complété {score} phrases sur {SENTENCES.length}
+                Tu as complété {score} phrases sur {sentences.length}
               </Text>
               
               <View className="w-32 h-32 rounded-full border-8 mb-6 items-center justify-center"
@@ -160,7 +168,7 @@ export default function GameScreen() {
         <View className="flex-1">
           <Text className="text-lg font-bold text-gray-900">Ordre des mots</Text>
           <Text className="text-gray-500 text-xs">
-            Phrase {currentSentenceIndex + 1}/{SENTENCES.length}
+            Phrase {currentSentenceIndex + 1}/{sentences.length}
           </Text>
         </View>
         <View className="bg-[#A78BFA] px-3 py-1 rounded-full">
@@ -172,7 +180,7 @@ export default function GameScreen() {
         <View className="h-2 bg-gray-200 rounded-full overflow-hidden">
           <View 
             className="h-full bg-[#A78BFA] rounded-full"
-            style={{ width: `${((currentSentenceIndex + 1) / SENTENCES.length) * 100}%` }}
+            style={{ width: `${((currentSentenceIndex + 1) / sentences.length) * 100}%` }}
           />
         </View>
       </View>

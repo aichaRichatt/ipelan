@@ -6,7 +6,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSelector } from "react-redux";
 import { RootState } from "../../../services/redux/store";
-import { getEnrolledCoursesByTimeline, getCoursesForLanguageAndGrade, getAllCoursesFromLanguageCategory } from "../../../services/api/courseService";
+import { getEnrolledCoursesByTimeline, getCoursesForLanguageAndGrade, getAllCoursesFromLanguageCategory, getCourseContents } from "../../../services/api/courseService";
+import { getCourseProgress, CourseProgressData } from "../../../services/storage/course-progress";
+import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
 
 const IS_DEV = process.env.NODE_ENV === "development";
 
@@ -26,6 +28,9 @@ interface CourseData {
   courseimage: string;
   coursecategory: string;
   viewurl: string;
+  lessonsCount: number;
+  dbProgress?: CourseProgressData;
+  totalScore?: string;
 }
 
 const getIconForCourse = (name: string): { icon: string; color: string; bg: string } => {
@@ -47,7 +52,6 @@ const getLevelFromCourse = (name: string): number => {
   return 1;
 };
 
-const getTotalLessons = (progress: number): number => Math.floor(Math.random() * 8) + 3;
 
 export default function CoursScreen() {
   const router = useRouter();
@@ -110,9 +114,56 @@ export default function CoursScreen() {
         }
         
         console.log("[Cours] Total courses to display:", fetchedCourses.length);
-        setCourses(fetchedCourses);
+
+        const enrichedCourses: CourseData[] = await Promise.all(
+          fetchedCourses.map(async (c: any) => {
+            let lessonsCount = 0;
+            let dbProgress: CourseProgressData | null = null;
+            let totalScore: string | undefined;
+            
+            try {
+              const sections = await getCourseContents(token, c.id);
+              if (Array.isArray(sections)) {
+                sections.forEach(sec => { if (sec.modules) lessonsCount += sec.modules.length; });
+              }
+            } catch { }
+            
+            try {
+              dbProgress = await getCourseProgress(c.id);
+              if (dbProgress) {
+                const scores = await getAllScoresForCourse(c.id);
+                if (scores.size > 0) {
+                  let best = 0, max = 0;
+                  scores.forEach(s => { best += s.bestScore; max += s.totalScore; });
+                  if (max > 0) totalScore = `${best}/${max}`;
+                }
+              }
+            } catch { }
+            
+            const finalProgress = dbProgress && dbProgress.totalActivities > 0
+              ? Math.round((dbProgress.completedActivities / dbProgress.totalActivities) * 100)
+              : c.progress || 0;
+            
+            return {
+              id: c.id,
+              fullname: c.fullname || c.shortname || "Cours",
+              shortname: c.shortname || "",
+              progress: finalProgress,
+              visible: c.visible ?? true,
+              courseimage: c.courseimage || "",
+              coursecategory: c.coursecategory || c.category || "",
+              viewurl: c.viewurl || "",
+              lessonsCount,
+              dbProgress: dbProgress || undefined,
+              totalScore,
+            };
+          })
+        );
+
+        console.log('[Courses] Loaded', enrichedCourses.length, 'courses with DB progress');
+        setCourses(enrichedCourses);
         
-        if (fetchedCourses.length === 0) {
+        if (enrichedCourses.length === 0) {
           setError("Aucun cours trouvé dans les catégories de langues");
         } else {
           setError(null);
@@ -169,7 +220,7 @@ export default function CoursScreen() {
 
   const renderModuleCard = (course: CourseData) => {
     const isCompleted = course.progress === 100;
-    const totalLessons = getTotalLessons(course.progress);
+    const totalLessons = course.lessonsCount;
     const iconData = getIconForCourse(course.fullname);
 
     return (
@@ -203,6 +254,11 @@ export default function CoursScreen() {
               ) : (
                 <View className="bg-amber-100 rounded-full px-2 py-1">
                   <Text className="text-amber-600 text-xs font-medium">+50 XP</Text>
+                </View>
+              )}
+              {course.totalScore && (
+                <View className="ml-2 bg-green-100 rounded-full px-2 py-1">
+                  <Text className="text-green-600 text-xs font-medium">★ {course.totalScore}</Text>
                 </View>
               )}
             </View>
@@ -269,7 +325,7 @@ export default function CoursScreen() {
 
         <View className="px-5 mb-8">
           <Pressable 
-            onPress={() => router.push("/(quiz)/index" as any)}
+            onPress={() => router.push("/quiz" as any)}
             className="bg-[#002366] rounded-3xl p-5 flex-row items-center justify-between"
             style={{
               shadowColor: "#002366",

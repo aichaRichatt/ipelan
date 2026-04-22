@@ -1,63 +1,69 @@
 import { AntDesign, Feather } from "@expo/vector-icons";
 import React, { useState } from "react";
-import { Pressable, Text, View, ScrollView } from "react-native";
+import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
-
-interface MatchItem {
-  id: number;
-  word?: string;
-  translation: string;
-}
-
-const MATCH_ITEMS: MatchItem[] = [
-  { id: 1, word: "Juumo", translation: "Maison" },
-  { id: 2, word: "Kombo", translation: "Chat" },
-  { id: 3, word: "Bapp", translation: "Père" },
-  { id: 4, word: "Nde", translation: "Mère" },
-  { id: 5, word: "Bii", translation: "Eau" },
-  { id: 6, word: "Lo", translation: "Chien" },
-];
+import { useSelector } from "react-redux";
+import { RootState } from "@/services/redux/store";
+import { useActivityContent, AssociationData, AssociationPair } from "@/hooks/useActivityContent";
 
 export default function AssociationScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ moduleId?: string; moduleTitle?: string; courseId?: string }>();
-  const [selectedWord, setSelectedWord] = useState<MatchItem | null>(null);
-  const [selectedTranslation, setSelectedTranslation] = useState<MatchItem | null>(null);
+  const params = useLocalSearchParams<{ moduleId?: string; moduleTitle?: string; courseId?: string; cmid?: string; instanceId?: string }>();
+  const token = useSelector((state: RootState) => state.auth.token);
+  
+  const moduleId = parseInt(params.moduleId || "0", 10);
+  const instanceId = parseInt(params.instanceId || params.moduleId || "0", 10);
+  const cmid = parseInt(params.cmid || "0", 10);
+  const courseId = parseInt(params.courseId || "0", 10);
+  
+  const { association: associationData, isLoading, error } = useActivityContent(
+    token || '',
+    moduleId,
+    instanceId,
+    'lesson',
+    cmid || instanceId,
+    courseId
+  );
+  
+  const [selectedWord, setSelectedWord] = useState<AssociationPair | null>(null);
+  const [selectedTranslation, setSelectedTranslation] = useState<AssociationPair | null>(null);
   const [matched, setMatched] = useState<number[]>([]);
   const [score, setScore] = useState(0);
   const [attempts, setAttempts] = useState(0);
   const [showResult, setShowResult] = useState(false);
 
+  const matchItems = associationData?.pairs?.length ? associationData.pairs : [];
+  const shuffledTranslations = [...matchItems].sort(() => Math.random() - 0.5);
+  const totalPairs = matchItems.length;
+  const progress = totalPairs > 0 ? (matched.length / totalPairs) * 100 : 0;
+
   const handleContinue = () => {
-    const resultParams = `?activity=Association&score=${score}&total=${totalPairs}&xp=${score * 20}&moduleId=${params.moduleId || ''}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Exercice')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
+    const instanceId = params.instanceId || params.moduleId || '0';
+    const resultParams = `?activity=Association&score=${score}&total=${totalPairs}&xp=${score * 20}&moduleId=${params.moduleId || ''}&instanceId=${instanceId}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Exercice')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
     router.push(`/(stacks)/(cours)/result${resultParams}` as any);
   };
 
-  const shuffledTranslations = [...MATCH_ITEMS].sort(() => Math.random() - 0.5);
-  const totalPairs = MATCH_ITEMS.length;
-  const progress = (matched.length / totalPairs) * 100;
-
-  const handleWordSelect = (item: MatchItem) => {
-    if (matched.includes(item.id)) return;
+  const handleWordSelect = (item: AssociationPair, index: number) => {
+    if (matched.includes(index)) return;
     setSelectedWord(item);
-    checkMatch(item);
+    checkMatch(item, index);
   };
 
-  const handleTranslationSelect = (item: MatchItem) => {
-    if (matched.includes(item.id)) return;
+  const handleTranslationSelect = (item: AssociationPair, index: number) => {
+    if (matched.includes(index)) return;
     setSelectedTranslation(item);
-    checkMatch(item);
+    checkMatch(item, index);
   };
 
-  const checkMatch = (item: MatchItem) => {
+  const checkMatch = (item: AssociationPair, index: number) => {
     if (!selectedWord && !selectedTranslation) return;
 
     const word = selectedWord || item;
     const translation = selectedTranslation || item;
 
-    if (word.id === translation.id) {
-      setMatched(prev => [...prev, word.id]);
+    if (word.word === translation.translation || word.translation === translation.word) {
+      setMatched(prev => [...prev, index]);
       setScore(prev => prev + 1);
       
       if (matched.length + 1 === totalPairs) {
@@ -173,25 +179,25 @@ export default function AssociationScreen() {
         </Text>
 
         <View className="flex-row flex-wrap justify-between">
-          {MATCH_ITEMS.map((item) => (
+          {matchItems.map((item, idx) => (
             <Pressable
-              key={item.id}
-              onPress={() => handleWordSelect(item)}
-              disabled={matched.includes(item.id)}
+              key={`word-${idx}`}
+              onPress={() => handleWordSelect(item, idx)}
+              disabled={matched.includes(idx)}
               className={`w-[48%] rounded-2xl p-4 mb-3 border-2 ${
-                matched.includes(item.id) 
+                matched.includes(idx) 
                   ? 'bg-green-100 border-green-500' 
-                  : selectedWord?.id === item.id 
+                  : selectedWord?.word === item.word 
                     ? 'bg-blue-100 border-[#4a90e2]' 
                     : 'bg-white border-gray-200'
               }`}
             >
               <Text className={`text-center font-bold text-lg ${
-                matched.includes(item.id) ? 'text-green-700' : 'text-gray-900'
+                matched.includes(idx) ? 'text-green-700' : 'text-gray-900'
               }`}>
                 {item.word}
               </Text>
-              {matched.includes(item.id) && (
+              {matched.includes(idx) && (
                 <View className="absolute top-1 right-1">
                   <AntDesign name="check-circle" size={16} color="#10B981" />
                 </View>
@@ -207,26 +213,28 @@ export default function AssociationScreen() {
         </Text>
 
         <View className="flex-row flex-wrap justify-between">
-          {shuffledTranslations.map((item) => (
+          {shuffledTranslations.map((item, idx) => {
+            const originalIndex = matchItems.findIndex(m => m.translation === item.translation || m.word === item.word);
+            return (
             <Pressable
-              key={`trans-${item.id}`}
-              onPress={() => handleTranslationSelect(item)}
-              disabled={matched.includes(item.id)}
+              key={`trans-${idx}`}
+              onPress={() => handleTranslationSelect(item, originalIndex)}
+              disabled={matched.includes(originalIndex)}
               className={`w-[48%] rounded-2xl p-4 mb-3 border-2 ${
-                matched.includes(item.id) 
+                matched.includes(originalIndex) 
                   ? 'bg-green-100 border-green-500' 
-                  : selectedTranslation?.id === item.id 
+                  : selectedTranslation?.translation === item.translation 
                     ? 'bg-blue-100 border-[#4a90e2]' 
                     : 'bg-white border-gray-200'
               }`}
             >
               <Text className={`text-center font-medium ${
-                matched.includes(item.id) ? 'text-green-700' : 'text-gray-700'
+                matched.includes(originalIndex) ? 'text-green-700' : 'text-gray-700'
               }`}>
                 {item.translation}
               </Text>
             </Pressable>
-          ))}
+          );})}
         </View>
 
         <View className="mt-6 bg-yellow-50 rounded-2xl p-4">

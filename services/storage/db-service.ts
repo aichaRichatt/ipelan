@@ -20,15 +20,66 @@ export interface CourseDB {
   completionhasrules: number;
 }
 
-export const getDBConnection = async () => {
-  try {
-    const db = await openDatabaseAsync('ipelan-data.db', { useNewConnection: true });
-    console.log("SQLite: Database opened successfully (via expo-sqlite)");
-    return db;
-  } catch (error: any) {
-    console.error("erreur d'initialisation de la base de donnee:", error);
-    throw error;
+let dbInstance: SQLiteDatabase | null = null;
+let dbInitPromise: Promise<SQLiteDatabase> | null = null;
+let dbQueue: (() => void)[] = [];
+let isProcessing = false;
+
+async function processQueue() {
+  if (isProcessing || dbQueue.length === 0) return;
+  isProcessing = true;
+  
+  while (dbQueue.length > 0) {
+    const next = dbQueue.shift();
+    if (next) {
+      try {
+        await next();
+      } catch (e) {
+        console.error('[DB] Queue error:', e);
+      }
+    }
   }
+  
+  isProcessing = false;
+}
+
+function queueOperation<T>(fn: () => Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    dbQueue.push(async () => {
+      try {
+        const result = await fn();
+        resolve(result);
+      } catch (e) {
+        reject(e);
+      }
+    });
+    processQueue();
+  });
+}
+
+export const getDBConnection = async () => {
+  if (dbInstance) {
+    return dbInstance;
+  }
+  
+  if (dbInitPromise) {
+    return dbInitPromise;
+  }
+  
+  dbInitPromise = (async () => {
+    try {
+      const db = await openDatabaseAsync('ipelan-data.db', { useNewConnection: true });
+      await db.execAsync('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
+      console.log("SQLite: Database opened successfully (singleton)");
+      dbInstance = db;
+      return db;
+    } catch (error: any) {
+      console.error("SQLite: erreur d'initialisation:", error);
+      throw error;
+    }
+  })();
+  
+  return dbInitPromise;
 };
 
 export const createTables = async (db: SQLiteDatabase) => {
@@ -126,6 +177,30 @@ export const createTables = async (db: SQLiteDatabase) => {
         chapter_title TEXT,
         content TEXT,
         FOREIGN KEY (book_id) REFERENCES epub_books(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS activity_progress(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        module_id INTEGER NOT NULL,
+        course_id INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        best_score INTEGER DEFAULT 0,
+        total_score INTEGER DEFAULT 0,
+        attempts_count INTEGER DEFAULT 0,
+        is_completed INTEGER DEFAULT 0,
+        last_attempt TEXT,
+        xp_earned INTEGER DEFAULT 0,
+        synced_at TEXT,
+        UNIQUE(module_id, course_id)
+    );
+    CREATE TABLE IF NOT EXISTS course_progress(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        course_id INTEGER NOT NULL UNIQUE,
+        completed_activities INTEGER DEFAULT 0,
+        total_activities INTEGER DEFAULT 0,
+        total_xp INTEGER DEFAULT 0,
+        best_score INTEGER DEFAULT 0,
+        last_activity_at TEXT,
+        synced_at TEXT
     );
   `);
 };

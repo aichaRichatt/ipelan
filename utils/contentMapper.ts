@@ -41,24 +41,30 @@ export interface MappedContent {
 
 const MODNAME_MAP: Record<string, ActivityType> = {
   quiz: 'quiz',
-  lesson: 'lesson',
+  lesson: 'association',
   page: 'html',
-  resource: 'lesson',
+  resource: 'resource',
   assign: 'dictation',
+  choice: 'listening',
   scorm: 'lesson',
-  folder: 'lesson',
-  forum: 'html',
-  choice: 'quiz',
+  folder: 'folder',
+  forum: 'forum',
   feedback: 'quiz',
   survey: 'quiz',
-  workshop: 'html',
-  lti: 'html',
+  workshop: 'quiz',
+  lti: 'lesson',
   imscp: 'lesson',
-  tracker: 'html',
-  data: 'html',
-  chat: 'html',
-  glossary: 'html',
-  label: 'html',
+  tracker: 'lesson',
+  data: 'lesson',
+  chat: 'lesson',
+  glossary: 'association',
+  label: 'label',
+  book: 'book',
+  url: 'url',
+  h5p: 'h5p',
+  bigbluebuttonbn: 'bbb',
+  zoom: 'zoom',
+  custom: 'lesson',
 };
 
 const AUDIO_MIMETYPES = [
@@ -138,8 +144,16 @@ export function mapModuleToContentType(module: ParsedModule): MappedContent {
     }
   }
 
-  if (result.type === 'lesson' && module.contents[0]?.fileurl) {
-    result.fileUrl = module.contents[0].fileurl;
+  if (result.type === 'resource' || result.type === 'lesson' || result.type === 'folder') {
+    if (module.contents[0]?.fileurl) {
+      result.fileUrl = module.contents[0].fileurl;
+      const firstFilename = module.contents[0].filename?.toLowerCase() || '';
+      if (firstFilename.endsWith('.pdf')) {
+        result.pdfUrl = module.contents[0].fileurl;
+      } else if (firstFilename.endsWith('.epub') || firstFilename.endsWith('.epub+zip')) {
+        result.epubUrl = module.contents[0].fileurl;
+      }
+    }
   }
 
   return result;
@@ -154,6 +168,10 @@ export function getContentTypeLabel(type: ActivityType): string {
     wordOrder: 'Ordre des mots',
     lesson: 'Leçon',
     html: 'Contenu',
+    resource: 'Fichier',
+    folder: 'Dossier',
+    book: 'Livre',
+    label: 'Note',
   };
   return labels[type] || 'Activité';
 }
@@ -167,6 +185,10 @@ export function getContentTypeIcon(type: ActivityType): string {
     wordOrder: 'layers',
     lesson: 'book-open',
     html: 'file-text',
+    resource: 'file',
+    folder: 'folder',
+    book: 'book',
+    label: 'info',
   };
   return icons[type] || 'file';
 }
@@ -180,6 +202,10 @@ export function getContentTypeColor(type: ActivityType): string {
     wordOrder: '#4a90e2',
     lesson: '#002366',
     html: '#6B7280',
+    resource: '#059669',
+    folder: '#D97706',
+    book: '#7C3AED',
+    label: '#EC4899',
   };
   return colors[type] || '#6B7280';
 }

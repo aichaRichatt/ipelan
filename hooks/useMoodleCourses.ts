@@ -20,6 +20,7 @@ interface MoodleCourse {
   courseimage: string;
   coursecategory: string;
   viewurl: string;
+  lessonsCount: number;
 }
 
 interface UseMoodleCoursesReturn {
@@ -75,16 +76,34 @@ export function useMoodleCourses(token: string): UseMoodleCoursesReturn {
         rawCourses = fallbackCourses;
       }
       
-      const mappedCourses = rawCourses.map((course: any) => ({
-        id: course.id,
-        fullname: course.fullname || course.shortname || "Cours",
-        shortname: course.shortname || "",
-        summary: course.summary || "",
-        progress: course.progress || 0,
-        visible: course.visible ?? true,
-        courseimage: course.courseimage || "",
-        coursecategory: course.coursecategory || course.category || "",
-        viewurl: course.viewurl || ""
+      const mappedCourses = await Promise.all(rawCourses.map(async (course: any) => {
+        let realLessonCount = 0;
+        try {
+          // Utilise getCourseContents importé depuis courseService.ts pour avoir le vrai chiffre
+          const sections = await getCourseContents(cleanToken, course.id);
+          if (Array.isArray(sections)) {
+            let count = 0;
+            sections.forEach(sec => {
+              if (sec.modules) count += sec.modules.length;
+            });
+            realLessonCount = count;
+          }
+        } catch (e) {
+            // Ignorer l'erreur pour ne pas bloquer le chargement
+        }
+
+        return {
+          id: course.id,
+          fullname: course.fullname || course.shortname || "Cours",
+          shortname: course.shortname || "",
+          summary: course.summary || "",
+          progress: course.progress || 0,
+          visible: course.visible ?? true,
+          courseimage: course.courseimage || "",
+          coursecategory: course.coursecategory || course.category || "",
+          viewurl: course.viewurl || "",
+          lessonsCount: realLessonCount === 0 && course.progress > 0 ? 1 : realLessonCount // Si 0 mais progrès, on met min 1
+        };
       }));
       
       setCourses(mappedCourses);

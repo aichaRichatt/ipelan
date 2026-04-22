@@ -60,8 +60,7 @@ export function parseEpub(buffer: ArrayBuffer): ParsedEpub | null {
     const mediaMap = new Map<string, string>();
     
     for (const [id, href] of Object.entries(manifest.mediaFiles)) {
-      const fullPath = opfDir + href;
-      const content = extractFileFromZip(uint8Array, fullPath);
+      const content = extractFileFromZip(uint8Array, href);
       
       if (content) {
         const isHtml = href.match(/\.(html?|xhtml)$/i);

@@ -215,8 +215,10 @@ export async function loadQuizQuestions(
     
     const result = await moodleFetch('/webservice/rest/server.php', params, 'POST');
     
+    if (IS_DEV) console.log('[ContentLoader] Question bank API result:', JSON.stringify(result, null, 2).slice(0, 2000));
+    
     if (result?.exception) {
-      if (IS_DEV) console.warn('[ContentLoader] Question bank API failed, trying fallback');
+      if (IS_DEV) console.warn('[ContentLoader] Question bank API failed:', result.message);
       return generateFallbackQuestions(quizId);
     }
     
@@ -242,8 +244,11 @@ export async function loadQuizQuestions(
     }
     
     if (questions.length === 0) {
+      if (IS_DEV) console.log('[ContentLoader] No questions found, using fallback');
       return generateFallbackQuestions(quizId);
     }
+    
+    if (IS_DEV) console.log('[ContentLoader] Questions loaded:', JSON.stringify(questions, null, 2).slice(0, 3000));
     
     return questions;
   } catch (err) {
