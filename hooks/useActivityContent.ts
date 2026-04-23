@@ -152,7 +152,7 @@ export function useActivityContent(
           await loadListeningWithRetry(activityToken, moduleId, instanceId, cmid, setListening, setError);
           break;
         case 'association':
-          await loadGlossaryWithRetry(activityToken, moduleId, instanceId, cmid || 0, setAssociation, setWordOrder, setError, 'association');
+          await loadGlossaryWithRetry(activityToken, moduleId, instanceId, cmid || 0, courseId || 0, setAssociation, setWordOrder, setError, 'association');
           break;
         case 'wordOrder':
           await loadLessonWithRetry(activityToken, moduleId, instanceId, cmid, setAssociation, setWordOrder, setError, 'wordOrder', courseId);
@@ -623,6 +623,7 @@ async function loadLessonWithRetry(
 async function loadGlossaryWithRetry(
   token: string,
   moduleId: number,
+  instanceId: number,
   cmid: number,
   courseId: number,
   setAssociation: (a: AssociationData | null) => void,
@@ -630,67 +631,69 @@ async function loadGlossaryWithRetry(
   setError: (e: string) => void,
   expectedType: 'association' | 'wordOrder'
 ) {
+  const { resolveActivityInstanceId, stripHtml: stripHtmlUtil } = await import('../services/utils/moodleIdResolver');
+  
   try {
-    if (IS_DEV) console.log(`[loadGlossaryWithRetry] Fetching glossary for course:`, courseId);
+    if (IS_DEV) console.log(`[loadGlossaryWithRetry] Fetching glossary:`, { moduleId, instanceId, cmid, courseId });
 
-    const idsToTry = generateIdRetryOrder(moduleId, cmid, moduleId);
+    const effectiveCmid = cmid > 0 ? cmid : (moduleId > 0 ? moduleId : instanceId);
+    
+    if (courseId > 0 && effectiveCmid > 0) {
+      const resolved = await resolveActivityInstanceId(
+        courseId,
+        'glossary',
+        effectiveCmid,
+        token
+      );
 
-    for (const { id } of idsToTry) {
-      // Try mod_glossary_get_entries_by_search with '*' to get all entries
-      const params: Record<string, any> = {
-        wstoken: token,
-        wsfunction: 'mod_glossary_get_entries_by_search',
-        moodlewsrestformat: 'json',
-        criterion: '*',
-      };
+      if (resolved) {
+        if (IS_DEV) console.log(`[loadGlossaryWithRetry] Resolved glossary ID:`, resolved.instanceId);
 
-      const result = await moodleFetch('/webservice/rest/server.php', params);
-
-      if (result?.exception) {
-        if (IS_DEV) console.warn(`[loadGlossaryWithRetry] Search failed:`, result.message);
-        continue;
-      }
-
-      const entries = result?.entries || [];
-
-      if (entries.length === 0) {
-        if (IS_DEV) console.warn(`[loadGlossaryWithRetry] No entries found`);
-        continue;
-      }
-
-      if (IS_DEV) console.log(`[loadGlossaryWithRetry] Found ${entries.length} glossary entries`);
-
-      // Parse entries as association pairs
-      const pairs: AssociationPair[] = [];
-      for (const entry of entries.slice(0, 10)) {
-        const concept = (entry.concept || '').trim();
-        const definition = (entry.definition || '').replace(/<[^>]*>/g, '').trim();
-
-        if (concept && definition) {
-          pairs.push({
-            word: concept,
-            translation: definition,
-          });
-        }
-      }
-
-      if (pairs.length > 0) {
-        if (IS_DEV) console.log(`[loadGlossaryWithRetry] ✅ SUCCESS with ${pairs.length} pairs`);
-
-        setAssociation({
-          id: id,
-          title: 'Association - Glossaire',
-          pairs: pairs,
+        const result = await moodleFetch('/webservice/rest/server.php', {
+          wstoken: token,
+          wsfunction: 'mod_glossary_get_entries_by_letter',
+          moodlewsrestformat: 'json',
+          id: resolved.instanceId,
+          letter: 'ALL',
+          from: 0,
+          limit: 50,
         });
-        setWordOrder(null);
-        return;
+
+        if (result?.exception) {
+          if (IS_DEV) console.warn(`[loadGlossaryWithRetry] API failed:`, result.message);
+        } else {
+          const entries = result?.entries || [];
+          
+          if (entries.length > 0) {
+            if (IS_DEV) console.log(`[loadGlossaryWithRetry] Found ${entries.length} entries`);
+
+            const pairs: AssociationPair[] = entries.map((entry: any) => ({
+              word: stripHtmlUtil(entry.concept || ''),
+              translation: stripHtmlUtil(entry.definition || ''),
+              id: entry.id,
+            }));
+
+            if (pairs.length > 0) {
+              setAssociation({
+                id: resolved.instanceId,
+                title: resolved.name || 'Association - Glossaire',
+                pairs: pairs.slice(0, 10),
+              });
+              setWordOrder(null);
+              return;
+            }
+          }
+        }
+      } else {
+        if (IS_DEV) console.warn(`[loadGlossaryWithRetry] Could not resolve glossary ID`);
       }
     }
   } catch (err: any) {
     if (IS_DEV) console.error(`[loadGlossaryWithRetry] Error:`, err.message);
   }
 
-  if (IS_DEV) console.log(`[loadGlossaryWithRetry] Falling back to Lesson API`);
+  if (IS_DEV) console.log(`[loadGlossaryWithRetry] Falling back to static pairs`);
+  setError(null);
 }
 
 export default useActivityContent;

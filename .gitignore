@@ -21,7 +21,10 @@ Avancement.md
 
 # Metro
 .metro-health-check*
-
+.idea/
+.vscode/
+.expo/
+.zed/
 # debug
 npm-debug.*
 yarn-debug.*

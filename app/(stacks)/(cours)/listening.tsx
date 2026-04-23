@@ -1,4 +1,5 @@
-import { ListeningData, useActivityContent } from "@/hooks/useActivityContent";
+import { ListeningExercise, useListeningContent } from "@/hooks/useListening";
+import { audioService } from "@/services/audio/audioService";
 import { RootState } from "@/services/redux/store";
 import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -6,11 +7,18 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
-import { audioService } from "../../../services/audio/audioService";
+
+const IS_DEV = process.env.NODE_ENV === "development";
 
 export default function ListeningScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ moduleId?: string; moduleTitle?: string; courseId?: string; cmid?: string; instanceId?: string }>();
+  const params = useLocalSearchParams<{ 
+    moduleId?: string; 
+    moduleTitle?: string; 
+    courseId?: string; 
+    cmid?: string; 
+    instanceId?: string 
+  }>();
   const token = useSelector((state: RootState) => state.auth.token);
   
   const moduleId = parseInt(params.moduleId || "0", 10);
@@ -18,60 +26,21 @@ export default function ListeningScreen() {
   const cmid = parseInt(params.cmid || "0", 10);
   const courseId = parseInt(params.courseId || "0", 10);
   
-  const { listening: listeningData, isLoading, error } = useActivityContent(
+  const { exercises, isLoading, error, refetch } = useListeningContent(
     token || '',
     moduleId,
     instanceId,
-    'choice',
-    cmid || instanceId,
-    courseId
+    courseId,
+    cmid
   );
   
-  const [exercises, setExercises] = useState<ListeningData[]>([]);
   const [currentExercise, setCurrentExercise] = useState(0);
   const [score, setScore] = useState(0);
   const [answers, setAnswers] = useState<boolean[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [showResult, setShowResult] = useState(false);
-  const [localIsLoading, setLocalIsLoading] = useState(true);
-
-  useEffect(() => {
-    if (listeningData?.options?.length) {
-      const generated: ListeningData[] = [];
-      listeningData.options.forEach((opt, idx) => {
-        generated.push({
-          id: idx,
-          title: listeningData.title,
-          audioUrl: listeningData.audioUrl,
-          question: listeningData.question,
-          options: listeningData.options,
-          correctIndex: listeningData.correctIndex,
-          translation: opt,
-          courseName: listeningData.courseName || "Pulaar",
-        });
-      });
-      setExercises(generated.slice(0, 5));
-    } else {
-      setExercises([]);
-    }
-    setLocalIsLoading(false);
-  }, [listeningData]);
-
-  const handleContinue = () => {
-    const instanceId = params.instanceId || params.moduleId || '0';
-    const resultParams = `?activity=Listening&score=${score}&total=${exercises.length}&xp=${score * 15}&moduleId=${params.moduleId || ''}&instanceId=${instanceId}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Exercice')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
-    router.push(`/(stacks)/(cours)/result${resultParams}` as any);
-  };
-
-  const exercise = exercises[currentExercise];
-  const progress = exercises.length > 0 ? ((currentExercise + 1) / exercises.length) * 100 : 0;
-
-  const getWrongTranslation = () => {
-    const alternatives = ["Maison", "Eau", "Pain", "Ami", "École", "Livre", "Main", "Pied"];
-    return alternatives[Math.floor(Math.random() * alternatives.length)];
-  };
-
-  const wrongOption = exercise ? getWrongTranslation() : "";
+  const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
+  const [showFeedback, setShowFeedback] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -79,41 +48,67 @@ export default function ListeningScreen() {
     };
   }, []);
 
+  const exercise = exercises[currentExercise];
+  const progress = exercises.length > 0 ? ((currentExercise + 1) / exercises.length) * 100 : 0;
+
   const handlePlayAudio = async () => {
     if (exercise?.audioUrl) {
       setIsPlaying(true);
       try {
         await audioService.playRemoteUrl(exercise.audioUrl, token || '');
         setIsPlaying(false);
-      } catch {
+      } catch (err) {
+        if (IS_DEV) console.error('[Listening] Audio play failed:', err);
         setIsPlaying(false);
       }
     } else {
+      // Simulate audio playback with visual feedback
       setIsPlaying(true);
-      try {
-        await audioService.playWord();
-        setIsPlaying(false);
-      } catch {
-        setIsPlaying(false);
-      }
+      setTimeout(() => setIsPlaying(false), 2000);
     }
   };
 
-  const handleAnswer = (isCorrect: boolean) => {
+  const handleAnswer = (optionIndex: number) => {
+    if (showFeedback) return;
+    
+    setSelectedAnswer(optionIndex);
+    setShowFeedback(true);
+    
+    const isCorrect = optionIndex === exercise?.correctIndex;
     const newAnswers = [...answers, isCorrect];
     setAnswers(newAnswers);
     
     if (isCorrect) {
       setScore(prev => prev + 1);
     }
+  };
 
+  const handleContinue = () => {
     if (currentExercise < exercises.length - 1) {
       setTimeout(() => {
         setCurrentExercise(prev => prev + 1);
-      }, 1000);
+        setSelectedAnswer(null);
+        setShowFeedback(false);
+      }, 1500);
     } else {
       setShowResult(true);
     }
+  };
+
+  const handleFinish = () => {
+    const instanceId = params.instanceId || params.moduleId || '0';
+    const resultParams = `?activity=Listening&score=${score}&total=${exercises.length}&xp=${score * 15}&moduleId=${params.moduleId || ''}&instanceId=${instanceId}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Compréhension Orale')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
+    router.push(`/(stacks)/(cours)/result${resultParams}` as any);
+  };
+
+  const handleRetry = () => {
+    setCurrentExercise(0);
+    setScore(0);
+    setAnswers([]);
+    setShowResult(false);
+    setSelectedAnswer(null);
+    setShowFeedback(false);
+    refetch();
   };
 
   const getScoreEmoji = () => {
@@ -125,24 +120,53 @@ export default function ListeningScreen() {
     return "📚";
   };
 
-  if (localIsLoading || isLoading) {
+  const getOptionStyle = (optionIndex: number) => {
+    if (!showFeedback) {
+      return selectedAnswer === optionIndex 
+        ? "border-[#002366] bg-[#002366]/10" 
+        : "border-gray-200 bg-white";
+    }
+    
+    if (optionIndex === exercise?.correctIndex) {
+      return "border-green-500 bg-green-50";
+    }
+    if (optionIndex === selectedAnswer && optionIndex !== exercise?.correctIndex) {
+      return "border-red-500 bg-red-50";
+    }
+    return "border-gray-200 bg-white opacity-50";
+  };
+
+  const getOptionTextStyle = (optionIndex: number) => {
+    if (!showFeedback) {
+      return selectedAnswer === optionIndex ? "text-[#002366]" : "text-gray-900";
+    }
+    
+    if (optionIndex === exercise?.correctIndex) {
+      return "text-green-700";
+    }
+    if (optionIndex === selectedAnswer && optionIndex !== exercise?.correctIndex) {
+      return "text-red-700";
+    }
+    return "text-gray-500";
+  };
+
+  if (isLoading) {
     return (
       <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
         <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
           <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
             <Feather name="arrow-left" size={24} color="black" />
           </Pressable>
-          <Text className="text-lg font-bold text-gray-900">Exercice d&apos;Écoute</Text>
+          <Text className="text-lg font-bold text-gray-900">Compréhension Orale</Text>
         </View>
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator size="large" color="#002366" />
-          <Text className="text-gray-500 mt-4">Chargement depuis Moodle...</Text>
+          <Text className="text-gray-500 mt-4">Chargement des exercices...</Text>
         </View>
       </SafeAreaView>
     );
   }
 
-  // ✅ AFFICHER LES ERREURS EXPLICITEMENT
   if (error) {
     return (
       <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
@@ -150,19 +174,16 @@ export default function ListeningScreen() {
           <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
             <Feather name="arrow-left" size={24} color="black" />
           </Pressable>
-          <Text className="text-lg font-bold text-gray-900">Exercice d&apos;Écoute</Text>
+          <Text className="text-lg font-bold text-gray-900">Compréhension Orale</Text>
         </View>
         <View className="flex-1 items-center justify-center px-5">
           <View className="bg-red-50 rounded-3xl p-8 items-center border border-red-200">
             <Feather name="alert-circle" size={64} color="#EF4444" />
             <Text className="text-xl font-bold text-red-900 mt-4 text-center">
-              Impossible de charger l&apos;exercice
+              Impossible de charger les exercices
             </Text>
             <Text className="text-red-700 text-center mt-2 text-sm">
               {error}
-            </Text>
-            <Text className="text-gray-500 text-center mt-4 text-xs">
-              Assurez-vous que vous avez une connexion Internet et que l&apos;activité existe dans Moodle.
             </Text>
             <Pressable
               onPress={() => router.back()}
@@ -171,23 +192,6 @@ export default function ListeningScreen() {
               <Text className="text-white font-bold">Retour</Text>
             </Pressable>
           </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (localIsLoading || isLoading) {
-    return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
-        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
-          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
-            <Feather name="arrow-left" size={24} color="black" />
-          </Pressable>
-          <Text className="text-lg font-bold text-gray-900">Exercice d&apos;Écoute</Text>
-        </View>
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color="#002366" />
-          <Text className="text-gray-500 mt-4">Chargement depuis Moodle...</Text>
         </View>
       </SafeAreaView>
     );
@@ -209,13 +213,17 @@ export default function ListeningScreen() {
                 Tu as obtenu {score} bonnes réponses sur {exercises.length}
               </Text>
               
-              <View className="w-32 h-32 rounded-full border-8 mb-6 items-center justify-center"
+              <View 
+                className="w-32 h-32 rounded-full border-8 mb-6 items-center justify-center"
                 style={{ 
                   borderColor: percentage >= 60 ? '#10B981' : '#EF4444',
                   backgroundColor: `${percentage >= 60 ? '#10B981' : '#EF4444'}10`
                 }}
               >
-                <Text className="text-4xl font-black" style={{ color: percentage >= 60 ? '#10B981' : '#EF4444' }}>
+                <Text 
+                  className="text-4xl font-black" 
+                  style={{ color: percentage >= 60 ? '#10B981' : '#EF4444' }}
+                >
                   {percentage}%
                 </Text>
               </View>
@@ -227,18 +235,13 @@ export default function ListeningScreen() {
 
               <View className="flex-row w-full">
                 <Pressable
-                  onPress={handleContinue}
+                  onPress={handleFinish}
                   className="flex-1 bg-gray-200 py-4 rounded-xl mr-2"
                 >
                   <Text className="text-gray-700 font-bold text-center">Continuer</Text>
                 </Pressable>
                 <Pressable
-                  onPress={() => {
-                    setCurrentExercise(0);
-                    setScore(0);
-                    setAnswers([]);
-                    setShowResult(false);
-                  }}
+                  onPress={handleRetry}
                   className="flex-1 bg-[#4a90e2] py-4 rounded-xl ml-2"
                 >
                   <Text className="text-white font-bold text-center">Recommencer</Text>
@@ -254,10 +257,19 @@ export default function ListeningScreen() {
   if (!exercise) {
     return (
       <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
+        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
+          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+            <Feather name="arrow-left" size={24} color="black" />
+          </Pressable>
+          <Text className="text-lg font-bold text-gray-900">Compréhension Orale</Text>
+        </View>
         <View className="flex-1 items-center justify-center">
           <Feather name="music" size={64} color="#D1D5DB" />
           <Text className="text-gray-500 mt-4">Aucun exercice disponible</Text>
-          <Pressable onPress={() => router.back()} className="mt-6 bg-[#002366] px-6 py-3 rounded-xl">
+          <Pressable 
+            onPress={() => router.back()} 
+            className="mt-6 bg-[#002366] px-6 py-3 rounded-xl"
+          >
             <Text className="text-white font-bold">Retour</Text>
           </Pressable>
         </View>
@@ -272,7 +284,9 @@ export default function ListeningScreen() {
           <Feather name="arrow-left" size={24} color="black" />
         </Pressable>
         <View className="flex-1">
-          <Text className="text-lg font-bold text-gray-900">Compréhension orale</Text>
+          <Text className="text-lg font-bold text-gray-900">
+            {params.moduleTitle || 'Compréhension Orale'}
+          </Text>
           <Text className="text-gray-500 text-xs">
             Exercice {currentExercise + 1}/{exercises.length}
           </Text>
@@ -291,7 +305,10 @@ export default function ListeningScreen() {
         </View>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false} 
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}
+      >
         
         <View 
           className="bg-white rounded-3xl p-6 mb-6 border border-gray-200"
@@ -303,7 +320,9 @@ export default function ListeningScreen() {
             elevation: 2,
           }}
         >
-          <Text className="text-gray-500 text-center mb-4">Écoute le mot et choisis la bonne traduction</Text>
+          <Text className="text-gray-500 text-center mb-4">
+            Écoute le mot et choisis la bonne traduction
+          </Text>
           
           <View className="flex-row items-center justify-center h-16 mb-4">
             {[...Array(18)].map((_, i) => (
@@ -323,37 +342,71 @@ export default function ListeningScreen() {
           </Pressable>
           
           <Text className="text-center text-gray-600 font-medium text-lg mt-4 mb-2">
-            &ldquo;{exercise.translation}&rdquo;
+            &ldquo;{exercise.word}&rdquo;
           </Text>
           <Text className="text-center text-gray-400 text-sm">{exercise.courseName}</Text>
         </View>
 
         <Text className="text-lg font-bold text-gray-900 mb-4 text-center">
-          Quelle est la bonne traduction ?
+          Quelle est la bonne traduction en français ?
         </Text>
 
-        <View className="flex-row flex-wrap justify-between">
-          <Pressable
-            onPress={() => handleAnswer(true)}
-            className="bg-white border-2 border-gray-200 rounded-2xl p-4 mb-3 w-[48%]"
-          >
-            <Text className="text-center font-bold text-gray-900 text-lg">
-              {exercise.translation}
-            </Text>
-            <Text className="text-center text-green-500 text-xs mt-1">✓ Correct</Text>
-          </Pressable>
-          
-          <Pressable
-            onPress={() => handleAnswer(false)}
-            className="bg-white border-2 border-gray-200 rounded-2xl p-4 mb-3 w-[48%]"
-          >
-            <Text className="text-center font-bold text-gray-900">
-              {wrongOption}
-            </Text>
-            <Text className="text-center text-gray-400 text-xs mt-1">Incorrect</Text>
-          </Pressable>
+        <View className="flex-col space-y-3">
+          {exercise.options.map((option, index) => (
+            <Pressable
+              key={index}
+              onPress={() => handleAnswer(index)}
+              className={`p-4 rounded-2xl border-2 ${getOptionStyle(index)}`}
+            >
+              <View className="flex-row items-center justify-between">
+                <Text className={`text-lg font-medium ${getOptionTextStyle(index)}`}>
+                  {option}
+                </Text>
+                {showFeedback && index === exercise?.correctIndex && (
+                  <Feather name="check-circle" size={24} color="#10B981" />
+                )}
+                {showFeedback && index === selectedAnswer && index !== exercise?.correctIndex && (
+                  <Feather name="x-circle" size={24} color="#EF4444" />
+                )}
+              </View>
+            </Pressable>
+          ))}
         </View>
+
+        {showFeedback && (
+          <View className={`mt-4 p-4 rounded-xl ${selectedAnswer === exercise?.correctIndex ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+            <View className="flex-row items-center">
+              <Feather 
+                name={selectedAnswer === exercise?.correctIndex ? "check-circle" : "x-circle"} 
+                size={20} 
+                color={selectedAnswer === exercise?.correctIndex ? '#10B981' : '#EF4444'} 
+              />
+              <Text className={`ml-2 font-medium ${selectedAnswer === exercise?.correctIndex ? 'text-green-700' : 'text-red-700'}`}>
+                {selectedAnswer === exercise?.correctIndex ? 'Correct !' : 'Incorrect'}
+              </Text>
+            </View>
+            {selectedAnswer !== exercise?.correctIndex && (
+              <Text className="text-gray-600 text-sm mt-2">
+                La bonne réponse était : {exercise.options[exercise.correctIndex]}
+              </Text>
+            )}
+          </View>
+        )}
       </ScrollView>
+
+      <View className="px-5 py-4 border-t border-gray-200 bg-white">
+        <Pressable
+          onPress={handleContinue}
+          disabled={!showFeedback}
+          className={`rounded-2xl py-4 items-center ${
+            showFeedback ? "bg-[#002366]" : "bg-gray-300"
+          }`}
+        >
+          <Text className="text-white font-bold text-lg">
+            {currentExercise < exercises.length - 1 ? "Continuer" : "Voir les résultats"}
+          </Text>
+        </Pressable>
+      </View>
     </SafeAreaView>
   );
 }
