@@ -83,7 +83,7 @@ export default function ListeningScreen() {
     if (exercise?.audioUrl) {
       setIsPlaying(true);
       try {
-        await audioService.play(exercise.audioUrl);
+        await audioService.playRemoteUrl(exercise.audioUrl, token || '');
         setIsPlaying(false);
       } catch {
         setIsPlaying(false);
@@ -91,7 +91,7 @@ export default function ListeningScreen() {
     } else {
       setIsPlaying(true);
       try {
-        await audioService.playAndAutoStop(2000);
+        await audioService.playWord();
         setIsPlaying(false);
       } catch {
         setIsPlaying(false);

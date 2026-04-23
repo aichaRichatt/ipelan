@@ -4,29 +4,46 @@ export const Config = {
   baseURL: process.env.EXPO_PUBLIC_MOODLE_API_URL || "https://moodle.richatt.com",
   service: "IPELAN_FULL_SERVICE",
 };
-
+ 
 export async function moodleFetch(
   endpoint: string,
   params: Record<string, any> = {},
   method: string = "POST"
 ) {
-  const url = `${Config.baseURL}${endpoint}`;
+  const url = new URL(`${Config.baseURL}${endpoint}`);
 
-  const queryString = Object.keys(params)
-    .filter((k) => params[k] != null)
-    .map((k) => encodeURIComponent(k) + "=" + encodeURIComponent(params[k]))
-    .join("&");
-
-  const fullBody = queryString + (queryString ? "&" : "") + "moodlewsrestformat=json";
+  let body: URLSearchParams | null = null;
+  if (method === "GET") {
+    Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
+  } else {
+    body = new URLSearchParams();
+    body.append("moodlewsrestformat", "json");
+    Object.keys(params).forEach(key => {
+      if (typeof params[key] === 'object' && params[key] !== null) {
+         const flatten = (obj: any, prefix: string = '') => {
+          Object.keys(obj).forEach(k => {
+            const propName = prefix ? `${prefix}[${k}]` : k;
+            if (typeof obj[k] === 'object' && obj[k] !== null) {
+              flatten(obj[k], propName);
+            } else {
+              body!.append(propName, obj[k]);
+            }
+          });
+        };
+        flatten(params[key], key);
+      } else {
+        body!.append(key, params[key]);
+      }
+    });
+  }
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch(url.toString(), {
       method,
-      body: method === "POST" ? fullBody : undefined,
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "Accept": "*/*",
+        "Content-Type": "application/x-www-form-urlencoded",
       },
+      body: method !== "GET" ? body?.toString() : null,
     });
 
     const text = await response.text();

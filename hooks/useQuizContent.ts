@@ -12,10 +12,7 @@ export interface UseQuizContentReturn {
 }
 
 export function useQuizContent(
-  token: string,
-  quizInstanceId: number,
-  courseId: number
-): UseQuizContentReturn {
+token: string, quizInstanceId: number, courseId: number, instanceId: number): UseQuizContentReturn {
   const [quiz, setQuiz] = useState<QuizData | null>(null);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -23,7 +20,8 @@ export function useQuizContent(
 
   const fetchQuizContent = useCallback(async () => {
     if (!token || !quizInstanceId) {
-      setError("Paramètres manquants pour charger le quiz");
+      console.error('[useQuizContent] Missing params - token:', !!token, 'quizInstanceId:', quizInstanceId);
+      setError(" useQuizContent: Paramètres manquants pour charger le quiz");
       return;
     }
 
@@ -33,7 +31,7 @@ export function useQuizContent(
     try {
       if (IS_DEV) console.log('[useQuizContent] Loading quiz:', quizInstanceId);
 
-      const quizData = await loadQuizFromMoodle(token, quizInstanceId);
+      const quizData = await loadQuizFromMoodle(token, quizInstanceId, courseId);
       
       if (quizData) {
         setQuiz(quizData);

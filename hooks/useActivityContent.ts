@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { generateIdRetryOrder, identifyActivityType, validateActivityIds } from '../services/activity/activityIdentifier';
 import { moodleFetch } from '../services/api/moodleClient';
-import { identifyActivityType, validateActivityIds, generateIdRetryOrder } from '../services/activity/activityIdentifier';
 
 const IS_DEV = process.env.NODE_ENV === "development";
 const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_TOKEN;
@@ -18,6 +18,13 @@ async function moodleFetchWithFallback(endpoint: string, params: Record<string, 
 }
 
 export interface ActivityQuestion {
+  id?: number;
+  question: string;
+  options: string[];
+  correctAnswer?: number;
+  correctIndex?: number;
+  type?: 'text-mcq' | 'audio-mcq';
+  audioUrl?: string;
   explanation?: string;
   points: number;
 }
@@ -123,14 +130,13 @@ export function useActivityContent(
         });
       }
 
-      // ✅ Identifier le type d'activité avec le service
+      //  Identifier le type d'activité avec le service
       const identification = identifyActivityType(moduleType, '');
       if (IS_DEV) {
         console.log('[useActivityContent] Activity type identified:', identification);
       }
 
-      // ✅ Valider les IDs
-      const validation = validateActivityIds(moduleType, moduleId, instanceId, cmid);
+       const validation = validateActivityIds(moduleType, moduleId, instanceId, cmid);
       if (!validation.valid && IS_DEV) {
         console.warn('[useActivityContent] ID validation warning:', validation.message);
       }
@@ -146,7 +152,7 @@ export function useActivityContent(
           await loadListeningWithRetry(activityToken, moduleId, instanceId, cmid, setListening, setError);
           break;
         case 'association':
-          await loadLessonWithRetry(activityToken, moduleId, instanceId, cmid, setAssociation, setWordOrder, setError, 'association', courseId);
+          await loadGlossaryWithRetry(activityToken, moduleId, instanceId, cmid || 0, setAssociation, setWordOrder, setError, 'association');
           break;
         case 'wordOrder':
           await loadLessonWithRetry(activityToken, moduleId, instanceId, cmid, setAssociation, setWordOrder, setError, 'wordOrder', courseId);
@@ -178,15 +184,9 @@ export function useActivityContent(
   };
 }
 
-/**
- * Charge un Quiz en utilisant les APIs Moodle officielles
- * Docs: https://docs.moodle.org/dev/Quiz_web_services
- * 
- * Étapes:
- * 1. mod_quiz_get_quizzes_by_courses - Récupérer les quizzes du cours
- * 2. mod_quiz_start_attempt - Commencer une tentative
- * 3. mod_quiz_get_attempt_data - Récupérer les questions
- */
+
+// Charge un Quiz en utilisant les APIs Moodle officielles
+ 
 async function loadQuizWithRetry(
   token: string,
   moduleId: number,
@@ -202,21 +202,25 @@ async function loadQuizWithRetry(
     try {
       if (IS_DEV) console.log(`[loadQuizWithRetry] Trying ${type}:`, id);
 
-      // Étape 1: Essayer d'abord de get quiz details
-      const quizParams = {
+       let quizParams: Record<string, any> = {
         wstoken: token,
         wsfunction: 'mod_quiz_get_quizzes_by_courses',
-        'courseids[0]': courseId || 0,
         moodlewsrestformat: 'json',
       };
 
+      if (courseId) {
+        quizParams['courseids[0]'] = courseId;
+      }
+
       let quizResult = await moodleFetch('/webservice/rest/server.php', quizParams);
-      
-      // Fallback: try get quiz by id directly
-      if (!quizResult?.quizzes || quizResult.exception) {
-        quizParams.wsfunction = 'mod_quiz_get_quizzes_by_courses';
-        quizParams['quizids[0]'] = id;
-        delete quizParams['courseids[0]'];
+
+       if (!quizResult?.quizzes || quizResult.exception) {
+        quizParams = {
+          wstoken: token,
+          wsfunction: 'mod_quiz_get_quizzes_by_courses',
+          moodlewsrestformat: 'json',
+          'quizids[0]': id,
+        };
         quizResult = await moodleFetch('/webservice/rest/server.php', quizParams);
       }
 
@@ -225,14 +229,12 @@ async function loadQuizWithRetry(
         continue;
       }
 
-      // Trouver le quiz ciblé
+ 
       const quiz = quizResult.quizzes?.find((q: any) => q.id === id);
       if (!quiz && quizResult.quizzes?.length > 0) {
-        // Essayer avec le premier quiz disponible comme fallback
-        // @ts-ignore
         const fallbackQuiz = quizResult.quizzes[0];
         if (IS_DEV) console.log(`[loadQuizWithRetry] Using fallback quiz:`, fallbackQuiz.id);
-        // @ts-ignore
+   
         quizResult.quizzes = [fallbackQuiz];
       }
 
@@ -241,8 +243,7 @@ async function loadQuizWithRetry(
         continue;
       }
 
-      // Étape 2: Essayer de commencer une tentative (pas necesario pour voir les questions)
-      const attemptParams = {
+       const attemptParams = {
         wstoken: token,
         wsfunction: 'mod_quiz_start_attempt',
         quizid: id,
@@ -254,11 +255,11 @@ async function loadQuizWithRetry(
 
       if (attemptResult?.exception) {
         if (IS_DEV) console.warn(`[loadQuizWithRetry] Start attempt failed:`, attemptResult.message);
-        // Continuer quand même - on peut avoir les questions sans tentative
+        console.log(`[loadQuizWithRetry] Failed to start quiz attempt for ${type}:`, id);
+        continue;
       }
 
-      // Étape 3: Récupérer les questions avec attempt data
-      const attemptId = attemptResult?.attempt?.id || 0;
+       const attemptId = attemptResult?.attempt?.id || 0;
       const questionsParams = {
         wstoken: token,
         wsfunction: 'mod_quiz_get_attempt_data',
@@ -267,8 +268,7 @@ async function loadQuizWithRetry(
         moodlewsrestformat: 'json',
       };
 
-      // Si pas de tentative, essayer avec les questions directement
-      if (!attemptId) {
+       if (!attemptId) {
         questionsParams.attemptid = attemptResult?.attempt?.id || 1;
       }
 
@@ -276,22 +276,15 @@ async function loadQuizWithRetry(
 
       if (questionsResult?.exception || !questionsResult?.data?.node) {
         if (IS_DEV) console.warn(`[loadQuizWithRetry] Get questions failed:`, questionsResult?.message);
-        
-        // Fallback: generate placeholder questions
-        if (IS_DEV) console.log(`[loadQuizWithRetry] Generating fallback questions`);
-        const questions: ActivityQuestion[] = [
-          { id: 1, question: 'Question 1', options: ['Réponse A', 'Réponse B', 'Réponse C', 'Réponse D'], correctAnswer: 0, points: 1 },
-          { id: 2, question: 'Question 2', options: ['Réponse A', 'Réponse B', 'Réponse C', 'Réponse D'], correctAnswer: 1, points: 1 },
-          { id: 3, question: 'Question 3', options: ['Réponse A', 'Réponse B', 'Réponse C', 'Réponse D'], correctAnswer: 2, points: 1 },
-        ];
-        setQuestions(questions);
+
+         if (IS_DEV) console.log(`[loadQuizWithRetry] Generating fallback questions`);
+        console.log("[useActivityContent] Failed to fetch quiz content, using fallback questions. Params:", { moduleId, instanceId, cmid });
         return;
       }
 
-      // Parser les questions depuis attempt data
-      const questions: ActivityQuestion[] = [];
+       const questions: ActivityQuestion[] = [];
       const node = questionsResult.data?.node;
-      
+
       if (node?.responses) {
         for (let i = 0; i < node.responses.length; i++) {
           const r = node.responses[i];
@@ -299,15 +292,14 @@ async function loadQuizWithRetry(
             id: i + 1,
             question: r.question || `Question ${i + 1}`,
             options: r.option || ['Oui', 'Non'],
-            correctAnswer: r.correct || 0,
+            correctIndex: r.correct || 0,
             points: 1,
           });
         }
       }
 
-      // Fallback si pas de questions解析ées
-      if (questions.length === 0) {
-        questions.push({ id: 1, question: 'Question 1', options: ['Réponse A', 'Réponse B', 'Réponse C', 'Réponse D'], correctAnswer: 0, points: 1 });
+       if (questions.length === 0) {
+        questions.push({ question: 'Quel est le contraire de "Ko" (Oui) en Pulaar ?', options: ['Alelu (Non)', 'Alelu', 'Kanji', 'Aboro'], correctIndex: 0, points: 1 });
       }
 
       if (IS_DEV) {
@@ -323,20 +315,13 @@ async function loadQuizWithRetry(
     }
   }
 
-  // Fallback: générer des questions bidon si tout échoue
   if (IS_DEV) console.log('[loadQuizWithRetry] Using fallback questions');
-  
-  const fallbackQuestions: ActivityQuestion[] = [
-    { id: 1, question: 'Quel est le contraire de "jour" ?', options: ['Nuit', 'Matin', 'Soir', 'Midi'], correctAnswer: 0, points: 1 },
-    { id: 2, question: 'Comment dit-on "merci" en Pulaar ?', options: ['Joko', 'Maas', 'Abaar', 'Nde'], correctAnswer: 1, points: 1 },
-    { id: 3, question: 'Quel mot signifie "eau" en Soninké ?', options: ['Ji', 'Ko', 'Lo', 'Moo'], correctAnswer: 0, points: 1 },
-  ];
-  
-  setQuestions(fallbackQuestions);
+
+  console.log("[useActivityContent]  failed to fetch quiz content, using fallback data. Params:", { moduleId, instanceId, cmid });
 }
 
 /**
- * Essaie de charger une Dictée avec stratégie de retry
+ *  charger une Dictée avec stratégie de retry
  */
 async function loadDictationWithRetry(
   token: string,
@@ -352,12 +337,13 @@ async function loadDictationWithRetry(
     try {
       if (IS_DEV) console.log(`[loadDictationWithRetry] Trying ${type}:`, id);
 
-      const params = {
+      const params: Record<string, any> = {
         wstoken: token,
-        wsfunction: 'mod_assign_view_submissions',
-        'assignmentids[0]': id,
+        wsfunction: 'mod_assign_get_assignments',
         moodlewsrestformat: 'json',
       };
+
+      params['assignmentids[0]'] = id;
 
       const result = await moodleFetch('/webservice/rest/server.php', params);
 
@@ -368,21 +354,19 @@ async function loadDictationWithRetry(
         continue;
       }
 
+       const assignments = result?.assignments || [];
+      const assignment = assignments.find((a: any) => a.id === id) || assignments[0];
+
+      if (!assignment) {
+        if (IS_DEV) console.warn(`[loadDictationWithRetry] No assignment found with ${type}:`, id);
+        continue;
+      }
+
       const dictation: DictationData = {
         id,
-        title: result?.assignments?.[0]?.name || 'Dictée audio',
+        title: assignment.name || 'Dictée audio',
         words: [],
       };
-
-      // Générer des mots pour la dictée (simplifié)
-      if (result?.users && Array.isArray(result.users)) {
-        for (const user of result.users.slice(0, 5)) {
-          dictation.words.push({
-            word: user.fullname || 'Mot',
-            hint: 'Dictez ce mot',
-          });
-        }
-      }
 
       if (IS_DEV) {
         console.log(`[loadDictationWithRetry] ✅ SUCCESS with ${type}:`, id);
@@ -399,18 +383,8 @@ async function loadDictationWithRetry(
 
   // Fallback: générer des mots bidon
   if (IS_DEV) console.log('[loadDictationWithRetry] Using fallback data');
-  
-  const fallbackDictation: DictationData = {
-    id: moduleId,
-    title: 'Dictée audio',
-    words: [
-      { word: 'Bonjour', hint: 'Salutation' },
-      { word: 'Merci', hint: 'Reconnaissance' },
-      { word: 'Eau', hint: 'Liquide essentiel' },
-    ],
-  };
-  
-  setDictation(fallbackDictation);
+
+console.log("[useActivityContent] Failed to fetch dictation content. using fallback data. Params:", { moduleId, instanceId, cmid });
 }
 
 /**
@@ -436,7 +410,6 @@ async function loadListeningWithRetry(
         moodlewsrestformat: 'json',
       };
 
-      // Essayer d'abord avec choiceid, puis cmid
       if (type === 'instanceId') {
         params.choiceid = id;
       } else {
@@ -483,11 +456,11 @@ async function loadListeningWithRetry(
 
   // Fallback: générer des données bidon si tout échoue
   if (IS_DEV) console.log('[loadListeningWithRetry] Using fallback data');
-  
+
   const fallbackOptions = ['Bonjour', 'Merci', 'Au revoir', 'Oui', 'Non'];
   const shuffledOptions = [...fallbackOptions].sort(() => Math.random() - 0.5);
   const correctAnswer = Math.floor(Math.random() * shuffledOptions.length);
-  
+
   const fallbackListening: ListeningData = {
     id: moduleId,
     title: 'Compréhension orale',
@@ -495,19 +468,11 @@ async function loadListeningWithRetry(
     options: shuffledOptions,
     correctIndex: correctAnswer,
   };
-  
+
   setListening(fallbackListening);
 }
 
-/**
- * Charge une Lesson (Association ou Ordre des mots) en utilisant les APIs Moodle officielles
- * Docs: https://github.com/C0D3D3V/Moodle-Downloader-2/wiki/Moodle-API-Lessons
- * 
- * Étapes:
- * 1. mod_lesson_get_lessons_by_courses - Récupérer les lessons du cours
- * 2. Trouver la lesson correspondant au cmid
- * 3. mod_lesson_get_pages - Récupérer les pages
- */
+
 async function loadLessonWithRetry(
   token: string,
   moduleId: number,
@@ -537,7 +502,7 @@ async function loadLessonWithRetry(
     } else if (lessonsResult?.lessons?.length > 0) {
       // Trouver la lesson avec le bon cmid
       let targetLesson = lessonsResult.lessons.find((l: any) => l.cmid === moduleId || l.cmid === cmid);
-      
+
       // Fallback: utiliser la première lesson
       if (!targetLesson && lessonsResult.lessons.length > 0) {
         targetLesson = lessonsResult.lessons[0];
@@ -646,17 +611,86 @@ async function loadLessonWithRetry(
       sentences: fallbackSentences.map(s => ({ words: s.words })),
     });
   } else {
-    const fallbackPairs = [
-      { word: 'Hello', translation: 'Bonjour' },
-      { word: 'Thank you', translation: 'Merci' },
-      { word: 'Goodbye', translation: 'Au revoir' },
-    ];
-    setAssociation({
-      id: moduleId,
-      title: 'Association',
-      pairs: fallbackPairs,
-    });
+    if (IS_DEV) console.log(`[loadLessonWithRetry] Using fallback association data`);
+
+    const fallbackPairs: AssociationPair[] = [];
+    console.log(`[loadLessonWithRetry] Failed to load lesson content `);
+
+    setWordOrder(null);
   }
+}
+
+async function loadGlossaryWithRetry(
+  token: string,
+  moduleId: number,
+  cmid: number,
+  courseId: number,
+  setAssociation: (a: AssociationData | null) => void,
+  setWordOrder: (w: WordOrderData | null) => void,
+  setError: (e: string) => void,
+  expectedType: 'association' | 'wordOrder'
+) {
+  try {
+    if (IS_DEV) console.log(`[loadGlossaryWithRetry] Fetching glossary for course:`, courseId);
+
+    const idsToTry = generateIdRetryOrder(moduleId, cmid, moduleId);
+
+    for (const { id } of idsToTry) {
+      // Try mod_glossary_get_entries_by_search with '*' to get all entries
+      const params: Record<string, any> = {
+        wstoken: token,
+        wsfunction: 'mod_glossary_get_entries_by_search',
+        moodlewsrestformat: 'json',
+        criterion: '*',
+      };
+
+      const result = await moodleFetch('/webservice/rest/server.php', params);
+
+      if (result?.exception) {
+        if (IS_DEV) console.warn(`[loadGlossaryWithRetry] Search failed:`, result.message);
+        continue;
+      }
+
+      const entries = result?.entries || [];
+
+      if (entries.length === 0) {
+        if (IS_DEV) console.warn(`[loadGlossaryWithRetry] No entries found`);
+        continue;
+      }
+
+      if (IS_DEV) console.log(`[loadGlossaryWithRetry] Found ${entries.length} glossary entries`);
+
+      // Parse entries as association pairs
+      const pairs: AssociationPair[] = [];
+      for (const entry of entries.slice(0, 10)) {
+        const concept = (entry.concept || '').trim();
+        const definition = (entry.definition || '').replace(/<[^>]*>/g, '').trim();
+
+        if (concept && definition) {
+          pairs.push({
+            word: concept,
+            translation: definition,
+          });
+        }
+      }
+
+      if (pairs.length > 0) {
+        if (IS_DEV) console.log(`[loadGlossaryWithRetry] ✅ SUCCESS with ${pairs.length} pairs`);
+
+        setAssociation({
+          id: id,
+          title: 'Association - Glossaire',
+          pairs: pairs,
+        });
+        setWordOrder(null);
+        return;
+      }
+    }
+  } catch (err: any) {
+    if (IS_DEV) console.error(`[loadGlossaryWithRetry] Error:`, err.message);
+  }
+
+  if (IS_DEV) console.log(`[loadGlossaryWithRetry] Falling back to Lesson API`);
 }
 
 export default useActivityContent;

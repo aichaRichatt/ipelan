@@ -198,6 +198,55 @@ export const getAllScoresForCourse = async (
   }
 };
 
+/**
+ * Mark an activity as successfully synced to Moodle
+ * Sets synced_at timestamp to prevent duplicate submissions
+ */
+export const markActivitySynced = async (
+  moduleId: number,
+  courseId: number
+): Promise<void> => {
+  try {
+    const db = await getDBConnection();
+    const now = new Date().toISOString();
+
+    await db.runAsync(
+      `UPDATE activity_progress 
+       SET synced_at = ?
+       WHERE module_id = ? AND course_id = ?`,
+      [now, moduleId, courseId]
+    );
+
+    console.log('[ActivityProgress] ✅ Marked as synced:', { moduleId, courseId });
+  } catch (error) {
+    console.error('[ActivityProgress] Failed to mark as synced:', error);
+    // Don't throw - this is non-critical
+  }
+};
+
+/**
+ * Check if an activity was already synced
+ * Returns true if synced_at is set
+ */
+export const isActivitySynced = async (
+  moduleId: number,
+  courseId: number
+): Promise<boolean> => {
+  try {
+    const db = await getDBConnection();
+    const result = await db.getFirstAsync<{ synced_at: string | null }>(
+      `SELECT synced_at FROM activity_progress 
+       WHERE module_id = ? AND course_id = ?`,
+      [moduleId, courseId]
+    );
+
+    return !!result?.synced_at;
+  } catch (error) {
+    console.error('[ActivityProgress] Failed to check sync status:', error);
+    return false;
+  }
+};
+
 export const getActivityProgress = async (
   moduleId: number,
   courseId: number

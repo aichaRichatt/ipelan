@@ -1,7 +1,7 @@
-import { moodleFetch } from '../api/moodleClient';
-import { getAllScoresForCourse } from '../storage/activity-progress';
-import { updateCourseProgressFromActivities } from '../storage/course-progress';
 import * as SecureStore from 'expo-secure-store';
+import { moodleFetch } from '../api/moodleClient';
+import { getAllScoresForCourse, markActivitySynced } from '../storage/activity-progress';
+import { updateCourseProgressFromActivities } from '../storage/course-progress';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
 
@@ -42,7 +42,7 @@ async function getStoredToken(): Promise<string | null> {
 
 export const checkInternetConnection = async (): Promise<boolean> => {
   try {
-    const response = await fetch('https://www.google.com/favicon.ico', { 
+    const response = await fetch('https://www.google.com/favicon.ico', {
       method: 'HEAD',
       mode: 'no-cors'
     });
@@ -222,16 +222,18 @@ export const syncAfterActivity = async (
   score: number,
   total: number,
   xpEarned: number,
-  instanceId: number
+  instanceId: number,
+  tokenParam?: string,
+  userId?: number
 ): Promise<void> => {
   console.log('[ProgressSync] ========== START SYNC ==========');
-  console.log('[ProgressSync] Params:', { moduleId, instanceId, courseId, activityType, score, total, xpEarned });
-  
+  console.log('[ProgressSync] Params:', { moduleId, instanceId, courseId, activityType, score, total, xpEarned, userId });
+
   if (!moduleId || moduleId === 0) {
     console.log('[ProgressSync] ❌ Invalid moduleId, skipping sync');
     return;
   }
-  
+
   try {
     const isConnected = await checkInternetConnection();
     console.log('[ProgressSync] Connection status:', isConnected);
@@ -240,7 +242,7 @@ export const syncAfterActivity = async (
       return;
     }
 
-    const token = await getStoredToken();
+    const token = tokenParam || await getStoredToken();
     console.log('[ProgressSync] Token available:', !!token);
     if (!token) {
       console.log('[ProgressSync] ❌ No token, cannot sync to Moodle');
@@ -250,21 +252,25 @@ export const syncAfterActivity = async (
     console.log('[ProgressSync] ✅ Online, syncing to Moodle...');
 
     const quizId = activityType === 'quiz' ? instanceId : moduleId;
-    
+
     if (activityType === 'quiz') {
       const attempts = await syncQuizScores(token, quizId);
       console.log('[ProgressSync] Quiz attempts synced:', attempts.length);
-    } 
-    
-    console.log('[ProgressSync] Updating completion for cmid:', moduleId, 'courseId:', courseId);
-    const completionResult = await updateActivityCompletion(token, courseId, moduleId, true);
+    }
+
+    console.log('[ProgressSync] Updating completion for cmid:', moduleId);
+    const completionResult = await updateActivityCompletion(token, moduleId, true);
     console.log('[ProgressSync] Completion update result:', completionResult);
-    
+
     const gradePercent = total > 0 ? (score / total) * 100 : 0;
     console.log('[ProgressSync] Updating grade:', gradePercent, '% for instanceId:', instanceId, '(cmid:', moduleId, ')');
-    const gradeResult = await updateActivityGrade(token, courseId, instanceId, gradePercent, activityType);
+    const gradeResult = await updateActivityGrade(token, courseId, moduleId, instanceId, gradePercent, activityType, userId);
     console.log('[ProgressSync] Grade update result:', gradeResult);
-    
+
+    // ✅ Mark as synced to prevent duplicate submissions
+    await markActivitySynced(moduleId, courseId);
+    console.log('[ProgressSync] ✅ Marked as synced');
+
     console.log('[ProgressSync] ========== SYNC COMPLETE ==========');
 
   } catch (error) {
@@ -274,18 +280,16 @@ export const syncAfterActivity = async (
 
 export const updateActivityCompletion = async (
   token: string,
-  courseId: number,
   cmId: number,
   completed: boolean
 ): Promise<boolean> => {
-  console.log('[ProgressSync] updateActivityCompletion called:', { courseId, cmId, completed });
-  
+  console.log('[ProgressSync] updateActivityCompletion called:', { cmId, completed });
+
   try {
     const params = {
       wstoken: token,
       wsfunction: 'core_completion_update_activity_completion_status_manually',
-      courseid: courseId,
-      cmid: Number(cmid),
+      cmid: Number(cmId),
       completed: completed ? 1 : 0,
       moodlewsrestformat: 'json'
     };
@@ -316,12 +320,14 @@ export const updateActivityCompletion = async (
 export const updateActivityGrade = async (
   token: string,
   courseId: number,
+  moduleId: number,
   instanceId: number,
   grade: number,
-  activityType: string
+  activityType: string,
+  userId?: number
 ): Promise<boolean> => {
-  console.log('[ProgressSync] updateActivityGrade called:', { courseId, instanceId, grade, activityType });
-  
+  console.log('[ProgressSync] updateActivityGrade called:', { courseId, moduleId, instanceId, grade, activityType, userId });
+
   // Map activity type to Moodle component
   const componentMap: Record<string, string> = {
     'quiz': 'mod_quiz',
@@ -334,20 +340,30 @@ export const updateActivityGrade = async (
     'association': 'mod_lesson',
     'wordOrder': 'mod_lesson',
   };
-  
+
   const component = componentMap[activityType] || 'mod_grade';
-  
+
+  // For choice/lesson activities, instanceId from Moodle is often wrong (1).
+  // Use moduleId (cmid) as activityid for grade updates.
+  const activityId = instanceId === 1 ? moduleId : instanceId;
+  console.log('[ProgressSync] Using activityId for grade:', activityId, '(moduleId:', moduleId, ', instanceId:', instanceId, ')');
+
   try {
-    const params = {
+    const params: any = {
       wstoken: token,
       wsfunction: 'core_grades_update_grades',
       source: 'ipelan_app',
       component: component,
       courseid: courseId,
-      'grades[0][activityid]': instanceId,
+      'grades[0][activityid]': activityId,
       'grades[0][rawgrade]': grade,
       moodlewsrestformat: 'json',
     };
+
+    // ✅ CRITICAL: Add userid to prevent grade assignment errors
+    if (userId) {
+      params['grades[0][userid]'] = userId;
+    }
 
     console.log('[ProgressSync] Calling core_grades_update_grades with params:', JSON.stringify(params));
 
@@ -397,4 +413,115 @@ export const batchSyncAllCourses = async (
   }
 
   return { synced, failed };
+};
+
+/**
+ * Sync user's total XP to Moodle custom field 'ipelan_xp'
+ */
+export const syncUserXPToMoodle = async (
+  token: string,
+  userId: number,
+  totalXP: number
+): Promise<boolean> => {
+  try {
+    console.log('[ProgressSync] Syncing XP:', totalXP, 'for user:', userId);
+
+    // Format data correctly for Moodle's x-www-form-urlencoded requirements
+    // This will be flattened by moodleFetch to: users[0][id]=X&users[0][customfields][0][type]=...
+    const params = {
+      wstoken: token,
+      wsfunction: 'core_user_update_users',
+      users: [
+        {
+          id: userId,
+          customfields: [
+            {
+              type: 'ipelan_xp',
+              value: String(totalXP),
+            },
+          ],
+        },
+      ],
+      moodlewsrestformat: 'json',
+    };
+
+    const result = await moodleFetch('/webservice/rest/server.php', params, 'POST');
+
+    if (result?.exception) {
+      console.warn('[ProgressSync] ❌ XP sync failed:', result.message);
+      return false;
+    }
+
+    console.log('[ProgressSync] ✅ XP synced successfully');
+    return true;
+  } catch (error) {
+    console.error('[ProgressSync] Failed to sync XP:', error);
+    return false;
+  }
+};
+
+/**
+ * Sync activity with automatic retry on failure
+ * Uses exponential backoff: 1s, 2s, 4s
+ */
+export const syncAfterActivityWithRetry = async (
+  moduleId: number,
+  courseId: number,
+  activityType: string,
+  score: number,
+  total: number,
+  xpEarned: number,
+  instanceId: number,
+  maxRetries: number = 3,
+  tokenParam?: string,
+  userId?: number
+): Promise<{ success: boolean; attempts: number; error?: string }> => {
+  let lastError: any = null;
+  let attempts = 0;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    attempts = attempt;
+    try {
+      console.log(`[ProgressSync] ⏳ Attempt ${attempt}/${maxRetries}`);
+
+      await syncAfterActivity(
+        moduleId,
+        courseId,
+        activityType,
+        score,
+        total,
+        xpEarned,
+        instanceId,
+        tokenParam,
+        userId
+      );
+
+      console.log('[ProgressSync] ✅ Sync succeeded');
+      return { success: true, attempts };
+    } catch (error) {
+      lastError = error;
+      console.warn(`[ProgressSync] ❌ Attempt ${attempt} failed:`, error);
+
+      if (attempt < maxRetries) {
+        // Exponential backoff: 1s, 2s, 4s
+        const delayMs = Math.pow(2, attempt - 1) * 1000;
+        console.log(`[ProgressSync] ⏳ Waiting ${delayMs}ms before retry...`);
+
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
+  console.error(
+    '[ProgressSync] ❌ Sync failed after',
+    maxRetries,
+    'attempts:',
+    lastError
+  );
+
+  return {
+    success: false,
+    attempts,
+    error: lastError?.message || 'Unknown error',
+  };
 };

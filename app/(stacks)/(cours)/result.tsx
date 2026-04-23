@@ -2,7 +2,7 @@ import { getCourseContents } from "@/services/api/courseService";
 import { RootState } from "@/services/redux/store";
 import { getBestScore, saveActivityScore } from "@/services/storage/activity-progress";
 import { updateCourseProgressFromActivities } from "@/services/storage/course-progress";
-import { syncAfterActivity } from "@/services/sync/progressSync";
+import { syncAfterActivityWithRetry } from "@/services/sync/progressSync";
 import { ActivityType } from "@/utils/xpCalculator";
 import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -24,6 +24,7 @@ const activityTypeMap: Record<string, ActivityType> = {
 export default function ResultScreen() {
   const router = useRouter();
   const token = useSelector((state: RootState) => state.auth.token);
+  const userId = useSelector((state: RootState) => state.auth.user?.id);
   const params = useLocalSearchParams<{
     activity?: string;
     score?: string;
@@ -49,7 +50,7 @@ export default function ResultScreen() {
   const percentage = Math.round((score / Math.max(total, 1)) * 100);
   const isCompleted = percentage >= 50;
 
-  // ✅ État de synchronisation
+ 
   const [syncStatus, setSyncStatus] = useState<'pending' | 'syncing' | 'success' | 'error'>('pending');
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
@@ -97,8 +98,7 @@ export default function ResultScreen() {
           console.log('[Result] ✅ Local save successful');
         }
 
-        // ✅ Étape 2 : Synchroniser avec Moodle (async, ne pas bloquer)
-        if (token) {
+         if (token) {
           setSyncStatus('syncing');
           setSyncMessage('Synchronisation avec Moodle...');
 
@@ -110,7 +110,7 @@ export default function ResultScreen() {
             });
           }
 
-          syncAfterActivity(moduleId, courseId, activityType, score, total, xp, instanceId)
+          syncAfterActivityWithRetry(moduleId, courseId, activityType, score, total, xp, instanceId, 3, token || undefined, userId)
             .then((syncResult) => {
               if (syncResult.success) {
                 setSyncStatus('success');
@@ -118,12 +118,11 @@ export default function ResultScreen() {
 
                 if (IS_DEV) {
                   console.log('[Result] ✅ Moodle sync successful:', syncResult);
-                }
 
-                // Masquer le message après 2s
-                setTimeout(() => {
-                  setSyncMessage(null);
-                }, 2000);
+                  setTimeout(() => {
+                    setSyncMessage(null);
+                  }, 2000);
+                }
               } else {
                 setSyncStatus('error');
                 setSyncMessage('⚠️ Sync Moodle en attente (vous êtes hors ligne ?)');
@@ -150,7 +149,6 @@ export default function ResultScreen() {
           }
         }
 
-        // Afficher la progression sauvegardée
         const savedProgress = await getBestScore(moduleId, courseId);
         if (IS_DEV) {
           console.log('[Result] Best score saved:', {

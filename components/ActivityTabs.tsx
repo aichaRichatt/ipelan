@@ -39,7 +39,7 @@ export const ActivityTabs: React.FC<ActivityTabsProps> = ({
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle="px-4 py-2"
+        contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 8 }}
       >
         {TABS.map((tab) => {
           const isActive = activeTab === tab.key;

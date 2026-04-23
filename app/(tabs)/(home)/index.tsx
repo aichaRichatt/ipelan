@@ -9,6 +9,7 @@ import { RootState } from "../../../services/redux/store";
 import { getUserBadges } from "../../../services/api/badgeService";
 import { getAllCourseProgress } from "../../../services/storage/course-progress";
 import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
+import React from "react";
 
 interface ModuleData {
   id: string;

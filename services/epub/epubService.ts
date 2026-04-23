@@ -72,8 +72,9 @@ class EPUBService {
   async loadAndExtractEPUB(epubUrl: string): Promise<{ basePath: string; htmlPath: string | null }> {
     const localPath = await downloadService.downloadEPUB(epubUrl);
     const basePath = await getEPUBBasePath(localPath);
+    const outputDir = localPath.replace(/\.epub$/i, '_extracted');
     
-    await unzipEPUB(localPath);
+    await unzipEPUB(localPath, outputDir);
     const htmlPath = await findFirstHtml(basePath);
     
     return { basePath, htmlPath };
@@ -86,8 +87,9 @@ class EPUBService {
   }> {
     const localPath = await downloadService.downloadEPUB(epubUrl);
     const basePath = await getEPUBBasePath(localPath);
+    const outputDir = localPath.replace(/\.epub$/i, '_extracted');
     
-    await unzipEPUB(localPath);
+    await unzipEPUB(localPath, outputDir);
     
     const opfPath = await findOPFPath(basePath);
     const parsed = await parseOPFLite(opfPath);
@@ -131,7 +133,8 @@ class EPUBService {
 
     try {
       const basePath = await getEPUBBasePath(localPath);
-      await unzipEPUB(localPath);
+      const outputDir = localPath.replace(/\.epub$/i, '_extracted');
+      await unzipEPUB(localPath, outputDir);
       const htmlPath = await findFirstHtml(basePath);
       
       if (htmlPath) {

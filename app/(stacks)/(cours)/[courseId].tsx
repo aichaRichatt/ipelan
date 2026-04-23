@@ -1,23 +1,24 @@
-import { AntDesign, Feather } from "@expo/vector-icons";
-import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { useSelector } from "react-redux";
-import { RootState } from "../../../services/redux/store";
-import { useCourseContent } from "../../../hooks/useCourseContent";
-import { getContentTypeIcon, getContentTypeColor, getContentTypeLabel, MappedContent } from "../../../utils/contentMapper";
-import { ActivityType, XP_CONFIG } from "../../../utils/xpCalculator";
-import { isEpubFile } from "../../../services/contentLoader";
-import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
-import { syncCourseProgress, checkInternetConnection } from "../../../services/sync/progressSync";
 import { ActivityCard } from "@/components/ActivityCard";
 import { ActivityTabs } from "@/components/ActivityTabs";
 import { EmptyState } from "@/components/EmptyState";
-import { FilterTab, PaginationState, ActivityWithProgress } from "@/types/activity";
+import { ActivityWithProgress, FilterTab, PaginationState } from "@/types/activity";
+import { AntDesign, Feather } from "@expo/vector-icons";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useSelector } from "react-redux";
+import { useCourseContent } from "../../../hooks/useCourseContent";
+import { isEpubFile } from "../../../services/contentLoader";
+import { RootState } from "../../../services/redux/store";
+import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
+import { checkInternetConnection, syncCourseProgress } from "../../../services/sync/progressSync";
+import { getContentTypeColor, getContentTypeIcon, getContentTypeLabel, MappedContent } from "../../../utils/contentMapper";
+import { ActivityType, XP_CONFIG } from "../../../utils/xpCalculator";
 
 const ACTIVITY_TYPES: ActivityType[] = ['quiz', 'dictation', 'listening', 'association', 'wordOrder'];
 const ITEMS_PER_PAGE = 10;
+const IS_DEV = process.env.NODE_ENV === "development";
 
 interface Lesson {
   id: number;
@@ -37,9 +38,21 @@ interface Lesson {
 
 export default function ModuleDetailScreen() {
   const router = useRouter();
-  const { id, title } = useLocalSearchParams<{ id: string; title?: string }>();
+  const { courseId: id, title } = useLocalSearchParams<{ courseId: string; title?: string }>();
   const token = useSelector((state: RootState) => state.auth.token);
-  const courseId = parseInt(id || "0", 10);
+  const parsedCourseId = parseInt(id || "0", 10);
+
+  if (IS_DEV) {
+    console.log('[ModuleDetail] Route loaded - courseId:', id, 'parsed:', parsedCourseId);
+  }
+
+  if (!id || isNaN(parsedCourseId) || parsedCourseId === 0) {
+    if (IS_DEV) {
+      console.log('[ModuleDetail] Invalid course ID:', id, '- this might be another route');
+    }
+  }
+
+  const courseId = parsedCourseId;
 
   const {
     sections,
@@ -47,7 +60,7 @@ export default function ModuleDetailScreen() {
     isLoading,
     error,
     getModuleContent,
-  } = useCourseContent(token || "", courseId);
+  } = useCourseContent(token || "", isNaN(parsedCourseId) ? 0 : parsedCourseId);
 
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
   const [progressData, setProgressData] = useState<Map<number, ActivityWithProgress['progress']>>(new Map());
@@ -149,6 +162,12 @@ export default function ModuleDetailScreen() {
 
     for (const section of sections) {
       const sectionModules = section.modules || [];
+      if (IS_DEV && sectionModules.length > 0) {
+        console.log('[ModuleDetail] Section', section.id, 'named:', section.title, '- has', sectionModules.length, 'modules');
+        for (const mod of sectionModules) {
+          console.log('  -', mod.modname, ':', mod.name, '(id:', mod.id, ', instance:', mod.instance, ')');
+        }
+      }
       for (const mod of sectionModules) {
         const modname = mod.modname?.toLowerCase() || '';
         let type: ActivityType | null = null;
@@ -198,11 +217,17 @@ export default function ModuleDetailScreen() {
       listening: 0,
       association: 0,
       wordOrder: 0,
+      lesson: 0,
+      html: 0,
+      resource: 0,
+      folder: 0,
+      book: 0,
+      label: 0
     };
     
     activities.forEach(a => {
-      if (counts[a.type] !== undefined) {
-        counts[a.type]++;
+      if (a.type in counts) {
+        counts[a.type] = (counts[a.type] || 0) + 1;
       }
     });
     
@@ -233,30 +258,33 @@ export default function ModuleDetailScreen() {
     }
   };
 
-  const handleActivityPress = (activity: ActivityWithProgress) => {
-    const params = { 
-      moduleId: String(activity.id), 
-      moduleTitle: activity.title, 
+const handleActivityPress = (activity: ActivityWithProgress) => {
+    const baseParams = {
+      moduleId: String(activity.id),
+      moduleTitle: activity.title,
       courseId: String(courseId),
       instanceId: String(activity.instanceId || activity.id),
-      cmid: String(activity.id)
+      cmid: String(activity.id),
     };
+
+    console.log('[handleActivityPress] Activity:', activity.type, 'params:', baseParams);
 
     switch (activity.type) {
       case 'quiz':
-        router.push({ pathname: '/quiz', params } as any);
+        const qp = `?moduleId=${activity.id}&courseId=${courseId}&cmid=${activity.id}&instanceId=${activity.instanceId || activity.id}&moduleTitle=${encodeURIComponent(activity.title)}`;
+        router.push(`/quiz${qp}` as any);
         break;
       case 'dictation':
-        router.push({ pathname: '/(stacks)/(cours)/dictation', params } as any);
+        router.push({ pathname: '/(stacks)/(cours)/dictation', params: baseParams } as any);
         break;
       case 'listening':
-        router.push({ pathname: '/(stacks)/(cours)/listening', params } as any);
+        router.push({ pathname: '/(stacks)/(cours)/listening', params: baseParams } as any);
         break;
       case 'association':
-        router.push({ pathname: '/(stacks)/(cours)/association', params } as any);
+        router.push({ pathname: '/(stacks)/(cours)/association', params: baseParams } as any);
         break;
       case 'wordOrder':
-        router.push({ pathname: '/(stacks)/(cours)/game', params } as any);
+        router.push({ pathname: '/(stacks)/(cours)/game', params: baseParams } as any);
         break;
       default:
         console.warn('[handleActivityPress] Unknown activity type:', activity.type);
@@ -269,6 +297,24 @@ export default function ModuleDetailScreen() {
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator size="large" color="#002366" />
           <Text className="mt-4 text-gray-500">Chargement du cours...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!id || isNaN(parsedCourseId) || parsedCourseId === 0) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
+        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
+          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+            <Feather name="arrow-left" size={24} color="black" />
+          </Pressable>
+          <Text className="text-lg font-bold text-gray-900 flex-1">Cours</Text>
+        </View>
+        <View className="flex-1 items-center justify-center px-5">
+          <Feather name="alert-circle" size={48} color="#D1D5DB" />
+          <Text className="text-gray-500 mt-4 text-center">Route non trouvée: {id}</Text>
+          <Text className="text-gray-400 text-sm mt-2 text-center">Cette page n&apos;existe pas</Text>
         </View>
       </SafeAreaView>
     );
@@ -343,7 +389,7 @@ export default function ModuleDetailScreen() {
         xp: 10,
         isCompleted,
         isLocked,
-        content,
+        content: content || undefined,
         epubUrl,
         pdfUrl,
         audioUrl,
@@ -383,7 +429,8 @@ export default function ModuleDetailScreen() {
 
     switch (lesson.type) {
       case 'quiz':
-        router.push({ pathname: '/quiz', params } as any);
+        const lqp = `?moduleId=${lesson.id}&courseId=${courseId}&cmid=${lesson.id}&instanceId=${lesson.id || lesson.id}&moduleTitle=${encodeURIComponent(lesson.title)}`;
+        router.push(`/quiz${lqp}` as any);
         break;
       case 'dictation':
         router.push(`/(stacks)/(cours)/dictation${params}` as any);

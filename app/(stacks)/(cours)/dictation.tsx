@@ -63,7 +63,7 @@ export default function DictationScreen() {
     if (dictation?.audioUrl) {
       setIsPlaying(true);
       try {
-        await audioService.play(dictation.audioUrl);
+        await audioService.playRemoteUrl(dictation.audioUrl, token || '');
         setIsPlaying(false);
       } catch {
         setIsPlaying(false);
@@ -71,7 +71,7 @@ export default function DictationScreen() {
     } else {
       setIsPlaying(true);
       try {
-        await audioService.playAndAutoStop(2000);
+        await audioService.playWord();
         setIsPlaying(false);
       } catch {
         setIsPlaying(false);

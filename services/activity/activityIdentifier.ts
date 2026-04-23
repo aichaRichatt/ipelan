@@ -56,45 +56,54 @@ export function identifyActivityType(
 
     // ✅ LESSON - Distinguer Association vs Ordre des mots
     if (modnameL === 'lesson') {
-        // Mots-clés pour Association
-        if (
-            fullText.includes('association') ||
-            fullText.includes('matching') ||
-            fullText.includes('appariement') ||
-            fullText.includes('animaux') ||
-            fullText.includes('images') ||
-            fullText.includes('pairs')
-        ) {
-            return {
-                type: 'association',
-                confidence: 'high',
-                reason: `Lesson with keywords: association/matching`,
-            };
-        }
-
-        // Mots-clés pour Ordre des mots
-        if (
-            fullText.includes('ordre') ||
-            fullText.includes('order') ||
-            fullText.includes('arrangement') ||
-            fullText.includes('phrase') ||
-            fullText.includes('sentence') ||
-            fullText.includes('réorganiser') ||
-            fullText.includes('rearrange')
-        ) {
-            return {
-                type: 'wordOrder',
-                confidence: 'high',
-                reason: `Lesson with keywords: ordre/order/phrase`,
-            };
-        }
-
-        // Défaut pour Lesson : Association
+      // Mots-clés pour Association
+      if (
+        fullText.includes('association') ||
+        fullText.includes('matching') ||
+        fullText.includes('appariement') ||
+        fullText.includes('animaux') ||
+        fullText.includes('images') ||
+        fullText.includes('pairs')
+      ) {
         return {
-            type: 'association',
-            confidence: 'low',
-            reason: `Lesson type (assuming Association by default)`,
+          type: 'association',
+          confidence: 'high',
+          reason: `Lesson with keywords: association/matching`,
         };
+      }
+
+      // Mots-clés pour Ordre des mots
+      if (
+        fullText.includes('ordre') ||
+        fullText.includes('order') ||
+        fullText.includes('arrangement') ||
+        fullText.includes('phrase') ||
+        fullText.includes('sentence') ||
+        fullText.includes('réorganiser') ||
+        fullText.includes('rearrange')
+      ) {
+        return {
+          type: 'wordOrder',
+          confidence: 'high',
+          reason: `Lesson with keywords: ordre/order/phrase`,
+        };
+      }
+
+      // Défaut pour Lesson : Association
+      return {
+        type: 'association',
+        confidence: 'low',
+        reason: `Lesson type (assuming Association by default)`,
+      };
+    }
+
+    // ✅ GLOSSARY (Association de mots)
+    if (modnameL === 'glossary') {
+      return {
+        type: 'association',
+        confidence: 'high',
+        reason: `Moodle type: Glossary (Association de mots)`,
+      };
     }
 
     // ❌ Type inconnu

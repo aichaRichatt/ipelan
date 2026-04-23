@@ -6,7 +6,7 @@ import {
   ParsedSection,
   CourseContent,
 } from '../services/moodleParser';
-import { mapModuleToContentType, MappedContent } from '../utils/contentMapper';
+import { mapModuleToContentType, MappedContent, ParsedModule } from '../utils/contentMapper';
 import { ActivityType } from '../utils/xpCalculator';
 
 const IS_DEV = process.env.NODE_ENV === "development";
@@ -36,7 +36,8 @@ export function useCourseContent(
 
   const fetchContent = useCallback(async () => {
     if (!token || !courseId) {
-      setError("Token ou ID de cours manquant");
+      console.error('[useCourseContent] Missing params - token:', !!token, 'courseId:', courseId);
+      setError("❌ useCourseContent: Token ou ID de cours manquant");
       setIsLoading(false);
       return;
     }

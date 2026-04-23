@@ -3,7 +3,7 @@ import React from "react";
 
 export default function CoursLayout() {
   return <Stack screenOptions={{ headerShown: false }} >
-    <Stack.Screen name="[id]" options={{ headerShown: false }} />
+    <Stack.Screen name="[courseId]" options={{ headerShown: false }} />
     <Stack.Screen name="lesson/[id]" options={{ headerShown: false }} />
     <Stack.Screen name="association" options={{ headerShown: false }} />
     <Stack.Screen name="dictation" options={{ headerShown: false }} />

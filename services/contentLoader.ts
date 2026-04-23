@@ -128,10 +128,10 @@ export async function fetchBinaryWithAuth(url: string, token: string): Promise<A
   
   try {
     const response = await fetch(authUrl, {
+      method: 'GET',
       headers: {
         'Authorization': `Bearer ${authToken}`,
       },
-      responseType: 'arraybuffer',
     });
 
     if (response.ok) {
@@ -146,33 +146,53 @@ export async function fetchBinaryWithAuth(url: string, token: string): Promise<A
 
 export async function loadQuizFromMoodle(
   token: string,
-  quizInstanceId: number
+  quizInstanceId: number,
+  courseId?: number
 ): Promise<QuizData | null> {
   const IS_DEV = process.env.NODE_ENV === "development";
   
-  if (IS_DEV) console.log('[ContentLoader] Loading quiz:', quizInstanceId);
+  if (IS_DEV) console.log('[ContentLoader] Loading quiz:', quizInstanceId, 'course:', courseId);
   
   try {
-    const params = {
+    // Try first with course ID to get all quizzes, then find by instance
+    const params: Record<string, any> = {
       wstoken: getAuthToken(token),
       wsfunction: 'mod_quiz_get_quizzes_by_courses',
-      'quizids[0]': quizInstanceId,
       moodlewsrestformat: 'json'
     };
+    
+    if (courseId && courseId > 0) {
+      params['courseids[0]'] = courseId;
+    } else {
+      params['quizids[0]'] = quizInstanceId;
+    }
     
     const result = await moodleFetch('/webservice/rest/server.php', params, 'POST');
     
     if (result?.exception) {
-      if (IS_DEV) console.warn('[ContentLoader] Quiz API exception:', result.exception);
+      if (IS_DEV) console.warn('[ContentLoader] Quiz API exception:', result.message);
       return null;
     }
     
-    if (!result?.quizzes || result.quizzes.length === 0) {
+    const quizzes = result?.quizzes || [];
+    
+    if (quizzes.length === 0) {
       if (IS_DEV) console.warn('[ContentLoader] No quiz found');
       return null;
     }
     
-    const quiz = result.quizzes[0];
+    // Find the quiz with matching ID
+    let quiz = quizzes.find((q: any) => q.id === quizInstanceId);
+    
+    // If not found by ID, use first quiz as fallback
+    if (!quiz) {
+      if (IS_DEV) console.log('[ContentLoader] Quiz not found by ID, using first quiz');
+      quiz = quizzes[0];
+    }
+    
+    if (!quiz) {
+      return null;
+    }
     
     return {
       id: quiz.id,
