@@ -58,6 +58,34 @@ export const XP_CONFIG: Record<ActivityType, XPConfig> = {
     streakBonus: 0,
     attemptPenalty: 0,
   },
+  resource: {
+    baseXP: 5,
+    perfectBonus: 0,
+    timeBonus: 0,
+    streakBonus: 0,
+    attemptPenalty: 0,
+  },
+  folder: {
+    baseXP: 5,
+    perfectBonus: 0,
+    timeBonus: 0,
+    streakBonus: 0,
+    attemptPenalty: 0,
+  },
+  book: {
+    baseXP: 10,
+    perfectBonus: 0,
+    timeBonus: 0,
+    streakBonus: 0,
+    attemptPenalty: 0,
+  },
+  label: {
+    baseXP: 0,
+    perfectBonus: 0,
+    timeBonus: 0,
+    streakBonus: 0,
+    attemptPenalty: 0,
+  },
 };
 
 export interface XPScore {

@@ -4,15 +4,15 @@ import React, { useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
-import { useQuiz } from "../../hooks/useQuiz";
-import { RootState } from "../../services/redux/store";
+import useQuiz from "@/hooks/useQuiz";
+import { RootState } from "@/services/redux/store";
 
 interface QuizQuestion {
   id: number;
   type: "text-mcq" | "audio-mcq";
   question: string;
   audioUrl?: string;
-  options: string[];
+  options: { value: string; label: string; inputName: string }[];
   correctIndex: number;
 }
 
@@ -225,7 +225,7 @@ export default function QuizScreen() {
                   </Text>
                 </View>
                 <Text className={`flex-1 text-base ${getOptionTextStyle(index)}`}>
-                  {option}
+                  {option.label}
                 </Text>
                 {showFeedback && index === currentQuestion.correctIndex && (
                   <Feather name="check" size={20} color="#10B981" />

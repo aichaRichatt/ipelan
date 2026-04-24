@@ -1,8 +1,10 @@
 import { getCourseContents } from "@/services/api/courseService";
+import { getAuthToken } from "@/services/contentLoader";
 import { RootState } from "@/services/redux/store";
 import { getBestScore, saveActivityScore } from "@/services/storage/activity-progress";
 import { updateCourseProgressFromActivities } from "@/services/storage/course-progress";
 import { syncAfterActivityWithRetry } from "@/services/sync/progressSync";
+import { awardXPForActivity } from "@/services/api/xpService";
 import { ActivityType } from "@/utils/xpCalculator";
 import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -111,18 +113,28 @@ export default function ResultScreen() {
           }
 
           syncAfterActivityWithRetry(moduleId, courseId, activityType, score, total, xp, instanceId, 3, token || undefined, userId)
-            .then((syncResult) => {
+            .then(async (syncResult) => {
               if (syncResult.success) {
                 setSyncStatus('success');
                 setSyncMessage('✅ Synchronisé avec Moodle');
 
                 if (IS_DEV) {
                   console.log('[Result] ✅ Moodle sync successful:', syncResult);
-
-                  setTimeout(() => {
-                    setSyncMessage(null);
-                  }, 2000);
                 }
+
+                const validActivityType = (activityType === 'wordOrder' ? 'association' : activityType) as 'quiz' | 'dictation' | 'listening' | 'association';
+                
+                if (userId && token && xp > 0) {
+                  const moodleToken = getAuthToken(token);
+                  await awardXPForActivity(moodleToken, userId, validActivityType, score, total);
+                  if (IS_DEV) {
+                    console.log('[Result] ✅ XP awarded for activity');
+                  }
+                }
+
+                setTimeout(() => {
+                  setSyncMessage(null);
+                }, 2000);
               } else {
                 setSyncStatus('error');
                 setSyncMessage('⚠️ Sync Moodle en attente (vous êtes hors ligne ?)');

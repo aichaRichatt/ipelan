@@ -1,8 +1,4 @@
-/**
- * Service pour identifier correctement le type d'activité IPELAN
- * à partir des données Moodle (modname + titre + contenu)
- */
-
+ 
 import { ActivityType } from '@/utils/xpCalculator';
 
 export interface ActivityIdentification {
@@ -11,12 +7,7 @@ export interface ActivityIdentification {
     reason: string;
 }
 
-/**
- * Identifie le type d'activité IPELAN basé sur:
- * 1. Le type Moodle (modname)
- * 2. Le titre/description
- * 3. Les mots-clés du contenu
- */
+ 
 export function identifyActivityType(
     modname: string,
     title: string,
@@ -25,93 +16,56 @@ export function identifyActivityType(
     const modnameL = (modname || '').toLowerCase().trim();
     const titleL = (title || '').toLowerCase();
     const descL = (description || '').toLowerCase();
-    const fullText = `${titleL} ${descL}`;
+    
+    // PRIORITY 1 — Keywords in title (MOST RELIABLE)
+    if (
+      titleL.includes('remise en ordre') ||
+      titleL.includes('word order') ||
+      titleL.includes('reorder') ||
+      titleL.includes('ordonner') ||
+      titleL.includes('phrase ')
+    ) {
+      return { type: 'wordOrder', confidence: 'high', reason: 'Title keyword: word order' };
+    }
+    
+    if (
+      titleL.includes('association') ||
+      titleL.includes('paires') ||
+      titleL.includes('relier') ||
+      titleL.includes('apparier')
+    ) {
+      return { type: 'association', confidence: 'high', reason: 'Title keyword: association' };
+    }
 
-    // ✅ QUIZ
+    // PRIORITY 2 — Moodle modname (reliable)
     if (modnameL === 'quiz') {
-        return {
-            type: 'quiz',
-            confidence: 'high',
-            reason: `Moodle type: Quiz`,
-        };
+        return { type: 'quiz', confidence: 'high', reason: 'Moodle type: Quiz' };
     }
-
-    // ✅ DICTÉE (Assign)
     if (modnameL === 'assign' || modnameL === 'assignment') {
-        return {
-            type: 'dictation',
-            confidence: 'high',
-            reason: `Moodle type: Assign/Assignment (Dictée)`,
-        };
+        return { type: 'dictation', confidence: 'high', reason: 'Moodle type: Assign' };
     }
-
-    // ✅ LISTENING (Choice)
     if (modnameL === 'choice') {
-        return {
-            type: 'listening',
-            confidence: 'high',
-            reason: `Moodle type: Choice (Listening - Compréhension orale)`,
-        };
+        return { type: 'listening', confidence: 'high', reason: 'Moodle type: Choice' };
     }
-
-    // ✅ LESSON - Distinguer Association vs Ordre des mots
-    if (modnameL === 'lesson') {
-      // Mots-clés pour Association
-      if (
-        fullText.includes('association') ||
-        fullText.includes('matching') ||
-        fullText.includes('appariement') ||
-        fullText.includes('animaux') ||
-        fullText.includes('images') ||
-        fullText.includes('pairs')
-      ) {
-        return {
-          type: 'association',
-          confidence: 'high',
-          reason: `Lesson with keywords: association/matching`,
-        };
-      }
-
-      // Mots-clés pour Ordre des mots
-      if (
-        fullText.includes('ordre') ||
-        fullText.includes('order') ||
-        fullText.includes('arrangement') ||
-        fullText.includes('phrase') ||
-        fullText.includes('sentence') ||
-        fullText.includes('réorganiser') ||
-        fullText.includes('rearrange')
-      ) {
-        return {
-          type: 'wordOrder',
-          confidence: 'high',
-          reason: `Lesson with keywords: ordre/order/phrase`,
-        };
-      }
-
-      // Défaut pour Lesson : Association
-      return {
-        type: 'association',
-        confidence: 'low',
-        reason: `Lesson type (assuming Association by default)`,
-      };
-    }
-
-    // ✅ GLOSSARY (Association de mots)
     if (modnameL === 'glossary') {
-      return {
-        type: 'association',
-        confidence: 'high',
-        reason: `Moodle type: Glossary (Association de mots)`,
-      };
+        return { type: 'association', confidence: 'high', reason: 'Moodle type: Glossary' };
+    }
+    if (modnameL === 'lesson') {
+        return { type: 'wordOrder', confidence: 'high', reason: 'Moodle type: Lesson' };
     }
 
-    // ❌ Type inconnu
-    return {
-        type: 'quiz', // Défaut
-        confidence: 'low',
-        reason: `Unknown modname: ${modname} - defaulting to quiz`,
-    };
+    // PRIORITY 3 — Fallback to title keywords (less reliable)
+    if (titleL.includes('quiz') || titleL.includes('test') || titleL.includes('qcm')) {
+        return { type: 'quiz', confidence: 'medium', reason: 'Title: quiz' };
+    }
+    if (titleL.includes('dictée') || titleL.includes('dictation')) {
+        return { type: 'dictation', confidence: 'medium', reason: 'Title: dictation' };
+    }
+    if (titleL.includes('listening') || titleL.includes('écoute') || titleL.includes('audio')) {
+        return { type: 'listening', confidence: 'medium', reason: 'Title: listening' };
+    }
+
+    return { type: 'unknown', confidence: 'low', reason: `Unknown: ${modname}` };
 }
 
 /**
@@ -125,32 +79,28 @@ export function validateActivityIds(
 ): { valid: boolean; message: string } {
     const modnameL = (modname || '').toLowerCase().trim();
 
-    // Quiz doit avoir instanceId (quiz_id)
-    if (modnameL === 'quiz' && !instanceId) {
+     if (modnameL === 'quiz' && !instanceId) {
         return {
             valid: false,
             message: `Quiz requires instanceId (quiz_id), got: ${instanceId}`,
         };
     }
 
-    // Lesson doit avoir instanceId (lesson_id)
-    if (modnameL === 'lesson' && !instanceId) {
+     if (modnameL === 'lesson' && !instanceId) {
         return {
             valid: false,
             message: `Lesson requires instanceId (lesson_id), got: ${instanceId}`,
         };
     }
 
-    // Choice doit avoir instanceId (choice_id)
-    if (modnameL === 'choice' && !instanceId) {
+     if (modnameL === 'choice' && !instanceId) {
         return {
             valid: false,
             message: `Choice requires instanceId (choice_id), got: ${instanceId}`,
         };
     }
 
-    // Assign doit avoir instanceId (assignment_id)
-    if ((modnameL === 'assign' || modnameL === 'assignment') && !instanceId) {
+     if ((modnameL === 'assign' || modnameL === 'assignment') && !instanceId) {
         return {
             valid: false,
             message: `Assign requires instanceId (assignment_id), got: ${instanceId}`,
@@ -160,10 +110,7 @@ export function validateActivityIds(
     return { valid: true, message: 'IDs validated successfully' };
 }
 
-/**
- * Génère une ordre de retry pour les IDs en cas d'erreur
- * Essaie d'abord instanceId, puis cmid, puis moduleId
- */
+ 
 export function generateIdRetryOrder(
     instanceId?: number,
     cmid?: number,

@@ -6,6 +6,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "../../services/redux/store";
 import { saveUserData } from "../../services/storage/tokenStorage";
+import { moodleFetch } from "../../services/api/moodleClient";
+import { getAuthToken } from "../../services/contentLoader";
 
 export default function EditProfileScreen() {
   const router = useRouter();
@@ -44,6 +46,23 @@ export default function EditProfileScreen() {
       
       await saveUserData(updatedUser);
       dispatch({ type: 'auth/loginSuccess', payload: { user: updatedUser, token: user?.token } });
+
+      if (user?.id && user?.token) {
+        try {
+          const moodleToken = getAuthToken(user.token);
+          await moodleFetch('/webservice/rest/server.php', {
+            wstoken: moodleToken,
+            wsfunction: 'core_user_update_users',
+            moodlewsrestformat: 'json',
+            'users[0][id]': user.id,
+            'users[0][firstname]': prenom.trim(),
+            'users[0][lastname]': nom.trim(),
+            'users[0][email]': email.trim() || user.email,
+          });
+        } catch (moodleErr) {
+          console.warn('[EditProfile] Moodle sync failed:', moodleErr);
+        }
+      }
       
       Alert.alert("Succès", "Profil mis à jour avec succès");
       router.back();

@@ -1,5 +1,5 @@
 import { AntDesign, Feather } from "@expo/vector-icons";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -21,21 +21,39 @@ export default function AssociationScreen() {
     token || '',
     moduleId,
     instanceId,
-    'lesson',
+    'glossary',
     cmid || instanceId,
-    courseId
+    courseId,
+    params.moduleTitle
   );
   
-  const [selectedWord, setSelectedWord] = useState<AssociationPair | null>(null);
-  const [selectedTranslation, setSelectedTranslation] = useState<AssociationPair | null>(null);
+  const matchItems = associationData?.pairs?.length ? associationData.pairs : [];
+  const totalPairs = matchItems.length;
+  const isDataReady = !isLoading && matchItems.length > 0;
+
+  const [leftColumn, setLeftColumn] = useState<Array<{item: AssociationPair; originalIndex: number}>>([]);
+  const [rightColumn, setRightColumn] = useState<Array<{item: AssociationPair; originalIndex: number}>>([]);
+  const [selectedLeft, setSelectedLeft] = useState<number | null>(null);
+  const [selectedRight, setSelectedRight] = useState<number | null>(null);
   const [matched, setMatched] = useState<number[]>([]);
   const [score, setScore] = useState(0);
-  const [attempts, setAttempts] = useState(0);
   const [showResult, setShowResult] = useState(false);
 
-  const matchItems = associationData?.pairs?.length ? associationData.pairs : [];
-  const shuffledTranslations = [...matchItems].sort(() => Math.random() - 0.5);
-  const totalPairs = matchItems.length;
+  useEffect(() => {
+    if (matchItems.length > 0) {
+      const left = matchItems.map((item, idx) => ({ item, originalIndex: idx }));
+      const right = matchItems.map((item, idx) => ({ item, originalIndex: idx }));
+      
+      for (let i = right.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [right[i], right[j]] = [right[j], right[i]];
+      }
+      
+      setLeftColumn(left);
+      setRightColumn(right);
+    }
+  }, [matchItems]);
+
   const progress = totalPairs > 0 ? (matched.length / totalPairs) * 100 : 0;
 
   const handleContinue = () => {
@@ -44,37 +62,37 @@ export default function AssociationScreen() {
     router.push(`/(stacks)/(cours)/result${resultParams}` as any);
   };
 
-  const handleWordSelect = (item: AssociationPair, index: number) => {
+  const handleLeftSelect = (index: number) => {
     if (matched.includes(index)) return;
-    setSelectedWord(item);
-    checkMatch(item, index);
+    setSelectedLeft(index);
+    tryMatch(index, selectedRight);
   };
 
-  const handleTranslationSelect = (item: AssociationPair, index: number) => {
+  const handleRightSelect = (index: number) => {
     if (matched.includes(index)) return;
-    setSelectedTranslation(item);
-    checkMatch(item, index);
+    setSelectedRight(index);
+    tryMatch(selectedLeft, index);
   };
 
-  const checkMatch = (item: AssociationPair, index: number) => {
-    if (!selectedWord && !selectedTranslation) return;
-
-    const word = selectedWord || item;
-    const translation = selectedTranslation || item;
-
-    if (word.word === translation.translation || word.translation === translation.word) {
-      setMatched(prev => [...prev, index]);
+  const tryMatch = (leftIdx: number | null, rightIdx: number | null) => {
+    if (leftIdx === null || rightIdx === null) return;
+    
+    const leftItem = leftColumn[leftIdx];
+    const rightItem = rightColumn[rightIdx];
+    
+    if (leftItem.item.word === rightItem.item.translation || leftItem.item.translation === rightItem.item.word) {
+      setMatched(prev => [...prev, leftIdx]);
       setScore(prev => prev + 1);
+      setSelectedLeft(null);
+      setSelectedRight(null);
       
       if (matched.length + 1 === totalPairs) {
         setTimeout(() => setShowResult(true), 500);
       }
     } else {
-      setAttempts(prev => prev + 1);
+      setSelectedLeft(null);
+      setSelectedRight(null);
     }
-
-    setSelectedWord(null);
-    setSelectedTranslation(null);
   };
 
   const getScoreEmoji = () => {
@@ -85,6 +103,49 @@ export default function AssociationScreen() {
     if (percentage >= 40) return "💪";
     return "📚";
   };
+
+  if (isLoading) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
+        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
+          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+            <Feather name="arrow-left" size={24} color="black" />
+          </Pressable>
+          <View className="flex-1">
+            <Text className="text-lg font-bold text-gray-900">Association de mots</Text>
+          </View>
+        </View>
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color="#4a90e2" />
+          <Text className="text-gray-500 mt-4">Chargement des mots...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (error || matchItems.length === 0) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
+        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
+          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+            <Feather name="arrow-left" size={24} color="black" />
+          </Pressable>
+          <View className="flex-1">
+            <Text className="text-lg font-bold text-gray-900">Association de mots</Text>
+          </View>
+        </View>
+        <View className="flex-1 items-center justify-center px-5">
+          <Text className="text-red-500 text-center">{error || 'Aucune donnée trouvée'}</Text>
+          <Pressable 
+            onPress={() => router.back()} 
+            className="mt-4 bg-[#4a90e2] px-6 py-3 rounded-xl"
+          >
+            <Text className="text-white font-bold">Retour</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (showResult) {
     const percentage = Math.round((score / totalPairs) * 100);
@@ -127,12 +188,19 @@ export default function AssociationScreen() {
                 </Pressable>
                 <Pressable
                   onPress={() => {
-                    setSelectedWord(null);
-                    setSelectedTranslation(null);
+                    setSelectedLeft(null);
+                    setSelectedRight(null);
                     setMatched([]);
                     setScore(0);
-                    setAttempts(0);
                     setShowResult(false);
+                    const left = matchItems.map((item, idx) => ({ item, originalIndex: idx }));
+                    const right = matchItems.map((item, idx) => ({ item, originalIndex: idx }));
+                    for (let i = right.length - 1; i > 0; i--) {
+                      const j = Math.floor(Math.random() * (i + 1));
+                      [right[i], right[j]] = [right[j], right[i]];
+                    }
+                    setLeftColumn(left);
+                    setRightColumn(right);
                   }}
                   className="flex-1 bg-[#4a90e2] py-4 rounded-xl ml-2"
                 >
@@ -179,25 +247,25 @@ export default function AssociationScreen() {
         </Text>
 
         <View className="flex-row flex-wrap justify-between">
-          {matchItems.map((item, idx) => (
+          {leftColumn.map(({ item, originalIndex }) => (
             <Pressable
-              key={`word-${idx}`}
-              onPress={() => handleWordSelect(item, idx)}
-              disabled={matched.includes(idx)}
+              key={`left-${originalIndex}`}
+              onPress={() => handleLeftSelect(originalIndex)}
+              disabled={matched.includes(originalIndex)}
               className={`w-[48%] rounded-2xl p-4 mb-3 border-2 ${
-                matched.includes(idx) 
+                matched.includes(originalIndex) 
                   ? 'bg-green-100 border-green-500' 
-                  : selectedWord?.word === item.word 
+                  : selectedLeft === originalIndex
                     ? 'bg-blue-100 border-[#4a90e2]' 
                     : 'bg-white border-gray-200'
               }`}
             >
               <Text className={`text-center font-bold text-lg ${
-                matched.includes(idx) ? 'text-green-700' : 'text-gray-900'
+                matched.includes(originalIndex) ? 'text-green-700' : 'text-gray-900'
               }`}>
                 {item.word}
               </Text>
-              {matched.includes(idx) && (
+              {matched.includes(originalIndex) && (
                 <View className="absolute top-1 right-1">
                   <AntDesign name="check-circle" size={16} color="#10B981" />
                 </View>
@@ -213,28 +281,31 @@ export default function AssociationScreen() {
         </Text>
 
         <View className="flex-row flex-wrap justify-between">
-          {shuffledTranslations.map((item, idx) => {
-            const originalIndex = matchItems.findIndex(m => m.translation === item.translation || m.word === item.word);
+          {rightColumn.map(({ item, originalIndex }) => {
+            const isMatched = matched.includes(originalIndex);
+            const isSelected = selectedRight === originalIndex;
+            
             return (
-            <Pressable
-              key={`trans-${idx}`}
-              onPress={() => handleTranslationSelect(item, originalIndex)}
-              disabled={matched.includes(originalIndex)}
-              className={`w-[48%] rounded-2xl p-4 mb-3 border-2 ${
-                matched.includes(originalIndex) 
-                  ? 'bg-green-100 border-green-500' 
-                  : selectedTranslation?.translation === item.translation 
-                    ? 'bg-blue-100 border-[#4a90e2]' 
-                    : 'bg-white border-gray-200'
-              }`}
-            >
-              <Text className={`text-center font-medium ${
-                matched.includes(originalIndex) ? 'text-green-700' : 'text-gray-700'
-              }`}>
-                {item.translation}
-              </Text>
-            </Pressable>
-          );})}
+              <Pressable
+                key={`right-${originalIndex}`}
+                onPress={() => handleRightSelect(originalIndex)}
+                disabled={isMatched}
+                className={`w-[48%] rounded-2xl p-4 mb-3 border-2 ${
+                  isMatched 
+                    ? 'bg-green-100 border-green-500' 
+                    : isSelected
+                      ? 'bg-blue-100 border-[#4a90e2]' 
+                      : 'bg-white border-gray-200'
+                }`}
+              >
+                <Text className={`text-center font-medium ${
+                  isMatched ? 'text-green-700' : 'text-gray-700'
+                }`}>
+                  {item.translation}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
 
         <View className="mt-6 bg-yellow-50 rounded-2xl p-4">

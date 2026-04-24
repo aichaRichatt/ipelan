@@ -37,7 +37,8 @@ export default function DictationScreen() {
     instanceId,
     'assign',
     cmid || instanceId,
-    courseId
+    courseId,
+    params.moduleTitle
   );
 
   const [currentWordIndex, setCurrentWordIndex] = useState(0);

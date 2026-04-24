@@ -48,7 +48,6 @@ const MODNAME_MAP: Record<string, ActivityType> = {
   choice: 'listening',
   scorm: 'lesson',
   folder: 'folder',
-  forum: 'forum',
   feedback: 'quiz',
   survey: 'quiz',
   workshop: 'quiz',
@@ -60,10 +59,8 @@ const MODNAME_MAP: Record<string, ActivityType> = {
   glossary: 'association',
   label: 'label',
   book: 'book',
-  url: 'url',
-  h5p: 'h5p',
-  bigbluebuttonbn: 'bbb',
-  zoom: 'zoom',
+  url: 'html',
+  h5p: 'lesson',
   custom: 'lesson',
 };
 
@@ -74,6 +71,7 @@ const AUDIO_MIMETYPES = [
   'audio/wav',
   'audio/x-wav',
   'audio/webm',
+  
   'video/mp4',
   'video/webm',
 ];

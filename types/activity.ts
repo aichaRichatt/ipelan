@@ -1,5 +1,7 @@
 import { ActivityType } from '../utils/xpCalculator';
 
+export type { ActivityType };
+
 export interface ActivityProgress {
   moduleId: number;
   courseId: number;

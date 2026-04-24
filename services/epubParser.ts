@@ -265,7 +265,7 @@ function extractFileFromZip(uint8Array: Uint8Array, filename: string): string | 
   if (!entry) {
     const partialMatch = entries.find(e => filenameLower.endsWith(e.name) || e.name.endsWith(filenameLower.split('/').pop() || ''));
     if (partialMatch) {
-      return decompressData(uint8Array.slice(partialMatch.offset, partialMatch.offset + entry?.size || partialMatch.size), partialMatch.size);
+      return decompressData(uint8Array.slice(partialMatch.offset, partialMatch.offset + partialMatch.size), partialMatch.size);
     }
     return null;
   }
@@ -394,11 +394,15 @@ function getMimeType(filename: string): string {
   return mimeTypes[ext || ''] || 'application/octet-stream';
 }
 
-function arrayBufferToBase64(buffer: Uint8Array, mimeType: string): string {
+function arrayBufferToBase64(buffer: string | Uint8Array, mimeType: string): string {
   let binary = '';
-  const len = buffer.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(buffer[i]);
+  if (typeof buffer === 'string') {
+    binary = buffer;
+  } else {
+    const len = buffer.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(buffer[i]);
+    }
   }
   return `data:${mimeType};base64,${btoa(binary)}`;
 }
@@ -428,7 +432,7 @@ export function processEpubHtml(
       
       newAttrs = newAttrs.replace(
         /src=["']([^"']*)["']/gi,
-        (m, src) => {
+        (m: string, src: string) => {
           const mediaId = findMediaByHref(src, Array.from(mediaMap.keys()));
           if (mediaId && mediaMap.has(mediaId)) {
             return `src="${mediaMap.get(mediaId)}"`;

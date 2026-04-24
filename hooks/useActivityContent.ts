@@ -92,7 +92,8 @@ export function useActivityContent(
   instanceId: number,
   moduleType: string,
   cmid?: number,
-  courseId?: number
+  courseId?: number,
+  moduleTitle?: string
 ): ActivityContentResult {
   const [questions, setQuestions] = useState<ActivityQuestion[]>([]);
   const [dictation, setDictation] = useState<DictationData | null>(null);
@@ -131,7 +132,7 @@ export function useActivityContent(
       }
 
       //  Identifier le type d'activité avec le service
-      const identification = identifyActivityType(moduleType, '');
+      const identification = identifyActivityType(moduleType, moduleTitle || '');
       if (IS_DEV) {
         console.log('[useActivityContent] Activity type identified:', identification);
       }
@@ -146,7 +147,7 @@ export function useActivityContent(
           await loadQuizWithRetry(activityToken, moduleId, instanceId, cmid, setQuestions, setError);
           break;
         case 'dictation':
-          await loadDictationWithRetry(activityToken, moduleId, instanceId, cmid, setDictation, setError);
+          await loadDictationWithRetry(activityToken, moduleId, instanceId, cmid, courseId || 0, setDictation, setError);
           break;
         case 'listening':
           await loadListeningWithRetry(activityToken, moduleId, instanceId, cmid, setListening, setError);
@@ -315,9 +316,7 @@ async function loadQuizWithRetry(
     }
   }
 
-  if (IS_DEV) console.log('[loadQuizWithRetry] Using fallback questions');
-
-  console.log("[useActivityContent]  failed to fetch quiz content, using fallback data. Params:", { moduleId, instanceId, cmid });
+  setQuestions([]);
 }
 
 /**
@@ -328,14 +327,16 @@ async function loadDictationWithRetry(
   moduleId: number,
   instanceId: number,
   cmid: number | undefined,
+  courseId: number,
   setDictation: (d: DictationData | null) => void,
   setError: (e: string) => void
 ) {
-  const idsToTry = generateIdRetryOrder(instanceId, cmid, moduleId);
+  // API mod_assign_get_assignments attend courseids[], pas assignmentids[]
+  const idsToTry = [courseId]; // Utiliser courseId uniquement
 
-  for (const { id, type } of idsToTry) {
+  for (const id of idsToTry) {
     try {
-      if (IS_DEV) console.log(`[loadDictationWithRetry] Trying ${type}:`, id);
+      if (IS_DEV) console.log(`[loadDictationWithRetry] Trying courseId:`, id);
 
       const params: Record<string, any> = {
         wstoken: token,
@@ -343,53 +344,55 @@ async function loadDictationWithRetry(
         moodlewsrestformat: 'json',
       };
 
-      params['assignmentids[0]'] = id;
+      params['courseids[0]'] = id;
 
       const result = await moodleFetch('/webservice/rest/server.php', params);
 
       if (result?.exception) {
         if (IS_DEV) {
-          console.warn(`[loadDictationWithRetry] ${type} failed:`, result.message);
+          console.warn(`[loadDictationWithRetry] courseId ${id} failed:`, result.message);
         }
         continue;
       }
 
-       const assignments = result?.assignments || [];
-      const assignment = assignments.find((a: any) => a.id === id) || assignments[0];
+      // Rechercher l'assignment par instanceId
+      const courses = result?.courses || [];
+      let assignment: any = null;
+      
+      for (const course of courses) {
+        const assignments = course.assignments || [];
+        assignment = assignments.find((a: any) => a.id === instanceId);
+        if (assignment) break;
+      }
 
       if (!assignment) {
-        if (IS_DEV) console.warn(`[loadDictationWithRetry] No assignment found with ${type}:`, id);
+        if (IS_DEV) console.warn(`[loadDictationWithRetry] No assignment ${instanceId} in course ${id}`);
         continue;
       }
 
       const dictation: DictationData = {
-        id,
+        id: instanceId,
         title: assignment.name || 'Dictée audio',
         words: [],
       };
 
       if (IS_DEV) {
-        console.log(`[loadDictationWithRetry] ✅ SUCCESS with ${type}:`, id);
+        console.log(`[loadDictationWithRetry] ✅ SUCCESS: instanceId ${instanceId} in course ${id}`);
       }
 
       setDictation(dictation);
       return;
     } catch (err: any) {
       if (IS_DEV) {
-        console.error(`[loadDictationWithRetry] Exception with ${type}:`, err.message);
+        console.error(`[loadDictationWithRetry] Exception:`, err.message);
       }
     }
   }
 
-  // Fallback: générer des mots bidon
-  if (IS_DEV) console.log('[loadDictationWithRetry] Using fallback data');
-
-console.log("[useActivityContent] Failed to fetch dictation content. using fallback data. Params:", { moduleId, instanceId, cmid });
+  setDictation(null);
 }
 
-/**
- * Essaie de charger une activité Listening avec stratégie de retry
- */
+
 async function loadListeningWithRetry(
   token: string,
   moduleId: number,
@@ -454,22 +457,9 @@ async function loadListeningWithRetry(
     }
   }
 
-  // Fallback: générer des données bidon si tout échoue
-  if (IS_DEV) console.log('[loadListeningWithRetry] Using fallback data');
+  
 
-  const fallbackOptions = ['Bonjour', 'Merci', 'Au revoir', 'Oui', 'Non'];
-  const shuffledOptions = [...fallbackOptions].sort(() => Math.random() - 0.5);
-  const correctAnswer = Math.floor(Math.random() * shuffledOptions.length);
-
-  const fallbackListening: ListeningData = {
-    id: moduleId,
-    title: 'Compréhension orale',
-    question: 'Écoutez et Choisissez la bonne réponse',
-    options: shuffledOptions,
-    correctIndex: correctAnswer,
-  };
-
-  setListening(fallbackListening);
+  setListening(null);
 }
 
 
@@ -596,26 +586,9 @@ async function loadLessonWithRetry(
     if (IS_DEV) console.error(`[loadLessonWithRetry] Error fetching lessons:`, err.message);
   }
 
-  // Fallback: générer des données bidon
-  if (IS_DEV) console.log(`[loadLessonWithRetry] Using fallback data`);
-
   if (expectedType === 'wordOrder') {
-    const fallbackSentences = [
-      { words: ['Bonjour', 'comment', 'allez'], translation: 'Bonjour comment allez vous' },
-      { words: ['Je', 'suis', 'content'], translation: 'Je suis content' },
-      { words: ['Merci', 'beaucoup'], translation: 'Merci beaucoup' },
-    ];
-    setWordOrder({
-      id: moduleId,
-      title: 'Ordre des mots',
-      sentences: fallbackSentences.map(s => ({ words: s.words })),
-    });
+    setWordOrder(null);
   } else {
-    if (IS_DEV) console.log(`[loadLessonWithRetry] Using fallback association data`);
-
-    const fallbackPairs: AssociationPair[] = [];
-    console.log(`[loadLessonWithRetry] Failed to load lesson content `);
-
     setWordOrder(null);
   }
 }
@@ -631,13 +604,17 @@ async function loadGlossaryWithRetry(
   setError: (e: string) => void,
   expectedType: 'association' | 'wordOrder'
 ) {
-  const { resolveActivityInstanceId, stripHtml: stripHtmlUtil } = await import('../services/utils/moodleIdResolver');
+  const { resolveActivityInstanceId, getModulesByType, stripHtml: stripHtmlUtil } = await import('../services/utils/moodleIdResolver');
+  const { moodleFetch } = await import('../services/api/moodleClient');
   
   try {
     if (IS_DEV) console.log(`[loadGlossaryWithRetry] Fetching glossary:`, { moduleId, instanceId, cmid, courseId });
 
     const effectiveCmid = cmid > 0 ? cmid : (moduleId > 0 ? moduleId : instanceId);
+    let glossaryInstanceId: number | null = null;
+    let glossaryName = 'Glossaire';
     
+    // Première tentative : résoudre via cmid direct
     if (courseId > 0 && effectiveCmid > 0) {
       const resolved = await resolveActivityInstanceId(
         courseId,
@@ -647,53 +624,66 @@ async function loadGlossaryWithRetry(
       );
 
       if (resolved) {
-        if (IS_DEV) console.log(`[loadGlossaryWithRetry] Resolved glossary ID:`, resolved.instanceId);
+        glossaryInstanceId = resolved.instanceId;
+        glossaryName = resolved.name || 'Glossaire';
+      }
+    }
+    
+    // Deuxième tentative : chercher tous les glossaires du cours si la première échoue
+    if (!glossaryInstanceId && courseId > 0) {
+      if (IS_DEV) console.log(`[loadGlossaryWithRetry] Trying fallback: get all glossaries`);
+      const glossaries = await getModulesByType(courseId, 'glossary', token);
+      if (glossaries.length > 0) {
+        glossaryInstanceId = glossaries[0].instanceId;
+        glossaryName = glossaries[0].name;
+        if (IS_DEV) console.log(`[loadGlossaryWithRetry] Found fallback glossary:`, { instanceId: glossaryInstanceId, name: glossaryName });
+      }
+    }
+    
+    // Charger les entrées du glossaire
+    if (glossaryInstanceId) {
+      if (IS_DEV) console.log(`[loadGlossaryWithRetry] Loading entries for glossary:`, glossaryInstanceId);
 
-        const result = await moodleFetch('/webservice/rest/server.php', {
-          wstoken: token,
-          wsfunction: 'mod_glossary_get_entries_by_letter',
-          moodlewsrestformat: 'json',
-          id: resolved.instanceId,
-          letter: 'ALL',
-          from: 0,
-          limit: 50,
-        });
+      const result = await moodleFetch('/webservice/rest/server.php', {
+        wstoken: token,
+        wsfunction: 'mod_glossary_get_entries_by_letter',
+        moodlewsrestformat: 'json',
+        id: glossaryInstanceId,
+        letter: 'ALL',
+        from: 0,
+        limit: 50,
+      });
 
-        if (result?.exception) {
-          if (IS_DEV) console.warn(`[loadGlossaryWithRetry] API failed:`, result.message);
-        } else {
-          const entries = result?.entries || [];
-          
-          if (entries.length > 0) {
-            if (IS_DEV) console.log(`[loadGlossaryWithRetry] Found ${entries.length} entries`);
+      if (result?.exception) {
+        if (IS_DEV) console.warn(`[loadGlossaryWithRetry] API failed:`, result.message);
+      } else {
+        const entries = result?.entries || [];
+        
+        if (entries.length > 0) {
+          if (IS_DEV) console.log(`[loadGlossaryWithRetry] Found ${entries.length} entries`);
 
-            const pairs: AssociationPair[] = entries.map((entry: any) => ({
-              word: stripHtmlUtil(entry.concept || ''),
-              translation: stripHtmlUtil(entry.definition || ''),
-              id: entry.id,
-            }));
+          const pairs: AssociationPair[] = entries.map((entry: any) => ({
+            word: stripHtmlUtil(entry.concept || ''),
+            translation: stripHtmlUtil(entry.definition || ''),
+            id: entry.id,
+          }));
 
-            if (pairs.length > 0) {
-              setAssociation({
-                id: resolved.instanceId,
-                title: resolved.name || 'Association - Glossaire',
-                pairs: pairs.slice(0, 10),
-              });
-              setWordOrder(null);
-              return;
-            }
+          if (pairs.length > 0) {
+            setAssociation({
+              id: glossaryInstanceId,
+              title: glossaryName,
+              pairs: pairs.slice(0, 10),
+            });
+            setWordOrder(null);
+            return;
           }
         }
-      } else {
-        if (IS_DEV) console.warn(`[loadGlossaryWithRetry] Could not resolve glossary ID`);
       }
     }
   } catch (err: any) {
     if (IS_DEV) console.error(`[loadGlossaryWithRetry] Error:`, err.message);
+    setError('Erreur lors du chargement du glossaire');
   }
-
-  if (IS_DEV) console.log(`[loadGlossaryWithRetry] Falling back to static pairs`);
-  setError(null);
 }
 
 export default useActivityContent;

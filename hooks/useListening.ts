@@ -4,29 +4,6 @@ import { getAuthToken } from '../services/contentLoader';
 import { categorizeMoodleError, getUserFriendlyError, logActivityFetch } from '../services/utils/moodleErrorHandler';
 import { convertFileUrlForAuth, resolveActivityInstanceId } from '../services/utils/moodleIdResolver';
 
-const PULAAR_WORDS = [
-  { word: 'Aboro', translation: 'Bonjour' },
-  { word: 'Maas', translation: 'Merci' },
-  { word: 'Nde', translation: 'Oui' },
-  { word: 'Alelu', translation: 'Non' },
-  { word: 'Ndeerka', translation: 'Comment allez-vous?' },
-  { word: 'Yaaya', translation: 'Mère' },
-  { word: 'Baaba', translation: 'Père' },
-  { word: 'Kerde', translation: 'Eau' },
-  { word: 'Ndimball', translation: 'Pain' },
-  { word: 'Sey', translation: 'Maison' },
-  { word: 'Yidda', translation: 'Ami' },
-  { word: 'Skol', translation: 'École' },
-  { word: 'Lifnde', translation: 'Livre' },
-  { word: 'Tottom', translation: 'Main' },
-  { word: 'Lok', translation: 'Pied' },
-  { word: 'Hoore', translation: 'Cheval' },
-  { word: 'Boggol', translation: 'Chien' },
-  { word: 'Malalam', translation: 'Chat' },
-  { word: 'Joonkil', translation: 'Oiseau' },
-  { word: 'Ko', translation: 'Tête' },
-];
-
 export interface ListeningExercise {
   id: number;
   word: string;
@@ -50,7 +27,8 @@ export function useListeningContent(
   token: string,
   moduleId: number,
   instanceId: number,
-  courseId: number
+  courseId: number,
+  cmid?: number
 ): ListeningResult {
   const [exercises, setExercises] = useState<ListeningExercise[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -58,12 +36,13 @@ export function useListeningContent(
   const [userError, setUserError] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
 
-  const fetchListeningContent = useCallback(async () => {
+const fetchListeningContent = useCallback(async () => {
     const authToken = getAuthToken(token);
     if (!authToken) {
       const err = { type: 'auth' as const, message: 'Token manquant', originalError: null, fallbackUsed: true };
       setUserError(getUserFriendlyError(err));
-      loadFallbackExercises();
+      setError('Aucun token authentication');
+      setIsLoading(false);
       return;
     }
 
@@ -71,7 +50,7 @@ export function useListeningContent(
     setError(null);
     setUserError(null);
 
-try {
+    try {
       logActivityFetch('Listening', 'START', { moduleId, instanceId, courseId });
 
       const effectiveCmid = moduleId > 0 ? moduleId : instanceId;
@@ -107,6 +86,9 @@ try {
       let choiceExercises: ListeningExercise[] = [];
 
       if (resolvedModule?.instanceId) {
+        let options: string[] = [];
+        
+        // Première tentative: via API standard
         try {
           const choiceOptions = await moodleFetch('/webservice/rest/server.php', {
             wstoken: authToken,
@@ -116,50 +98,100 @@ try {
           });
 
           if (choiceOptions?.exception) {
-            const moodleError = categorizeMoodleError(choiceOptions, 'get_choice_options');
-            logActivityFetch('Listening', 'OPTIONS_ERROR', moodleError);
+            logActivityFetch('Listening', 'OPTIONS_ERROR', { error: choiceOptions.message, code: choiceOptions.errorcode });
           } else if (choiceOptions?.options && Array.isArray(choiceOptions.options)) {
-            const options = choiceOptions.options
+            options = choiceOptions.options
               .filter((o: any) => o.enabled !== false)
               .map((o: any) => stripHtml(o.text || String(o.id)));
-
             logActivityFetch('Listening', 'OPTIONS_LOADED', { count: options.length });
-
-            if (options.length >= 2) {
-              choiceExercises = options.map((option: string, index: number) => {
-                const wrongOptions = options
-                  .filter((_, i) => i !== index)
-                  .sort(() => Math.random() - 0.5)
-                  .slice(0, 3);
-                
-                const allOptions = [option, ...wrongOptions].sort(() => Math.random() - 0.5);
-                const correctIndex = allOptions.indexOf(option);
-                
-                return {
-                  id: index + 1,
-                  word: resolvedModule?.name || 'Écoute',
-                  translation: option,
-                  audioUrl: choiceAudioUrl ? convertFileUrlForAuth(choiceAudioUrl, authToken) : undefined,
-                  options: allOptions,
-                  correctIndex,
-                  courseName: 'Pulaar',
-                };
-              });
-            }
           }
-        } catch (err: any) {
-          const moodleError = categorizeMoodleError(err, 'get_choice_options');
-          logActivityFetch('Listening', 'OPTIONS_EXCEPTION', moodleError);
+        } catch (apiErr: any) {
+          logActivityFetch('Listening', 'API_ERROR', apiErr.message);
+        }
+
+        // Deuxième tentative: via mod_choice_view_choice (alternative)
+        if (options.length < 2) {
+          try {
+            const viewResult = await moodleFetch('/webservice/rest/server.php', {
+              wstoken: authToken,
+              wsfunction: 'mod_choice_view_choice',
+              moodlewsrestformat: 'json',
+              choiceid: resolvedModule.instanceId,
+            });
+
+            if (viewResult?.options) {
+              options = viewResult.options.map((o: any) => stripHtml(o.text || o.name || String(o.id)));
+              logActivityFetch('Listening', 'FROM_VIEW', { count: options.length });
+            }
+          } catch (viewErr: any) {
+            logActivityFetch('Listening', 'VIEW_ERROR', viewErr.message);
+          }
+        }
+
+        // Troisième tentative: via contents du cours
+        if (options.length < 2) {
+          try {
+            const contents = await moodleFetch('/webservice/rest/server.php', {
+              wstoken: authToken,
+              wsfunction: 'core_course_get_contents',
+              moodlewsrestformat: 'json',
+              courseid: courseId,
+              options: [{ name: 'includemodules', value: 1 }],
+            });
+            
+            for (const section of Array.isArray(contents) ? contents : [contents]) {
+              for (const mod of section.modules || []) {
+                if (mod.modname === 'choice' && mod.instance === resolvedModule.instanceId) {
+                  if (mod.contents?.length > 0) {
+                    const file = mod.contents.find((f: any) => f?.filename?.endsWith('.xml'));
+                    if (file) {
+                      logActivityFetch('Listening', 'FOUND_FILE', { file: file.filename });
+                    }
+                  }
+                  break;
+                }
+              }
+            }
+          } catch (contentsErr: any) {
+            logActivityFetch('Listening', 'CONTENTS_ERROR', contentsErr.message);
+          }
+        }
+
+        // Générer les exercices si on a des options
+        if (options.length >= 2) {
+          choiceExercises = options.map((option: string, index: number) => {
+            const wrongOptions = options
+              .filter((_: string, i: number) => i !== index)
+              .sort(() => Math.random() - 0.5)
+              .slice(0, Math.min(3, options.length - 1));
+            
+            const allOptions = [option, ...wrongOptions].sort(() => Math.random() - 0.5);
+            const correctIndex = allOptions.indexOf(option);
+            
+            return {
+              id: index + 1,
+              word: resolvedModule?.name || 'Écoute',
+              translation: option,
+              audioUrl: choiceAudioUrl ? convertFileUrlForAuth(choiceAudioUrl, authToken) : undefined,
+              options: allOptions,
+              correctIndex,
+              courseName: resolvedModule?.name || 'Pulaar',
+            };
+          });
         }
       }
 
-      // Step 3: Utiliser les exercices Choice ou générer des fallback
+      // Step 3: Si pas d'options, afficher erreur Moodle
       if (choiceExercises.length > 0) {
         setExercises(choiceExercises);
-        logActivityFetch('Listening', 'SUCCESS', { fromChoice: true, count: choiceExercises.length });
+        logActivityFetch('Listening', 'SUCCESS', { count: choiceExercises.length });
       } else {
-        logActivityFetch('Listening', 'FALLBACK', 'Generating from Pulaar words');
-        loadFallbackExercises(choiceAudioUrl);
+        const errMsg = resolvedModule?.instanceId 
+          ? "Impossible de charger les options du sondage. Permissions insuffisantes."
+          : "Module de choix non trouvé.";
+        setUserError(errMsg);
+        setError(errMsg);
+        logActivityFetch('Listening', 'NO_OPTIONS', errMsg);
       }
 
     } catch (err: any) {
@@ -167,7 +199,6 @@ try {
       logActivityFetch('Listening', 'ERROR', moodleError);
       setError(moodleError.message);
       setUserError(getUserFriendlyError(moodleError));
-      loadFallbackExercises();
     } finally {
       setIsLoading(false);
     }
@@ -184,34 +215,6 @@ try {
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'")
       .trim();
-  }
-
-  function loadFallbackExercises(existingAudioUrl?: string) {
-    const shuffledWords = [...PULAAR_WORDS].sort(() => Math.random() - 0.5);
-    const selectedWords = shuffledWords.slice(0, 5);
-
-    const fallback = selectedWords.map((wordData, index) => {
-      const wrongOptions = PULAAR_WORDS
-        .filter(w => w.translation !== wordData.translation)
-        .map(w => w.translation)
-        .sort(() => Math.random() - 0.5)
-        .slice(0, 3);
-
-      const allOptions = [wordData.translation, ...wrongOptions].sort(() => Math.random() - 0.5);
-      const correctIndex = allOptions.indexOf(wordData.translation);
-
-      return {
-        id: index + 1,
-        word: wordData.word,
-        translation: wordData.translation,
-        audioUrl: existingAudioUrl,
-        options: allOptions,
-        correctIndex,
-        courseName: 'Pulaar',
-      };
-    });
-
-    setExercises(fallback);
   }
 
   useEffect(() => {

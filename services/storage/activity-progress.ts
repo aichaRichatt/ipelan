@@ -33,8 +33,8 @@ export const saveActivityProgress = async (
         progress.moduleId,
         progress.courseId,
         progress.type,
-        progress.score,
-        progress.total,
+        progress.bestScore,
+        progress.totalScore,
         1,
         progress.isCompleted ? 1 : 0,
         progress.lastAttempt,
@@ -173,7 +173,6 @@ export const getAllScoresForCourse = async (
       is_completed: number;
       last_attempt: string;
       xp_earned: number;
-      synced_at: string;
     }>('SELECT * FROM activity_progress WHERE course_id = ?', [courseId]);
 
     const scoreMap = new Map<number, ActivityScoreData>();
@@ -188,7 +187,6 @@ export const getAllScoresForCourse = async (
         isCompleted: r.is_completed === 1,
         lastAttempt: r.last_attempt,
         xpEarned: r.xp_earned,
-        syncedAt: r.synced_at,
       });
     }
     return scoreMap;
@@ -198,10 +196,7 @@ export const getAllScoresForCourse = async (
   }
 };
 
-/**
- * Mark an activity as successfully synced to Moodle
- * Sets synced_at timestamp to prevent duplicate submissions
- */
+ 
 export const markActivitySynced = async (
   moduleId: number,
   courseId: number
@@ -257,9 +252,9 @@ export const getActivityProgress = async (
       module_id: number;
       course_id: number;
       type: string;
-      score: number;
-      total: number;
-      attempts: number;
+      best_score: number;
+      total_score: number;
+      attempts_count: number;
       is_completed: number;
       last_attempt: string;
       xp_earned: number;
@@ -274,9 +269,9 @@ export const getActivityProgress = async (
       moduleId: result.module_id,
       courseId: result.course_id,
       type: result.type as ActivityType,
-      score: result.score,
-      total: result.total,
-      attempts: result.attempts,
+      bestScore: result.best_score,
+      totalScore: result.total_score,
+      attempts: result.attempts_count,
       isCompleted: result.is_completed === 1,
       lastAttempt: result.last_attempt,
       xpEarned: result.xp_earned,
@@ -296,9 +291,9 @@ export const getAllProgressForCourse = async (
       module_id: number;
       course_id: number;
       type: string;
-      score: number;
-      total: number;
-      attempts: number;
+      best_score: number;
+      total_score: number;
+      attempts_count: number;
       is_completed: number;
       last_attempt: string;
       xp_earned: number;
@@ -308,9 +303,9 @@ export const getAllProgressForCourse = async (
       moduleId: r.module_id,
       courseId: r.course_id,
       type: r.type as ActivityType,
-      score: r.score,
-      total: r.total,
-      attempts: r.attempts,
+      bestScore: r.best_score,
+      totalScore: r.total_score,
+      attempts: r.attempts_count,
       isCompleted: r.is_completed === 1,
       lastAttempt: r.last_attempt,
       xpEarned: r.xp_earned,
@@ -328,14 +323,14 @@ export const incrementActivityAttempts = async (
   try {
     const db = await getDBConnection();
     const result = await db.runAsync(
-      'UPDATE activity_progress SET attempts = attempts + 1 WHERE module_id = ? AND course_id = ?',
+      'UPDATE activity_progress SET attempts_count = MAX(attempts_count, 1) + 1 WHERE module_id = ? AND course_id = ?',
       [moduleId, courseId]
     );
-    const current = await db.getFirstAsync<{ attempts: number }>(
-      'SELECT attempts FROM activity_progress WHERE module_id = ? AND course_id = ?',
+    const current = await db.getFirstAsync<{ attempts_count: number }>(
+      'SELECT attempts_count FROM activity_progress WHERE module_id = ? AND course_id = ?',
       [moduleId, courseId]
     );
-    return current?.attempts || 1;
+    return current?.attempts_count || 1;
   } catch (error) {
     console.error('Failed to increment attempts:', error);
     return 1;

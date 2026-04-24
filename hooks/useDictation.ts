@@ -5,7 +5,6 @@
  * 1. Résoudre cmid → assign.id (instance ID)
  * 2. Extraire l'URL audio de introfiles
  * 3. Charger les infos du devoir
- * 4. Fallback sur mots Pulaar si erreur
  */
 
 import { useState, useCallback, useEffect } from 'react';
@@ -15,19 +14,6 @@ import { resolveActivityInstanceId, convertFileUrlForAuth, stripHtml } from '../
 import { categorizeMoodleError, logActivityFetch, getUserFriendlyError } from '../services/utils/moodleErrorHandler';
 
 const IS_DEV = process.env.NODE_ENV === "development";
-
-const DICTATION_WORDS = [
-  { word: 'Aboro', hint: 'Salutation', translation: 'Bonjour' },
-  { word: 'Maas', hint: 'Politesse', translation: 'Merci' },
-  { word: 'Nde', hint: 'Réponse affirmative', translation: 'Oui' },
-  { word: 'Alelu', hint: 'Négation', translation: 'Non' },
-  { word: 'Yaaya', hint: 'Famille', translation: 'Mère' },
-  { word: 'Baaba', hint: 'Famille', translation: 'Père' },
-  { word: 'Yidda', hint: 'Relations', translation: 'Ami' },
-  { word: 'Sey', hint: 'Lieu', translation: 'Maison' },
-  { word: 'Kerde', hint: 'Nécessité', translation: 'Eau' },
-  { word: 'Skol', hint: 'Éducation', translation: 'École' },
-];
 
 export interface DictationWord {
   word: string;
@@ -69,7 +55,8 @@ export function useDictationContent(
     if (!authToken) {
       const err = { type: 'auth' as const, message: 'Token manquant', originalError: null, fallbackUsed: true };
       setUserError(getUserFriendlyError(err));
-      loadFallbackExercise();
+      setError('Aucun token authentication');
+      setIsLoading(false);
       return;
     }
 
@@ -155,22 +142,21 @@ export function useDictationContent(
         }
       }
 
-      // Step 3: Créer l'exercice avec les données extraites ou fallback
-      if (audioUrl) {
+      // Step 3: Vérifier la présence de l'audio Moodle
+      if (!audioUrl) {
+        const errorMsg = "Aucun fichier audio trouvé dans ce devoir Moodle.";
+        setError(errorMsg);
+        setUserError(errorMsg);
+        logActivityFetch('Dictation', 'NO_AUDIO', errorMsg);
+      } else {
         setExercise({
           id: instanceId || moduleId,
           title: dictationTitle,
-          words: DICTATION_WORDS.slice(0, 5).map(w => ({
-            ...w,
-            audioUrl
-          })),
+          words: [], // Les mots seront fournis par l'enseignant
           audioUrl,
           difficulty: 'medium',
         });
         logActivityFetch('Dictation', 'SUCCESS', { hasAudio: true });
-      } else {
-        logActivityFetch('Dictation', 'FALLBACK', 'No audio found');
-        loadFallbackExercise();
       }
 
     } catch (err: any) {
@@ -178,20 +164,10 @@ export function useDictationContent(
       logActivityFetch('Dictation', 'ERROR', moodleError);
       setError(moodleError.message);
       setUserError(getUserFriendlyError(moodleError));
-      loadFallbackExercise();
     } finally {
       setIsLoading(false);
     }
   }, [token, moduleId, instanceId, courseId, cmid]);
-
-  function loadFallbackExercise() {
-    setExercise({
-      id: instanceId || moduleId,
-      title: 'Dictée audio',
-      words: DICTATION_WORDS.map(w => ({ ...w })),
-      difficulty: 'medium',
-    });
-  }
 
   useEffect(() => {
     fetchDictationContent();

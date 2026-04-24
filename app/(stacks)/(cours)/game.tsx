@@ -23,7 +23,8 @@ export default function GameScreen() {
     instanceId,
     'lesson',
     cmid || instanceId,
-    courseId
+    courseId,
+    params.moduleTitle
   );
   
   const sentences = wordOrderData?.sentences?.length ? wordOrderData.sentences : [];

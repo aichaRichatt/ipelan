@@ -6,10 +6,6 @@ import { categorizeMoodleError, logActivityFetch, getUserFriendlyError } from '.
 
 const IS_DEV = process.env.NODE_ENV === "development";
 
-const FALLBACK_PAIRS = [
-  { word: 'Aboro', translation: 'Bonjour Mock' },
-];
-
 export interface AssociationPair {
   word: string;
   translation: string;
@@ -48,7 +44,8 @@ export function useAssociationContent(
     if (!authToken) {
       const err = { type: 'auth' as const, message: 'Token manquant', originalError: null, fallbackUsed: true };
       setUserError(getUserFriendlyError(err));
-      loadFallbackPairs();
+      setError('Aucun token authentication');
+      setIsLoading(false);
       return;
     }
 
@@ -59,10 +56,9 @@ export function useAssociationContent(
     try {
       logActivityFetch('Association', 'START', { moduleId, instanceId, courseId });
 
-      // Step 1: Résoudre cmid → glossary.id
       const effectiveCmid = moduleId > 0 ? moduleId : instanceId;
-      let glossaryTitle = 'Association de mots';
-      
+      let glossaryInstanceId = instanceId;
+
       if (courseId > 0 && effectiveCmid > 0) {
         const resolved = await resolveActivityInstanceId(
           courseId,
@@ -70,87 +66,80 @@ export function useAssociationContent(
           effectiveCmid,
           token
         );
-        
+
         if (resolved) {
-          glossaryTitle = resolved.name;
+          glossaryInstanceId = resolved.instanceId;
           logActivityFetch('Association', 'RESOLVED', {
             cmid: effectiveCmid,
-            instanceId: resolved.instanceId,
-            name: glossaryTitle
+            instanceId: glossaryInstanceId,
+            name: resolved.name
           });
-
-          // Step 2: Charger les entrées du glossaire
-          try {
-            const entriesResult = await moodleFetch('/webservice/rest/server.php', {
-              wstoken: authToken,
-              wsfunction: 'mod_glossary_get_entries_by_letter',
-              moodlewsrestformat: 'json',
-              id: resolved.instanceId,
-              letter: 'ALL',
-              from: 0,
-              limit: 50,
-            });
-
-            if (entriesResult?.exception) {
-              const moodleError = categorizeMoodleError(entriesResult, 'get_glossary_entries');
-              logActivityFetch('Association', 'ENTRIES_ERROR', moodleError);
-            } else if (entriesResult?.entries && Array.isArray(entriesResult.entries)) {
-              const entries = entriesResult.entries;
-              logActivityFetch('Association', 'ENTRIES_LOADED', { count: entries.length });
-
-              if (entries.length > 0) {
-                const pairs: AssociationPair[] = entries.map((entry: any) => ({
-                  word: stripHtml(entry.concept || ''),
-                  translation: stripHtml(entry.definition || ''),
-                  id: entry.id,
-                }));
-
-                if (pairs.length > 0) {
-                  setExercise({
-                    id: resolved.instanceId,
-                    title: glossaryTitle,
-                    pairs: pairs.slice(0, 10),
-                    courseName: 'Pulaar',
-                  });
-                  logActivityFetch('Association', 'SUCCESS', { pairsCount: pairs.length });
-                  setIsLoading(false);
-                  return;
-                }
-              }
-            }
-          } catch (err: any) {
-            const moodleError = categorizeMoodleError(err, 'get_glossary_entries');
-            logActivityFetch('Association', 'ENTRIES_EXCEPTION', moodleError);
-          }
-        } else {
-          logActivityFetch('Association', 'RESOLVE_FAILED', { cmid: effectiveCmid });
         }
       }
 
-      // Step 3: Fallback sur les paires Pulaar
-      logActivityFetch('Association', 'FALLBACK', 'Using Pulaar word pairs');
-      loadFallbackPairs();
+      if (!glossaryInstanceId) {
+        const errMsg = "Glossary non trouvé dans ce cours.";
+        setError(errMsg);
+        setUserError(errMsg);
+        return;
+      }
+
+      const glossaryResult = await moodleFetch('/webservice/rest/server.php', {
+        wstoken: authToken,
+        wsfunction: 'mod_glossary_get_entries_by_letter',
+        moodlewsrestformat: 'json',
+        glossaryid: glossaryInstanceId,
+        letter: 'ALL',
+      });
+
+      if (glossaryResult?.exception) {
+        logActivityFetch('Association', 'ENTRIES_ERROR', glossaryResult.message);
+        const moodleError = categorizeMoodleError(glossaryResult, 'fetch_association');
+        setError(moodleError.message);
+        setUserError(getUserFriendlyError(moodleError));
+        return;
+      }
+
+      const entries = glossaryResult?.entries || [];
+      
+      const pairs: AssociationPair[] = [];
+      
+      for (const entry of entries) {
+        if (entry.concept && entry.definition) {
+          pairs.push({
+            id: entry.id,
+            word: stripHtml(entry.concept),
+            translation: stripHtml(entry.definition),
+          });
+        }
+      }
+
+      if (pairs.length === 0) {
+        const errMsg = "Aucune entrée de glossaire trouvée.";
+        setError(errMsg);
+        setUserError(errMsg);
+        logActivityFetch('Association', 'NO_ENTRIES', errMsg);
+        return;
+      }
+
+      setExercise({
+        id: glossaryInstanceId,
+        title: 'Associations',
+        pairs,
+        courseName: 'Glossary',
+      });
+
+      logActivityFetch('Association', 'SUCCESS', { count: pairs.length });
 
     } catch (err: any) {
       const moodleError = categorizeMoodleError(err, 'fetch_association');
       logActivityFetch('Association', 'ERROR', moodleError);
       setError(moodleError.message);
       setUserError(getUserFriendlyError(moodleError));
-      loadFallbackPairs();
     } finally {
       setIsLoading(false);
     }
-  }, [token, moduleId, instanceId, courseId, cmid]);
-
-  function loadFallbackPairs() {
-    const shuffledPairs = [...FALLBACK_PAIRS].sort(() => Math.random() - 0.5);
-    setExercise({
-      id: instanceId || moduleId,
-      title: 'Association de mots',
-      pairs: shuffledPairs.slice(0, 8),
-      courseName: 'Pulaar',
-    });
-  }
+  }, [token, moduleId, instanceId, courseId]);
 
   useEffect(() => {
     fetchAssociationContent();
@@ -164,5 +153,3 @@ export function useAssociationContent(
     refetch: fetchAssociationContent,
   };
 }
-
-export default useAssociationContent;

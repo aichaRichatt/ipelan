@@ -1,4 +1,5 @@
 import { moodleFetch } from "./moodleClient";
+import { categorizeMoodleError, logActivityFetch } from "../utils/moodleErrorHandler";
 
 const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_TOKEN;
 
@@ -90,24 +91,26 @@ export async function getCoursesByCategory(token: string, categoryId: number, li
     const result = await moodleFetch("/webservice/rest/server.php", params, "POST");
 
     if (result?.exception) {
-      if (IS_DEV) console.warn("[courseService] getCoursesByCategory exception:", result.message || result.exception);
+      const error = categorizeMoodleError(result, 'getCoursesByCategory');
+      logActivityFetch('Course', 'ERROR', error);
       return [];
     }
 
     if (Array.isArray(result)) {
-      if (IS_DEV && result.length > 0) console.log("[courseService] Courses in category", categoryId, ":", result.length, result);
+      logActivityFetch('Course', 'FOUND', { categoryId, count: result.length });
       return result;
     }
 
     if (result?.courses && Array.isArray(result.courses)) {
-      if (IS_DEV) console.log("[courseService] Courses in category", categoryId, ":", result.courses.length);
+      logActivityFetch('Course', 'FOUND', { categoryId, count: result.courses.length });
       return result.courses;
     }
 
-    if (IS_DEV) console.warn("[courseService] getCoursesByCategory returned unexpected format:", typeof result, result);
+    logActivityFetch('Course', 'UNEXPECTED', typeof result);
     return [];
   } catch (error) {
-    console.warn("[courseService] getCoursesByCategory failed:", error);
+    const err = categorizeMoodleError(error, 'getCoursesByCategory');
+    logActivityFetch('Course', 'ERROR', err);
     return [];
   }
 }
