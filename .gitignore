@@ -2,13 +2,13 @@
 
 # dependencies
 node_modules/
-
+AUDIT_IPELAN.epub
 # Expo
 .expo/
 dist/
 web-build/
 expo-env.d.ts
-
+AUDIT_IPELAN.md
 # Native
 .kotlin/
 *.orig.*
@@ -18,7 +18,7 @@ Avancement.md
 *.p12
 *.key
 *.mobileprovision
-
+Application Mobile - IPELAN.docx
 # Metro
 .metro-health-check*
 .idea/
@@ -39,7 +39,7 @@ QUICK_START_CHECKLIST.md
 # macOS
 .DS_Store
 *.pem
-
+CLAUDE.md
 # local env files
 .env*.local
 
@@ -69,6 +69,6 @@ android/
 assets/storage/
 
 scripts/
-
+AUDIT_IPELAN.pdf
 test/
 SKILLs.md

@@ -1,7 +1,7 @@
-import * as SecureStore from 'expo-secure-store';
 import { moodleFetch } from '../api/moodleClient';
 import { getAllScoresForCourse, markActivitySynced } from '../storage/activity-progress';
 import { updateCourseProgressFromActivities } from '../storage/course-progress';
+import { getToken } from '../storage/tokenStorage';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
 
@@ -34,7 +34,7 @@ export interface SyncResult {
 
 async function getStoredToken(): Promise<string | null> {
   try {
-    return await SecureStore.getItemAsync('auth_token');
+    return await getToken();
   } catch {
     return null;
   }

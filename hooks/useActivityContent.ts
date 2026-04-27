@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { generateIdRetryOrder, identifyActivityType, validateActivityIds } from '../services/activity/activityIdentifier';
 import { moodleFetch } from '../services/api/moodleClient';
+import { shuffle } from '../utils/shuffle';
 
 const IS_DEV = process.env.NODE_ENV === "development";
 const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_TOKEN;
@@ -525,10 +526,10 @@ async function loadLessonWithRetry(
                 .replace(/<[^>]*>/g, '')
                 .replace(/&[^;]+;/g, ' ')
                 .trim();
-              const words = cleanContent.split(/\s+/).filter((w: string) => w.length > 2);
+              const words: string[] = String(cleanContent).split(/\s+/).filter((w: string) => w.length > 2);
 
               if (words.length >= 2 && words.length <= 8) {
-                const shuffled = [...words].sort(() => Math.random() - 0.5);
+                const shuffled = shuffle(words);
                 sentences.push({
                   words: shuffled,
                   translation: cleanContent,
@@ -685,5 +686,3 @@ async function loadGlossaryWithRetry(
     setError('Erreur lors du chargement du glossaire');
   }
 }
-
-export default useActivityContent;

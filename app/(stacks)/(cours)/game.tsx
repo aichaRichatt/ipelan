@@ -6,6 +6,7 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import { useSelector } from "react-redux";
 import { RootState } from "@/services/redux/store";
 import { useActivityContent, WordOrderData } from "@/hooks/useActivityContent";
+import { shuffle } from "@/utils/shuffle";
 
 export default function GameScreen() {
   const router = useRouter();
@@ -50,7 +51,7 @@ export default function GameScreen() {
   }, [currentSentenceIndex]);
 
   const initSentence = () => {
-    const shuffled = [...sentence.words].sort(() => Math.random() - 0.5);
+    const shuffled = shuffle(sentence.words);
     setAvailableWords(shuffled);
     setPlacedWords([]);
     setWrongAttempts(0);
@@ -90,7 +91,7 @@ export default function GameScreen() {
       }
       setTimeout(() => {
         setPlacedWords([]);
-        setAvailableWords([...availableWords, ...placedWords].sort(() => Math.random() - 0.5));
+        setAvailableWords(shuffle([...availableWords, ...placedWords]));
       }, 1000);
     }
   };

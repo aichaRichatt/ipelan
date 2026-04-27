@@ -32,7 +32,7 @@ const SLIDES: OnboardingSlide[] = [
     id: 3,
     icon: "award",
     title: "Gagne des récompenses",
-    subtitle: "Des étoiles, des badges et desXP pour chaque activité réussie !",
+    subtitle: "Des étoiles, des badges et des XP pour chaque activité réussie !",
     color: "#F59E0B",
   },
 ];
@@ -129,4 +129,4 @@ export default function OnboardingScreen() {
       </View>
     </View>
   );
-}
+}

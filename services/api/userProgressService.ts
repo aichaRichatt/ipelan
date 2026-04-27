@@ -12,7 +12,7 @@ export async function initStreakTable(): Promise<void> {
       best         INTEGER DEFAULT 0
     );
   `);
-  
+
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS user_progress (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -236,11 +236,11 @@ export async function saveActivityResult(params: {
     console.log('[userProgressService] Activity saved:', {
       xp: totalXP,
       coins: totalCoins,
-      streak: currentStreak
+      streak: currentStreak,
     });
 
     await syncUserProgressToMoodle(userId, totalXP, currentStreak, token);
-    
+
     if (coinsEarned > 0) {
       await syncCoinsToMoodle(userId, totalCoins, token);
     }
@@ -249,10 +249,10 @@ export async function saveActivityResult(params: {
       userId,
       courseId,
       moduleId,
-      score: score,
-      total: total,
+      score,
+      total,
+      token,
     });
-
   } catch (err) {
     console.warn('[userProgressService] saveActivityResult error:', err);
   }
@@ -264,29 +264,44 @@ export async function submitGradeToMoodle(params: {
   moduleId: number;
   score: number;
   total: number;
+  token: string;
 }): Promise<boolean> {
-  const { userId, courseId, moduleId, score, total } = params;
+  const { moduleId, score, total, token } = params;
   const percentage = Math.round((score / Math.max(total, 1)) * 100);
   const passed = percentage >= 50;
 
+  if (!token || token.length < 10) {
+    console.warn('[Grade] Missing token, cannot submit completion to Moodle');
+    return false;
+  }
+
   try {
-    await moodleFetch('/webservice/rest/server.php', {
-      wstoken: '',
+    const result = await moodleFetch('/webservice/rest/server.php', {
+      wstoken: token,
       wsfunction: 'core_completion_update_activity_completion_status_manually',
       moodlewsrestformat: 'json',
       cmid: moduleId,
       completionstate: passed ? 1 : 0,
       completionnotify: 0,
     });
+
+    if (result?.exception) {
+      const errCode = result.errorcode || '';
+      const errMsg = result.message || '';
+      // Module sans completion manuelle activee : on ignore silencieusement.
+      if (errCode === 'invalidparameter' || errMsg.includes('Valeur incorrecte')) {
+        console.log('[Grade] Completion manual not enabled for this module, skipping');
+        return true;
+      }
+      console.warn('[Grade] Completion update failed:', errCode || errMsg);
+      return false;
+    }
+
     console.log('[Grade] Completion marked for module:', moduleId, 'passed:', passed);
     return true;
   } catch (err: any) {
-    const errorMsg = err.message || err.errorcode || String(err);
-    if (errorMsg.includes('invalidparameter') || errorMsg.includes(' Valeur incorrecte')) {
-      console.log('[Grade] Completion manual not enabled for this module, skipping');
-      return true;
-    }
-    console.warn('[Grade] Completion update failed:', errorMsg);
+    const errorMsg = err?.message || String(err);
+    console.warn('[Grade] Completion update exception:', errorMsg);
     return false;
   }
 }

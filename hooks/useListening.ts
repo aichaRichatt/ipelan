@@ -3,6 +3,7 @@ import { moodleFetch } from '../services/api/moodleClient';
 import { getAuthToken } from '../services/contentLoader';
 import { categorizeMoodleError, getUserFriendlyError, logActivityFetch } from '../services/utils/moodleErrorHandler';
 import { convertFileUrlForAuth, resolveActivityInstanceId } from '../services/utils/moodleIdResolver';
+import { shuffle } from '../utils/shuffle';
 
 export interface ListeningExercise {
   id: number;
@@ -160,12 +161,11 @@ const fetchListeningContent = useCallback(async () => {
         // Générer les exercices si on a des options
         if (options.length >= 2) {
           choiceExercises = options.map((option: string, index: number) => {
-            const wrongOptions = options
-              .filter((_: string, i: number) => i !== index)
-              .sort(() => Math.random() - 0.5)
-              .slice(0, Math.min(3, options.length - 1));
-            
-            const allOptions = [option, ...wrongOptions].sort(() => Math.random() - 0.5);
+            const wrongOptions = shuffle(
+              options.filter((_: string, i: number) => i !== index)
+            ).slice(0, Math.min(3, options.length - 1));
+
+            const allOptions = shuffle([option, ...wrongOptions]);
             const correctIndex = allOptions.indexOf(option);
             
             return {

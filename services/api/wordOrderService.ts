@@ -33,7 +33,7 @@ export async function getWordOrderSentences(
 
     const sentences: WordOrderSentence[] = [];
 
-for (const lesson of lessons) {
+    for (const lesson of lessons) {
       const result = await moodleFetch('/webservice/rest/server.php', {
         wstoken: token,
         wsfunction: 'mod_lesson_get_pages',
@@ -47,33 +47,16 @@ for (const lesson of lessons) {
       }
 
       const pages = result?.pages || [];
-      
+
       for (const p of pages) {
         const page = p.page || p;
         if (page.contents) {
           const words = page.contents.split(/[|,]/).map((w: string) => w.trim()).filter(Boolean);
-          
+
           if (words.length >= 2) {
             sentences.push({
               id: page.id,
               words: shuffleArray([...words]),
-              correctOrder: [...words],
-            });
-          }
-        }
-      }
-    }
-
-      const pages = result?.pages || [];
-      
-      for (const page of pages) {
-        if (page.contents) {
-          const words = page.contents.split(/[|,]/).map((w: string) => w.trim()).filter(Boolean);
-          
-          if (words.length >= 2) {
-            sentences.push({
-              id: page.id,
-              words: shuffleArray(words),
               correctOrder: [...words],
             });
           }
