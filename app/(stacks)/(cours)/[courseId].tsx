@@ -271,8 +271,10 @@ const handleActivityPress = (activity: ActivityWithProgress) => {
 
     switch (activity.type) {
       case 'quiz':
-        const qp = `?moduleId=${activity.id}&courseId=${courseId}&cmid=${activity.id}&instanceId=${activity.instanceId || activity.id}&moduleTitle=${encodeURIComponent(activity.title)}`;
-        router.push(`/quiz${qp}` as any);
+        //  const qp = `?moduleId=${activity.id}&courseId=${courseId}&cmid=${activity.id}&instanceId=${activity.instanceId || activity.id}&moduleTitle=${encodeURIComponent(activity.title)}`;
+        // router.push(`/quiz${qp}` as any);
+        // Use WebView for quizzes - more reliable than REST API
+        router.push(`/(stacks)/(cours)/quiz-webview?quizId=${activity.id}&courseId=${courseId}&moduleTitle=${encodeURIComponent(activity.title)}` as any);
         break;
       case 'dictation':
         router.push({ pathname: '/(stacks)/(cours)/dictation', params: baseParams } as any);
@@ -429,8 +431,8 @@ const handleActivityPress = (activity: ActivityWithProgress) => {
 
     switch (lesson.type) {
       case 'quiz':
-        const lqp = `?moduleId=${lesson.id}&courseId=${courseId}&cmid=${lesson.id}&instanceId=${lesson.id || lesson.id}&moduleTitle=${encodeURIComponent(lesson.title)}`;
-        router.push(`/quiz${lqp}` as any);
+        // Use WebView for quizzes - more reliable than REST API
+        router.push(`/(stacks)/(cours)/quiz-webview?quizId=${lesson.id}&courseId=${courseId}&moduleTitle=${encodeURIComponent(lesson.title)}` as any);
         break;
       case 'dictation':
         router.push(`/(stacks)/(cours)/dictation${params}` as any);

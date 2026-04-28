@@ -1,15 +1,16 @@
+import { useFirstCourse } from "@/hooks/useMoodleCourses";
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useState, useEffect } from "react";
-import { Pressable, ScrollView, Text, View, Image, ActivityIndicator } from "react-native";
+import React, { useEffect, useState } from "react";
+import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useMoodleCourses } from "../../../hooks/useMoodleCourses";
 import { useSelector } from "react-redux";
+import { getAndSyncUserBadges } from "../../../services/api/badgeService";
+import { getUserProgress, syncUserProgressToMoodle } from "../../../services/api/userProgressService";
+import { getUserXP } from "../../../services/api/xpService";
 import { RootState } from "../../../services/redux/store";
-import { getUserBadges } from "../../../services/api/badgeService";
-import { getAllCourseProgress } from "../../../services/storage/course-progress";
 import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
-import React from "react";
+import { getAllCourseProgress } from "../../../services/storage/course-progress";
 
 interface ModuleData {
   id: string;
@@ -58,21 +59,56 @@ export default function HomeScreen() {
   const loggedUser = reduxUser;
   const activeToken = reduxToken || "";
   
-const { courses, isLoading, error } = useMoodleCourses(activeToken);
+const { course, isLoading, error } = useFirstCourse(activeToken);
   const [badgesCount, setBadgesCount] = useState(0);
   const [courseProgressMap, setCourseProgressMap] = useState<any>({});
   const [courseScoreMap, setCourseScoreMap] = useState<any>({});
+  const [totalXP, setTotalXP] = useState(0);
+  const [streak, setStreak] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   useEffect(() => {
-    if (!loggedUser?.id || !activeToken) return;
-    getUserBadges(activeToken, loggedUser.id)
-      .then(b => setBadgesCount(b.length))
-      .catch(() => setBadgesCount(0));
+    const loadUserStats = async () => {
+      if (!loggedUser?.id) return;
+
+      const localProgress = await getUserProgress(loggedUser.id);
+      if (localProgress) {
+        setTotalXP(localProgress.xp);
+        setStreak(localProgress.streak_current);
+      }
+
+      const { badges, fromCache } = await getAndSyncUserBadges(activeToken, loggedUser.id);
+      setBadgesCount(badges.length);
+
+      if (!fromCache && activeToken) {
+        setIsSyncing(true);
+        try {
+          const moodleXP = await getUserXP(activeToken, loggedUser.id);
+          if (moodleXP.xp > 0) {
+            setTotalXP(moodleXP.xp);
+            setStreak(moodleXP.streak);
+          }
+
+          await syncUserProgressToMoodle(
+            loggedUser.id,
+            totalXP,
+            streak,
+            activeToken
+          );
+        } catch (err) {
+          console.warn("[Home] Failed to sync with Moodle:", err);
+        } finally {
+          setIsSyncing(false);
+        }
+      }
+    };
+
+    loadUserStats();
   }, [loggedUser?.id, activeToken]);
 
   useEffect(() => {
     const loadProgress = async () => {
-      if (!courses || courses.length === 0) {
+      if (!course) {
         setCourseProgressMap({});
         setCourseScoreMap({});
         return;
@@ -91,15 +127,12 @@ const { courses, isLoading, error } = useMoodleCourses(activeToken);
           };
         }
         
-        for (const course of courses) {
-          if (course.id) {
-            const scores = await getAllScoresForCourse(course.id);
-            setCourseScoreMap((prev: any) => ({ ...prev, [course.id]: scores }));
-          }
+        if (course.id) {
+          const scores = await getAllScoresForCourse(course.id);
+          setCourseScoreMap({ [course.id]: scores });
         }
         
         setCourseProgressMap(progressMap);
-        console.log('[Home] Loaded progress for', Object.keys(progressMap).length, 'courses');
       } catch (err) {
         console.warn('[Home] Failed to load progress:', err);
         setCourseProgressMap({});
@@ -107,7 +140,7 @@ const { courses, isLoading, error } = useMoodleCourses(activeToken);
       }
     };
     loadProgress();
-  }, [courses, activeToken]);
+  }, [course, activeToken]);
 
   const handleSettingsPress = () => {
     router.push("/(settings)/index" as any);
@@ -157,11 +190,8 @@ const { courses, isLoading, error } = useMoodleCourses(activeToken);
     return match ? parseInt(match[1], 10) : 1;
   };
 
-  const filteredCourses = courses;
-
-  const currentCourse = courses.find((c: any) => (c.progress || 0) > 0 && (c.progress || 0) < 100) || courses[0];
-  const totalXP = loggedUser?.ipelan_xp || 0;
-  const streak = loggedUser?.streak || 0;
+  // Single course from user's preferred language/grade
+  const currentCourse = course;
 
   return (  
     <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
@@ -199,6 +229,7 @@ const { courses, isLoading, error } = useMoodleCourses(activeToken);
               <View className="flex-row items-center bg-white px-2 py-1 rounded-full border border-gray-100 shadow-sm">
                 <Ionicons name="medal" size={14} color="#8B5CF6" />
                 <Text className="font-bold text-xs text-[#8B5CF6] ml-1">{badgesCount}</Text>
+                {isSyncing && <ActivityIndicator size="small" color="#8B5CF6" className="ml-1" />}
               </View>
               <Pressable onPress={handleSettingsPress} className="p-2 bg-white rounded-full border border-gray-100 shadow-sm">
                 <Feather name="settings" size={18} color="#374151" />
@@ -230,7 +261,7 @@ const { courses, isLoading, error } = useMoodleCourses(activeToken);
             />
             <StatsCard 
               label="Cours" 
-              value={`${courses.length}`} 
+              value={course ? "1" : "0"} 
               icon={<Feather name="book-open" size={16} color="#10B981" />}
               bgColor="bg-green-50"
               textColor="text-green-600"
@@ -310,26 +341,24 @@ const { courses, isLoading, error } = useMoodleCourses(activeToken);
                 <View className="bg-red-50 p-4 rounded-2xl">
                   <Text className="text-red-600 text-center">{error}</Text>
                 </View>
-              ) : filteredCourses.length > 0 ? (
-                filteredCourses.map((course) => (
-                  <HomeModuleCard 
-                    key={course.id}
-                    module={{
-                      id: String(course.id),
-                      title: course.fullname,
-                      description: course.coursecategory || "",
-                      xp: 50,
-                      isLocked: false,
-                      lessonsCount: getCourseLessonsCount(course),
-                      completedLessons: getCompletedLessons(course),
-                      icon: "book",
-                      iconColor: "#002366",
-                      iconBg: "bg-blue-100",
-                      levelId: getCourseLevel(course.fullname)
-                    }}
-                    onPress={() => handleCoursePress(course.id)}
-                  />
-                ))
+              ) : course ? (
+                <HomeModuleCard 
+                  key={course.id}
+                  module={{
+                    id: String(course.id),
+                    title: course.fullname,
+                    description: course.coursecategory || "",
+                    xp: 50,
+                    isLocked: false,
+                    lessonsCount: getCourseLessonsCount(course),
+                    completedLessons: getCompletedLessons(course),
+                    icon: "book",
+                    iconColor: "#002366",
+                    iconBg: "bg-blue-100",
+                    levelId: getCourseLevel(course.fullname)
+                  }}
+                  onPress={() => handleCoursePress(course.id)}
+                />
               ) : (
                 <View className="bg-white p-8 rounded-3xl border border-dashed border-gray-200 items-center">
                   <Feather name="book-open" size={32} color="#D1D5DB" />
@@ -418,21 +447,3 @@ function HomeModuleCard({ module, onPress }: {
   );
 }
 
-function QuickActionCard({ action, icon, onPress }: { 
-  action: QuickActionData;
-  icon: React.ReactNode;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable 
-      onPress={onPress}
-      className={`w-[48%] ${action.bgColor} rounded-3xl p-4 mb-3 border border-gray-100 shadow-sm`}
-    >
-      <View className="w-10 h-10 rounded-2xl bg-white items-center justify-center mb-3 shadow-sm">
-        {icon}
-      </View>
-      <Text className="font-bold text-gray-900 text-sm">{action.title}</Text>
-      <Text className="text-gray-500 text-[10px] mt-0.5" numberOfLines={1}>{action.subtitle}</Text>
-    </Pressable>
-  );
-}

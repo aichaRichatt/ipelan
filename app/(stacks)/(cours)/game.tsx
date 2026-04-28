@@ -1,12 +1,12 @@
-import { Feather } from "@expo/vector-icons";
-import React, { useState } from "react";
-import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { useSelector } from "react-redux";
+import { useActivityContent } from "@/hooks/useActivityContent";
 import { RootState } from "@/services/redux/store";
-import { useActivityContent, WordOrderData } from "@/hooks/useActivityContent";
 import { shuffle } from "@/utils/shuffle";
+import { Feather } from "@expo/vector-icons";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
+import { Pressable, ScrollView, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useSelector } from "react-redux";
 
 export default function GameScreen() {
   const router = useRouter();
@@ -18,7 +18,7 @@ export default function GameScreen() {
   const cmid = parseInt(params.cmid || "0", 10);
   const courseId = parseInt(params.courseId || "0", 10);
   
-  const { wordOrder: wordOrderData, isLoading, error } = useActivityContent(
+  const { wordOrder: wordOrderData } = useActivityContent(
     token || '',
     moduleId,
     instanceId,
@@ -46,17 +46,17 @@ export default function GameScreen() {
     router.push(`/(stacks)/(cours)/result${resultParams}` as any);
   };
 
-  React.useEffect(() => {
-    initSentence();
-  }, [currentSentenceIndex]);
-
-  const initSentence = () => {
+  const initSentence = React.useCallback(() => {
     const shuffled = shuffle(sentence.words);
     setAvailableWords(shuffled);
     setPlacedWords([]);
     setWrongAttempts(0);
     setShowAnswer(false);
-  };
+  }, [sentence.words]);
+
+  useEffect(() => {
+    initSentence();
+  }, [currentSentenceIndex, initSentence]);
 
   const handlePlaceWord = (word: string) => {
     if (placedWords.length >= sentence.words.length) return;

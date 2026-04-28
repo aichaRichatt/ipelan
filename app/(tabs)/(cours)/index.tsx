@@ -1,14 +1,14 @@
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import React, { useState, useEffect } from "react";
-import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
+import { getAllCoursesFromLanguageCategory, getCourseContents, getCoursesForLanguageAndGrade, getEnrolledCoursesByTimeline } from "../../../services/api/courseService";
 import { RootState } from "../../../services/redux/store";
-import { getEnrolledCoursesByTimeline, getCoursesForLanguageAndGrade, getAllCoursesFromLanguageCategory, getCourseContents } from "../../../services/api/courseService";
-import { getCourseProgress, CourseProgressData } from "../../../services/storage/course-progress";
 import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
+import { CourseProgressData, getCourseProgress } from "../../../services/storage/course-progress";
 
 const IS_DEV = process.env.NODE_ENV === "development";
 
@@ -85,26 +85,27 @@ export default function CoursScreen() {
       try {
         let fetchedCourses: any[] = [];
         
-        console.log("[Cours] Fetching all courses from Langues Nationales iplan (category 18)...");
-        const allLangCourses = await getAllCoursesFromLanguageCategory(token, 18);
-        
-        if (allLangCourses.length > 0) {
-          if (IS_DEV) console.log("[Cours] Found", allLangCourses.length, "courses in language category");
-          fetchedCourses = allLangCourses;
-        }
-        
-        if (fetchedCourses.length === 0 && preferences) {
-          console.log("[Cours] No courses from language category, trying grade-specific...");
+        // 1. Try to get courses for user's preferred language and grade
+        if (preferences) {
+          console.log("[Cours] Fetching courses for language:", preferences.language, "grade:", preferences.grade);
           const langCourses = await getCoursesForLanguageAndGrade(token, preferences.language, preferences.grade);
           if (langCourses.length > 0) {
-            if (Array.isArray(langCourses[0])) {
-              fetchedCourses = langCourses.flat();
-            } else {
-              fetchedCourses = langCourses;
-            }
+            if (IS_DEV) console.log("[Cours] Found", langCourses.length, "courses for", preferences.language, "grade", preferences.grade);
+            fetchedCourses = langCourses;
           }
         }
         
+        // 2. Fallback: get all courses from Langues Nationales iplan
+        if (fetchedCourses.length === 0) {
+          console.log("[Cours] No grade-specific courses, fetching all from Langues Nationales iplan...");
+          const allLangCourses = await getAllCoursesFromLanguageCategory(token, 18);
+          if (allLangCourses.length > 0) {
+            if (IS_DEV) console.log("[Cours] Found", allLangCourses.length, "courses in language category");
+            fetchedCourses = allLangCourses;
+          }
+        }
+        
+        // 3. Last resort: get enrolled courses
         if (fetchedCourses.length === 0) {
           console.log("[Cours] No filtered courses, trying enrolled courses...");
           const response = await getEnrolledCoursesByTimeline(token);

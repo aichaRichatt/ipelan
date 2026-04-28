@@ -1,15 +1,16 @@
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
-import React, { useState, useEffect } from "react";
-import { Pressable, Text, View, ScrollView, ActivityIndicator } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { useLogin } from "../../../hooks/useLogin";
+import React, { useEffect, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
+import { useLogin } from "../../../hooks/useLogin";
+import { getCourseContents, getEnrolledCoursesByTimeline } from "../../../services/api/courseService";
 import { RootState } from "../../../services/redux/store";
-import { getEnrolledCoursesByTimeline, getCourseContents } from "../../../services/api/courseService";
-import { getUserBadges } from "../../../services/api/badgeService";
-import { getAllCourseProgress, CourseProgressData } from "../../../services/storage/course-progress";
 import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
+import { CourseProgressData, getAllCourseProgress } from "../../../services/storage/course-progress";
+
+const IS_DEV = process.env.NODE_ENV === "development";
 
 interface UserCourse {
   id: number;
@@ -27,7 +28,6 @@ export default function ProgressScreen() {
   const token = useSelector((state: RootState) => state.auth.token);
   const [courses, setCourses] = useState<UserCourse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [badgesCount, setBadgesCount] = useState(0);
 
   useEffect(() => {
     const fetchCourses = async () => {
@@ -77,24 +77,17 @@ export default function ProgressScreen() {
               };
             })
           );
-          console.log('[Progress] Loaded', enriched.length, 'courses with progress from DB');
+          if (IS_DEV) console.log('[Progress] Loaded', enriched.length, 'courses with progress from DB');
           setCourses(enriched);
         }
       } catch (error) {
-        console.error("Failed to fetch courses:", error);
+        if (IS_DEV) console.error("Failed to fetch courses:", error);
       } finally {
         setIsLoading(false);
       }
     };
     fetchCourses();
   }, [token]);
-
-  useEffect(() => {
-    if (!user?.id || !token) return;
-    getUserBadges(token, user.id)
-      .then(b => setBadgesCount(b.length))
-      .catch(() => setBadgesCount(0));
-  }, [user?.id, token]);
 
   const totalLessons = courses.reduce((sum, c) => sum + c.lessonsCount, 0);
   const completedLessons = courses.reduce((sum, c) => sum + Math.floor((c.progress / 100) * c.lessonsCount), 0);

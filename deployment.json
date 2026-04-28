@@ -1,0 +1,15 @@
+{
+  "project_id": "",
+  "type": "web",
+  "framework": "nextjs",
+  "build_command": "npx expo export",
+  "output_directory": "dist",
+  "env_vars": {
+    "EXPO_PUBLIC_MOODLE_API_URL": "https://moodle.richatt.com",
+    "EXPO_PUBLIC_MOODLE_SERVICE": "IPELAN_FULL_SERVICE"
+  },
+  "expo": {
+    "sdkVersion": "~54.0.0",
+    "platforms": ["ios", "android", "web"]
+  }
+}

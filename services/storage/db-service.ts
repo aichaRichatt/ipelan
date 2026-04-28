@@ -1,5 +1,5 @@
 import { openDatabaseAsync, SQLiteDatabase } from 'expo-sqlite';
-import { IPELANUser, CourseCategory, CourseSection, CourseModule, ModuleContent } from '../../types';
+import { CourseCategory, CourseModule, CourseSection, IPELANUser, ModuleContent } from '../../types';
 
 export type UserDB = Pick<IPELANUser, 'id' | 'username' | 'email' | 'firstname' | 'lastname' | 'fullname' | 'ipelan_xp' | 'coins' | 'streak'> & { token: string; badges?: string };
 
@@ -28,7 +28,7 @@ let isProcessing = false;
 async function processQueue() {
   if (isProcessing || dbQueue.length === 0) return;
   isProcessing = true;
-  
+
   while (dbQueue.length > 0) {
     const next = dbQueue.shift();
     if (next) {
@@ -39,7 +39,7 @@ async function processQueue() {
       }
     }
   }
-  
+
   isProcessing = false;
 }
 
@@ -61,16 +61,20 @@ export const getDBConnection = async () => {
   if (dbInstance) {
     return dbInstance;
   }
-  
+
   if (dbInitPromise) {
     return dbInitPromise;
   }
-  
+
   dbInitPromise = (async () => {
     try {
       const db = await openDatabaseAsync('ipelan-data.db', { useNewConnection: true });
       await db.execAsync('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
-      console.log("SQLite: Database opened successfully (singleton)");
+
+      // Create all tables on first connection
+      await createTables(db);
+
+      console.log("SQLite: Database opened and initialized successfully");
       dbInstance = db;
       return db;
     } catch (error: any) {
@@ -78,7 +82,7 @@ export const getDBConnection = async () => {
       throw error;
     }
   })();
-  
+
   return dbInitPromise;
 };
 
@@ -178,6 +182,31 @@ export const createTables = async (db: SQLiteDatabase) => {
         content TEXT,
         FOREIGN KEY (book_id) REFERENCES epub_books(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS user_progress(
+        user_id INTEGER PRIMARY KEY,
+        xp INTEGER DEFAULT 0,
+        coins INTEGER DEFAULT 0,
+        streak_current INTEGER DEFAULT 0,
+        streak_best INTEGER DEFAULT 0,
+        last_activity_at INTEGER,
+        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+    );
+    CREATE TABLE IF NOT EXISTS activity_scores(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        module_id INTEGER,
+        course_id INTEGER,
+        activity_type TEXT,
+        score INTEGER DEFAULT 0,
+        total_score INTEGER DEFAULT 0,
+        xp_earned INTEGER DEFAULT 0,
+        is_completed INTEGER DEFAULT 0,
+        attempts_count INTEGER DEFAULT 0,
+        last_attempt INTEGER,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+        UNIQUE(user_id, module_id) ON CONFLICT REPLACE
+    );
     CREATE TABLE IF NOT EXISTS activity_progress(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         module_id INTEGER NOT NULL,
@@ -201,6 +230,17 @@ export const createTables = async (db: SQLiteDatabase) => {
         best_score INTEGER DEFAULT 0,
         last_activity_at TEXT,
         synced_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS pending_sync(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        activity_type TEXT NOT NULL,
+        module_id INTEGER NOT NULL,
+        course_id INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        retries INTEGER DEFAULT 0,
+        last_attempt TEXT,
+        status TEXT DEFAULT 'pending'
     );
   `);
 };
@@ -291,20 +331,20 @@ export const getAllEPUBBooks = async (db: SQLiteDatabase): Promise<EPUBBookDB[]>
 };
 
 export const saveUser = async (db: SQLiteDatabase, user: UserDB) => {
-   await db.runAsync(`DELETE FROM users`);
-  
+  await db.runAsync(`DELETE FROM users`);
+
   const query = `INSERT OR REPLACE INTO users(id, username, email, firstname, lastname, fullname, ipelan_xp, coins, streak, badges, token) 
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   await db.runAsync(query, [
-    user.id, 
-    user.username, 
-    user.email, 
+    user.id,
+    user.username,
+    user.email,
     user.firstname || "",
     user.lastname || "",
-    user.fullname, 
-    user.ipelan_xp, 
-    user.coins, 
-    user.streak, 
+    user.fullname,
+    user.ipelan_xp,
+    user.coins,
+    user.streak,
     user.badges || '[]',
     user.token
   ]);
@@ -326,7 +366,7 @@ export const getUserXP = async (db: SQLiteDatabase, userId: number): Promise<num
 export const saveCourses = async (db: SQLiteDatabase, courses: CourseDB[]) => {
   const query = `INSERT OR REPLACE INTO courses(id, shortname, fullname, displayname, idnumber, categoryid, visible, summary, summaryformat, format, showgrades, lang, enablecompletion, completionhasrules) 
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-  
+
   for (const course of courses) {
     await db.runAsync(query, [
       course.id,

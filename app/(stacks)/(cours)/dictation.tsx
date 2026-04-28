@@ -141,56 +141,6 @@ export default function DictationScreen() {
   }
 
   // ✅ AFFICHER LES ERREURS EXPLICITEMENT
-  if (error || !dictation) {
-    return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
-        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
-          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
-            <Feather name="arrow-left" size={24} color="black" />
-          </Pressable>
-          <Text className="text-lg font-bold text-gray-900">Dictée audio</Text>
-        </View>
-        <View className="flex-1 items-center justify-center px-5">
-          <View className="bg-red-50 rounded-3xl p-8 items-center border border-red-200">
-            <Feather name="alert-circle" size={64} color="#EF4444" />
-            <Text className="text-xl font-bold text-red-900 mt-4 text-center">
-              Impossible de charger la dictée
-            </Text>
-            <Text className="text-red-700 text-center mt-2 text-sm">
-              {error || 'Cette activité n\'est pas disponible'}
-            </Text>
-            <Text className="text-gray-500 text-center mt-4 text-xs">
-              Assurez-vous que vous avez une connexion Internet et que l&apos;activité existe dans Moodle.
-            </Text>
-            <Pressable
-              onPress={() => router.back()}
-              className="bg-red-500 rounded-full px-6 py-3 mt-6"
-            >
-              <Text className="text-white font-bold">Retour</Text>
-            </Pressable>
-          </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
-  
-  if (isLoading) {
-    return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
-        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
-          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
-            <Feather name="arrow-left" size={24} color="black" />
-          </Pressable>
-          <Text className="text-lg font-bold text-gray-900">Dictée audio</Text>
-        </View>
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color="#002366" />
-          <Text className="mt-4 text-gray-500">Chargement depuis Moodle...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   if (error || (!dictation && !EMPTY_DICTATION.words.length)) {
     return (
       <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>

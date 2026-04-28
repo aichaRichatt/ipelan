@@ -1,7 +1,7 @@
 import { moodleFetch } from './api/moodleClient';
 import { Config } from './api/moodleClient';
 
-const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_TOKEN;
+const ADMIN_TOKEN = process.env.MOODLE_ADMIN_TOKEN;
 const IS_DEV = process.env.NODE_ENV === "development";
 
 export interface QuizQuestion {

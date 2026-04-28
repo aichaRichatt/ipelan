@@ -1,4 +1,4 @@
-import { ListeningExercise, useListeningContent } from "@/hooks/useListening";
+import { useListeningContent } from "@/hooks/useListening";
 import { audioService } from "@/services/audio/audioService";
 import { RootState } from "@/services/redux/store";
 import { Feather } from "@expo/vector-icons";

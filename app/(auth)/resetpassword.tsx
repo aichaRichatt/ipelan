@@ -1,44 +1,59 @@
-import React, { useState } from "react";
-import { View, Text, StyleSheet, ActivityIndicator, Pressable, TextInput, Image, Dimensions, Alert } from "react-native";
-import { useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-
+import { useRouter } from "expo-router";
+import React, { useState } from "react";
+import { ActivityIndicator, Alert, Dimensions, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { moodleFetch } from '../../services/api/moodleClient';
+ 
 const { width } = Dimensions.get("window");
+const IS_DEV = process.env.NODE_ENV === 'development';
 
 export default function ResetPassword() {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const handleContinue = async () => {
     if (step === 1) {
       if (!email) return;
       setLoading(true);
       try {
-        // TODO: Connect to Moodle API for password reset
-        // await requestPasswordReset(email);
-        setTimeout(() => {
+        // ✅ Call Moodle API for password reset
+        const response = await moodleFetch('/webservice/rest/server.php', {
+          wsfunction: 'core_auth_request_password_reset',
+          username: email,
+          moodlewsrestformat: 'json',
+        });
+        
+        if (response?.exception) {
+          if (IS_DEV) console.warn('[ResetPassword] Exception:', response);
+          Alert.alert('Erreur', response?.message || 'Email non reconnu');
           setLoading(false);
-          setStep(2);
-        }, 1000);
-      } catch (error) {
+          return;
+        }
+        
+        if (response?.error) {
+          if (IS_DEV) console.warn('[ResetPassword] Error:', response);
+          Alert.alert('Erreur', response?.error || 'Impossible d\'envoyer le lien');
+          setLoading(false);
+          return;
+        }
+        
+        // Moodle returns success even if email doesn't exist (security)
+        setStep(2);
         setLoading(false);
-        Alert.alert('Erreur', 'Impossible d\'envoyer le lien de réinitialisation'+error);
+      } catch (error: any) {
+        setLoading(false);
+        if (IS_DEV) console.warn('[ResetPassword] Error:', error);
+        
+        if (error?.message?.includes('network') || error?.message?.includes('fetch')) {
+          Alert.alert('Erreur', 'Vérifiez votre connexion');
+        } else {
+          Alert.alert('Erreur', 'Impossible d\'envoyer le lien de réinitialisation');
+        }
       }
     } else if (step === 2) {
-      if (!password || password !== confirmPassword) return;
-      setLoading(true);
-      setTimeout(() => {
-        setLoading(false);
-        setStep(3);
-      }, 1500);
-    } else if (step === 3) {
       router.replace("/(auth)/login");
     }
   };
@@ -66,63 +81,16 @@ export default function ResetPassword() {
   );
 
   const renderStep2 = () => (
-    <View style={styles.stepContainer}>
-      <View style={styles.headerWithBack}>
-        <Pressable onPress={() => setStep(1)} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
-        </Pressable>
-        <Text style={styles.titleSmall}>Créer un mot de passe</Text>
-      </View>
-      
-      <View style={styles.content}>
-        <Text style={styles.subtitle}>Créer un nouveau mot de passe</Text>
-        
-        <View style={styles.sectionStyle}>
-          <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.iconStyle} />
-          <TextInput
-            value={password}
-            placeholder="Password"
-            placeholderTextColor="#999"
-            style={styles.input}
-            secureTextEntry={!showPassword}
-            onChangeText={setPassword}
-          />
-          <Pressable onPress={() => setShowPassword(!showPassword)}>
-            <Ionicons name={showPassword ? "eye-outline" : "eye-off-outline"} size={20} color="#666" />
-          </Pressable>
-        </View>
-
-        <View style={styles.sectionStyle}>
-          <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.iconStyle} />
-          <TextInput
-            value={confirmPassword}
-            placeholder="Confirm Password"
-            placeholderTextColor="#999"
-            style={styles.input}
-            secureTextEntry={!showConfirmPassword}
-            onChangeText={setConfirmPassword}
-          />
-          <Pressable onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
-            <Ionicons name={showConfirmPassword ? "eye-outline" : "eye-off-outline"} size={20} color="#666" />
-          </Pressable>
-        </View>
-      </View>
-    </View>
-  );
-
-  const renderStep3 = () => (
     <View style={[styles.stepContainer, { alignItems: 'center', justifyContent: 'center' }]}>
       <View style={styles.successCard}>
-        <Image 
-          source={require('../../assets/images/success_illustration.png')} 
-          style={styles.successImage}
-          resizeMode="contain"
-        />
-        <Text style={styles.successTitle}>Félicitations</Text>
+        <Ionicons name="mail-open-outline" size={60} color="#4a90e2" style={{ marginBottom: 20 }} />
+        <Text style={styles.successTitle}>Email Envoyé</Text>
         <Text style={styles.successText}>
-          Votre compte est prêt à être utilisé. Vous serez redirigé vers la page d`accueil dans quelques secondes.
+          Un lien de réinitialisation a été envoyé à votre adresse email. Veuillez vérifier votre boîte de réception et suivre les instructions pour réinitialiser votre mot de passe.
         </Text>
-        <ActivityIndicator size="small" color="#1A1A1A" style={{ marginTop: 20 }} />
+        <Text style={styles.supportText}>
+          Si vous ne recevez pas l&apos;email dans les prochaines minutes, vérifiez votre dossier spam.
+        </Text>
       </View>
     </View>
   );
@@ -132,25 +100,38 @@ export default function ResetPassword() {
       <View style={styles.main}>
         {step === 1 && renderStep1()}
         {step === 2 && renderStep2()}
-        {step === 3 && renderStep3()}
 
-        {step !== 3 && (
+        {step !== 2 && (
           <View style={styles.footer}>
             <Pressable 
-              style={[styles.button, (!email && step === 1) || (!password && step === 2) ? styles.buttonDisabled : null]}
+              style={[styles.button, !email && step === 1 ? styles.buttonDisabled : null]}
               onPress={handleContinue}
-              disabled={loading}
+              disabled={loading || !email}
             >
               {loading ? (
                 <ActivityIndicator color="white" />
               ) : (
                 <>
-                  <Text style={styles.buttonText}>Continue</Text>
+                  <Text style={styles.buttonText}>Continuer</Text>
                   <View style={styles.buttonIcon}>
-                    <Ionicons name="arrow-forward" size={20} color="#0062FF" />
+                    <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
                   </View>
                 </>
               )}
+            </Pressable>
+          </View>
+        )}
+
+        {step === 2 && (
+          <View style={styles.footer}>
+            <Pressable 
+              style={styles.button}
+              onPress={handleContinue}
+            >
+              <Text style={styles.buttonText}>Retour à la Connexion</Text>
+              <View style={styles.buttonIcon}>
+                <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
+              </View>
             </Pressable>
           </View>
         )}
@@ -162,7 +143,7 @@ export default function ResetPassword() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "white",
+    backgroundColor: "#FAF9F6",
   },
   main: {
     flex: 1,
@@ -175,33 +156,10 @@ const styles = StyleSheet.create({
   header: {
     marginBottom: 40,
   },
-  headerWithBack: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 60,
-  },
-  backButton: {
-      padding: 5,
-  },
   title: {
     fontSize: 24,
     fontWeight: "bold",
-    color: "#1A1A1A",
-  },
-  titleSmall: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#1A1A1A",
-    marginLeft: 15,
-  },
-  subtitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#1A1A1A",
-    marginBottom: 20,
-  },
-  content: {
-    flex: 1,
+    color: "#002366",
   },
   inputContainer: {
     flex: 1,
@@ -211,7 +169,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#F0F0F0',
+    borderColor: '#E8E8E8',
     height: 60,
     borderRadius: 12,
     marginVertical: 10,
@@ -234,60 +192,61 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   button: {
-    backgroundColor: "#0062FF",
+    backgroundColor: "#002366",
     height: 60,
     borderRadius: 30,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-    shadowColor: "#0062FF",
+    shadowColor: "#002366",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 5,
   },
   buttonDisabled: {
+    backgroundColor: "#CCC",
     opacity: 0.6,
   },
   buttonText: {
-    color: "white",
-    fontSize: 18,
-    fontWeight: "bold",
-    marginRight: 10,
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "600",
   },
   buttonIcon: {
-    backgroundColor: "white",
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'absolute',
-    right: 5,
+    marginLeft: 10,
   },
   successCard: {
-    backgroundColor: '#F9FAFF',
-    width: width - 50,
-    borderRadius: 30,
     padding: 30,
     alignItems: 'center',
-  },
-  successImage: {
-    width: 200,
-    height: 200,
-    marginBottom: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
   },
   successTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1A1A1A',
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "#002366",
     marginBottom: 15,
+    textAlign: 'center',
   },
   successText: {
     fontSize: 16,
-    color: '#666',
+    color: "#555",
     textAlign: 'center',
+    marginBottom: 15,
     lineHeight: 24,
-  }
+  },
+  supportText: {
+    fontSize: 14,
+    color: "#999",
+    textAlign: 'center',
+    fontStyle: 'italic',
+    marginTop: 10,
+  },
 });

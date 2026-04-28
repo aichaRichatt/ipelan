@@ -1,11 +1,11 @@
 const MOODLE_URL = "https://moodle.richatt.com";
-const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_TOKEN || "";
+const ADMIN_TOKEN = process.env.MOODLE_ADMIN_TOKEN || "";
 
 async function testLessonAPI() {
   console.log("=== Testing Moodle Lesson API ===\n");
 
   if (!ADMIN_TOKEN) {
-    console.error("ERROR: EXPO_PUBLIC_MOODLE_TOKEN not found in .env");
+    console.error("ERROR: MOODLE_ADMIN_TOKEN not found in .env");
     return;
   }
 

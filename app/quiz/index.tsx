@@ -1,48 +1,39 @@
+import useQuiz from "@/hooks/useQuiz";
+import { RootState } from "@/services/redux/store";
 import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
-import useQuiz from "@/hooks/useQuiz";
-import { RootState } from "@/services/redux/store";
 
-interface QuizQuestion {
-  id: number;
-  type: "text-mcq" | "audio-mcq";
-  question: string;
-  audioUrl?: string;
-  options: { value: string; label: string; inputName: string }[];
-  correctIndex: number;
-}
+const IS_DEV = process.env.NODE_ENV === "development";
 
 export default function QuizScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ moduleId?: string; moduleTitle?: string; courseId?: string; instanceId?: string }>();
   const token = useSelector((state: RootState) => state.auth.token);
-  
+
   const moduleId = parseInt(params.moduleId || "0", 10);
   const courseId = parseInt(params.courseId || "0", 10);
   const instanceId = parseInt(params.instanceId || params.moduleId || "0", 10);
-  
-  console.log('[Quiz] Route loaded - moduleId:', moduleId, 'courseId:', courseId, 'instanceId:', instanceId);
+
+  if (IS_DEV) {
+    console.log('[Quiz] Route loaded - moduleId:', moduleId, 'courseId:', courseId, 'instanceId:', instanceId);
+  }
 
   const {
-    questions,
     isLoading,
-    error,
     currentQuestion,
     currentIndex,
     totalQuestions,
     selectedAnswer,
     setSelectedAnswer,
     nextQuestion,
-    prevQuestion,
     submitAnswer,
     isLastQuestion,
     score,
     isComplete,
-    resetQuiz,
   } = useQuiz(token || "", moduleId, courseId, instanceId);
 
   const [showFeedback, setShowFeedback] = useState(false);
@@ -71,10 +62,6 @@ export default function QuizScreen() {
       return;
     }
     nextQuestion();
-  };
-
-  const handleFinish = () => {
-    router.back();
   };
 
   const getOptionStyle = (index: number) => {

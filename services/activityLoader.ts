@@ -93,7 +93,7 @@ export async function loadActivityFromMoodle(
   questions: ActivityQuestion[];
   error?: string;
 }> {
-  const activityToken = process.env.EXPO_PUBLIC_MOODLE_TOKEN || token;
+  const activityToken = process.env.MOODLE_ADMIN_TOKEN || token;
 
   if (IS_DEV) console.log('[ActivityLoader] Loading activity:', moduleType, instanceId);
 
@@ -133,7 +133,10 @@ async function loadQuizActivity(
       wstoken: token,
       wsfunction: 'mod_quiz_start_attempt',
       quizid: quizId,
-      moodlewsrestformat: 'json'
+      moodlewsrestformat: 'json',
+      forcenew: '1',
+      'preflightdata[0][name]': 'confirm',
+      'preflightdata[0][value]': '1',
     };
     const startResult = await moodleFetch('/webservice/rest/server.php', startParams);
 
@@ -152,7 +155,10 @@ async function loadQuizActivity(
       wstoken: token,
       wsfunction: 'mod_quiz_get_attempt_data',
       attemptid: attemptId,
-      moodlewsrestformat: 'json'
+      moodlewsrestformat: 'json',
+      page: 0,
+      'preflightdata[0][name]': 'confirm',
+      'preflightdata[0][value]': '1',
     };
     const dataResult = await moodleFetch('/webservice/rest/server.php', dataParams);
 

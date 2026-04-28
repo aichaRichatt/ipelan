@@ -1,10 +1,10 @@
+import { AntDesign, Feather } from "@expo/vector-icons";
 import { Tabs, useRouter } from "expo-router";
 import React, { useEffect } from "react";
-import { AntDesign, Feather } from "@expo/vector-icons";
 import { useLogin } from "../../hooks/useLogin";
 
 export default function TabsLayout() {
-  const { token, user } = useLogin();
+  const { token } = useLogin();
   const router = useRouter();
   
   useEffect(() => {

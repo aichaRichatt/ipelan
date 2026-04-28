@@ -174,7 +174,7 @@ Créer `.env` :
 
 ```env
 EXPO_PUBLIC_MOODLE_API_URL=https://moodle.richatt.com
-EXPO_PUBLIC_MOODLE_TOKEN=your_admin_token_here
+MOODLE_ADMIN_TOKEN=your_admin_token_here
 ```
 
 ---

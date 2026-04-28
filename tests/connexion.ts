@@ -2,10 +2,10 @@ import { moodleFetch } from "../services/api/moodleClient";
 
 async function testConnection() {
   console.log("Starting Moodle Connection Test...");
-  const token = process.env.EXPO_PUBLIC_MOODLE_TOKEN;
+  const token = process.env.MOODLE_ADMIN_TOKEN;
   
   if (!token) {
-    console.error("EXPO_PUBLIC_MOODLE_TOKEN is missing in .env");
+    console.error("MOODLE_ADMIN_TOKEN is missing in .env");
     return;
   }
 

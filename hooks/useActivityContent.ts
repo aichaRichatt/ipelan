@@ -4,7 +4,7 @@ import { moodleFetch } from '../services/api/moodleClient';
 import { shuffle } from '../utils/shuffle';
 
 const IS_DEV = process.env.NODE_ENV === "development";
-const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_TOKEN;
+const ADMIN_TOKEN = process.env.MOODLE_ADMIN_TOKEN;
 
 async function moodleFetchWithFallback(endpoint: string, params: Record<string, any>, userToken: string) {
   let result = await moodleFetch(endpoint, params);
@@ -116,7 +116,7 @@ export function useActivityContent(
     setError(null);
 
     try {
-      const activityToken = token || process.env.EXPO_PUBLIC_MOODLE_TOKEN;
+      const activityToken = token || process.env.MOODLE_ADMIN_TOKEN;
       if (!activityToken) {
         setError('Token d\'authentification manquant');
         setIsLoading(false);
@@ -251,6 +251,8 @@ async function loadQuizWithRetry(
         quizid: id,
         forcenew: 1,
         moodlewsrestformat: 'json',
+        'preflightdata[0][name]': 'confirm',
+        'preflightdata[0][value]': '1',
       };
 
       const attemptResult = await moodleFetch('/webservice/rest/server.php', attemptParams);
@@ -268,6 +270,8 @@ async function loadQuizWithRetry(
         attemptid: attemptId,
         page: 0,
         moodlewsrestformat: 'json',
+        'preflightdata[0][name]': 'confirm',
+        'preflightdata[0][value]': '1',
       };
 
        if (!attemptId) {

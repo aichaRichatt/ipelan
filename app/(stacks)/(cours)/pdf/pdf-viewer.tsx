@@ -1,12 +1,12 @@
-import { Feather, Ionicons } from "@expo/vector-icons";
-import React, { useState, useCallback, useEffect, useRef } from "react";
-import { Pressable, Text, View, ActivityIndicator, Linking, ScrollView, Dimensions } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { WebView } from "react-native-webview";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { useSelector } from "react-redux";
 import { RootState } from "@/services/redux/store";
 import { cleanAndAuthUrl } from "@/services/urlAuth";
+import { Feather } from "@expo/vector-icons";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Linking, Pressable, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { WebView } from "react-native-webview";
+import { useSelector } from "react-redux";
 
 const IS_DEV = process.env.NODE_ENV === "development";
 const CORS_PROXY = "https://corsproxy.io/?";
@@ -23,7 +23,6 @@ export default function PdfViewerScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pages, setPages] = useState<PdfPage[]>([]);
-  const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const webViewRef = useRef<WebView>(null);
 

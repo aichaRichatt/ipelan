@@ -1,16 +1,18 @@
-import React, { useEffect, useRef } from "react";
-import { View, Text, Image } from "react-native";
 import { useRouter } from "expo-router";
-import Animated, { 
-  FadeIn, 
-  FadeInUp,
+import * as SplashScreen from "expo-splash-screen";
+import React, { useEffect, useRef } from "react";
+import { Image, Text, View } from "react-native";
+import Animated, {
+    FadeIn,
+    FadeInUp,
 } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
-import * as SplashScreen from "expo-splash-screen";
-import { useSelector, useDispatch } from "react-redux";
-import { RootState } from "../services/redux/store";
-import { hasValidToken, getToken, getUserData } from "../services/storage/tokenStorage";
+import { useDispatch, useSelector } from "react-redux";
 import { loginSuccess } from "../services/redux/slices/authSlice";
+import { RootState } from "../services/redux/store";
+import { getToken, getUserData, hasValidToken } from "../services/storage/tokenStorage";
+
+const IS_DEV = process.env.NODE_ENV === "development";
 
 const LOGO = require("../assets/images/logo_ipelan.png"); 
 const MASCOT = require("../assets/images/mascot_parrot.png");
@@ -44,7 +46,7 @@ export default function Index() {
           }
         }
       } catch (error) {
-        console.error("[Index] Auth check error:", error);
+        if (IS_DEV) console.error("[Index] Auth check error:", error);
       } finally {
         // IMPORTANT: Hide the native splash screen immediately!
         // This allows the user to see the animated JS splash screen below.
@@ -54,7 +56,7 @@ export default function Index() {
           setTimeout(async () => {
             if (isMounted) await SplashScreen.hideAsync();
           }, 500);
-        } catch (e) {
+        } catch {
           // Ignore
         }
       }
@@ -73,7 +75,7 @@ export default function Index() {
           router.replace("/(auth)/onboarding");
         }
       } catch (navigationError) {
-        console.error("[Index] Navigation failed:", navigationError);
+        if (IS_DEV) console.error("[Index] Navigation failed:", navigationError);
       }
     }, 5000);
 

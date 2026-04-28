@@ -179,7 +179,7 @@ export default function ResultScreen() {
       }
     };
     saveProgress();
-  }, [moduleId, courseId, activityType, score, total, isCompleted, xp, instanceId, token]);
+  }, [moduleId, courseId, activityType, score, total, isCompleted, xp, instanceId, token, userId]);
   
   const getGrade = () => {
     if (percentage >= 90) return { text: "Excellent !", color: "#10B981" };

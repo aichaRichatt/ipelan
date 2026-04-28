@@ -1,5 +1,5 @@
-import { moodleFetch } from './moodleClient';
 import { getCourseModules } from './moduleResolver';
+import { moodleFetch } from './moodleClient';
 
 export interface ListeningOption {
   id: number;
@@ -11,6 +11,7 @@ export interface ListeningExercise {
   name: string;
   audioUrl: string;
   options: ListeningOption[];
+  correctIndex: number; 
 }
 
 function buildAudioUrl(fileurl: string, token: string): string {
@@ -64,6 +65,7 @@ export async function getListeningExercise(
       name: mod.name,
       audioUrl: buildAudioUrl(audioFile.fileurl, token),
       options,
+      correctIndex: options.findIndex((o: any) => o.id === result?.choice?.answer || -1),
     };
   } catch (err: any) {
     console.warn('[listeningService] Exception:', err.message);

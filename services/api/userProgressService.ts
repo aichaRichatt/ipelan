@@ -1,9 +1,17 @@
+import { getDBConnection } from '../storage/db-service';
 import { moodleFetch } from './moodleClient';
-import * as SQLite from 'expo-sqlite';
 
-const db = SQLite.openDatabaseSync('ipelan.db');
+let dbInstance: any = null;
+
+async function getDB() {
+  if (!dbInstance) {
+    dbInstance = await getDBConnection();
+  }
+  return dbInstance;
+}
 
 export async function initStreakTable(): Promise<void> {
+  const db = await getDB();
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS streaks (
       user_id      INTEGER PRIMARY KEY,
@@ -26,18 +34,33 @@ export async function initStreakTable(): Promise<void> {
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS pending_sync (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      activity_type TEXT NOT NULL,
+      module_id INTEGER NOT NULL,
+      course_id INTEGER NOT NULL,
+      payload TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      retries INTEGER DEFAULT 0,
+      last_attempt TEXT,
+      status TEXT DEFAULT 'pending'
+    );
+  `);
 }
 
 export async function updateStreak(userId: number): Promise<number> {
   const today = new Date().toISOString().split('T')[0];
 
   try {
-    const row = await db.getFirstAsync<{
+    const db = await getDB();
+    const row = await db.getFirstAsync('SELECT * FROM user_progress WHERE user_id = ?', [userId]) as {
       user_id: number;
       last_date: string;
       streak_current: number;
       streak_best: number;
-    }>('SELECT * FROM user_progress WHERE user_id = ?', [userId]);
+    } | null;
 
     let current = 1;
     let best = row?.streak_best ?? 1;
@@ -55,7 +78,8 @@ export async function updateStreak(userId: number): Promise<number> {
       best = Math.max(best, current);
     }
 
-    await db.runAsync(
+    const db2 = await getDB();
+    await db2.runAsync(
       `INSERT INTO user_progress (user_id, streak_current, streak_best, last_activity, updated_at)
        VALUES (?, ?, ?, ?, datetime('now'))
        ON CONFLICT(user_id) DO UPDATE SET
@@ -75,10 +99,8 @@ export async function updateStreak(userId: number): Promise<number> {
 
 export async function addXP(userId: number, xpToAdd: number): Promise<number> {
   try {
-    const row = await db.getFirstAsync<{ xp: number }>(
-      'SELECT xp FROM user_progress WHERE user_id = ?',
-      [userId]
-    );
+    const db = await getDB();
+    const row = await db.getFirstAsync('SELECT xp FROM user_progress WHERE user_id = ?', [userId]) as { xp: number } | null;
 
     const currentXP = (row?.xp ?? 0) + xpToAdd;
 
@@ -100,10 +122,8 @@ export async function addXP(userId: number, xpToAdd: number): Promise<number> {
 
 export async function addCoins(userId: number, coinsToAdd: number): Promise<number> {
   try {
-    const row = await db.getFirstAsync<{ coins: number }>(
-      'SELECT coins FROM user_progress WHERE user_id = ?',
-      [userId]
-    );
+    const db = await getDB();
+    const row = await db.getFirstAsync('SELECT coins FROM user_progress WHERE user_id = ?', [userId]) as { coins: number } | null;
 
     const currentCoins = (row?.coins ?? 0) + coinsToAdd;
 
@@ -130,15 +150,13 @@ export async function getUserProgress(userId: number): Promise<{
   streak_best: number;
 } | null> {
   try {
-    const row = await db.getFirstAsync<{
+    const db = await getDB();
+    const row = await db.getFirstAsync('SELECT xp, coins, streak_current, streak_best FROM user_progress WHERE user_id = ?', [userId]) as {
       xp: number;
       coins: number;
       streak_current: number;
       streak_best: number;
-    }>(
-      'SELECT xp, coins, streak_current, streak_best FROM user_progress WHERE user_id = ?',
-      [userId]
-    );
+    } | null;
 
     return row ?? null;
   } catch (err) {
@@ -222,6 +240,7 @@ export async function saveActivityResult(params: {
   const { userId, xpEarned, coinsEarned, token, moduleId, courseId, type, score, total } = params;
 
   try {
+    const db = await getDB();
     await db.runAsync(
       `INSERT OR REPLACE INTO activity_results
        (user_id, module_id, course_id, type, score, total, xp_earned, coins_earned, completed_at)
@@ -288,11 +307,17 @@ export async function submitGradeToMoodle(params: {
     if (result?.exception) {
       const errCode = result.errorcode || '';
       const errMsg = result.message || '';
-      // Module sans completion manuelle activee : on ignore silencieusement.
+
       if (errCode === 'invalidparameter' || errMsg.includes('Valeur incorrecte')) {
-        console.log('[Grade] Completion manual not enabled for this module, skipping');
-        return true;
+        console.warn('[Grade] Completion not enabled on cmid:', moduleId);
+        return false;
       }
+
+      if (errCode === 'invalidtoken' || errMsg.includes('invalid token')) {
+        console.error('[Grade] Invalid token for cmid:', moduleId);
+        return false;
+      }
+
       console.warn('[Grade] Completion update failed:', errCode || errMsg);
       return false;
     }
@@ -303,5 +328,78 @@ export async function submitGradeToMoodle(params: {
     const errorMsg = err?.message || String(err);
     console.warn('[Grade] Completion update exception:', errorMsg);
     return false;
+  }
+}
+
+export interface PendingSyncRecord {
+  id: number;
+  activity_type: string;
+  module_id: number;
+  course_id: number;
+  payload: string;
+  created_at: string;
+  retries: number;
+  last_attempt: string | null;
+  status: string;
+}
+
+export async function addPendingSync(
+  activityType: string,
+  moduleId: number,
+  courseId: number,
+  payload: Record<string, any>
+): Promise<boolean> {
+  try {
+    const db = await getDB();
+    await db.runAsync(
+      `INSERT INTO pending_sync (activity_type, module_id, course_id, payload, status) VALUES (?, ?, ?, ?, ?)`,
+      [activityType, moduleId, courseId, JSON.stringify(payload), 'pending']
+    );
+    return true;
+  } catch (err: any) {
+    console.warn('[pending_sync] Failed to add:', err.message);
+    return false;
+  }
+}
+
+export async function getPendingSync(): Promise<PendingSyncRecord[]> {
+  try {
+    const db = await getDB();
+    return await db.getAllAsync('SELECT * FROM pending_sync WHERE status = ? ORDER BY created_at ASC', ['pending']) as PendingSyncRecord[];
+  } catch (err: any) {
+    console.warn('[pending_sync] Failed to get:', err.message);
+    return [];
+  }
+}
+
+export async function updatePendingSync(
+  id: number,
+  status: string,
+  incrementRetries: boolean = false
+): Promise<void> {
+  try {
+    const db = await getDB();
+    if (incrementRetries) {
+      await db.runAsync(
+        'UPDATE pending_sync SET status = ?, retries = retries + 1, last_attempt = ? WHERE id = ?',
+        [status, new Date().toISOString(), id]
+      );
+    } else {
+      await db.runAsync(
+        'UPDATE pending_sync SET status = ?, last_attempt = ? WHERE id = ?',
+        [status, new Date().toISOString(), id]
+      );
+    }
+  } catch (err: any) {
+    console.warn('[pending_sync] Failed to update:', err.message);
+  }
+}
+
+export async function deletePendingSync(id: number): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.runAsync('DELETE FROM pending_sync WHERE id = ?', [id]);
+  } catch (err: any) {
+    console.warn('[pending_sync] Failed to delete:', err.message);
   }
 }
