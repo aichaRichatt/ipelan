@@ -9,6 +9,7 @@ import { FontAwesome5 } from "@expo/vector-icons";
 import { useAuthRestore } from "../hooks/useAuthRestore";
 import { getDBConnection, createTables } from "../services/storage/db-service";
 import { registerBackgroundSync } from "../services/api/backgroundSync";
+import { registerQueueProcessor, unregisterQueueProcessor } from "../services/sync/queueProcessor";
 
 function AuthRestoreWrapper() {
   useAuthRestore();
@@ -39,6 +40,12 @@ function BackgroundSyncInitializer() {
       registerBackgroundSync().catch((err) => {
         console.warn('[BackgroundSync] Registration failed:', err);
       });
+      // ✅ Register the offline queue processor
+      registerQueueProcessor();
+      
+      return () => {
+        unregisterQueueProcessor();
+      };
     }
   }, [user?.id, token]);
   

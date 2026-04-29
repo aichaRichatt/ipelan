@@ -1,11 +1,11 @@
-import { View, Text, TextInput, StyleSheet, Alert, ActivityIndicator, Pressable, ScrollView, KeyboardAvoidingView, Platform, Linking } from "react-native";
-import React, { useState } from "react";
 import { useRouter } from "expo-router";
+import React, { useState } from "react";
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useSignup } from "../../hooks/useSignup";
 import { PolicyModal } from "../../components/PolicyModal";
+import { useSignup } from "../../hooks/useSignup";
+import { createTables, getDBConnection, saveUser } from "../../services/storage/db-service";
 import { saveUserData } from "../../services/storage/tokenStorage";
-import { getDBConnection, saveUser, createTables } from "../../services/storage/db-service";
 
 const IS_DEV = process.env.NODE_ENV === "development";
 
@@ -122,14 +122,10 @@ export default function SignUp() {
 
       Alert.alert(
         "Compte créé!",
-        `Bienvenue ${cleanFirstname}! Votre compte a été créé avec succès. Un email de confirmation a été envoyé à ${cleanEmail}. Cliquez sur le lien dans l'email pour activer votre compte.`,
+        `Bienvenue ${cleanFirstname}! Votre compte a été créé avec succès. Vous avez été automatiquement inscrit à tous les cours disponibles et pouvez maintenant accéder à toutes les activités!`,
         [
           {
-            text: "Ouvrir l'app email",
-            onPress: () => Linking.openURL(`mailto:${cleanEmail}`)
-          },
-          {
-            text: "Se connecter",
+            text: "Commencer à apprendre",
             onPress: () => router.replace("/(auth)/login"),
             style: "default"
           }

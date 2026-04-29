@@ -1,297 +1,166 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useCallback, useEffect, useState } from 'react';
-import { getAllCourses, getCourseContents, getCoursesForLanguageAndGrade, getEnrolledCoursesByTimeline, getFirstCourseFromLanguageAndGrade, getUserCourses } from '../services/api/courseService';
+// hooks/useMoodleCourses.ts
+import { useState, useEffect, useCallback } from 'react';
+import { moodleCall } from '../services/api/moodleClient';
+import { getToken } from '../services/storage/tokenStorage';
+import { useStreak } from '../services/storage/streak';
+import { getAllBadgesWithStatus } from '../constants/badges';
+import { getDBConnection } from '../services/storage/db-service';
 
-const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN;
-const PREFERENCES_KEY = '@ipelan_preferences';
-
-interface UserPreferences {
-  language: string;
-  grade: number;
+export interface CourseProgress {
+  courseId:           number;
+  courseName:         string;
+  completedActivities: number;
+  totalActivities:    number;
+  completionPercent:  number;
+  totalXP:            number;
+  perfectScores:      number;
+  breakdown: Record<string, { completed: number; total: number }>;
 }
 
-interface MoodleCourse {
+export interface CourseInput {
   id: number;
-  fullname: string;
-  shortname: string;
-  summary: string;
-  progress: number;
-  visible: boolean;
-  courseimage: string;
-  coursecategory: string;
-  viewurl: string;
-  lessonsCount: number;
+  name?: string;
 }
 
-interface UseMoodleCoursesReturn {
-  courses: MoodleCourse[];
-  isLoading: boolean;
-  error: string | null;
-  refetch: () => Promise<void>;
+const EXCLUDED_MODNAMES = new Set(['label']);
+const XP_PER_ACTIVITY = 20;
+
+function calculateXP(score: number, maxScore: number, baseXP: number = XP_PER_ACTIVITY): number {
+  if (!maxScore || maxScore === 0) return score > 0 ? baseXP : 0;
+  const ratio = score / maxScore;
+  return Number.isFinite(ratio) ? Math.round(ratio * baseXP) : 0;
 }
 
-export function useMoodleCourses(token: string): UseMoodleCoursesReturn {
-  const [courses, setCourses] = useState<MoodleCourse[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchCourses = useCallback(async () => {
-    const cleanToken = token?.trim();
-
-    if (!cleanToken || cleanToken.length < 10) {
-      setError("Connectez-vous pour voir vos cours");
-      setIsLoading(false);
-      return;
+function getCompletableModules(sections: any[]): any[] {
+  if (!Array.isArray(sections)) return [];
+  const result: any[] = [];
+  for (const section of sections) {
+    if (section.visible === 0) continue;
+    for (const mod of section.modules ?? []) {
+      if (!mod.completion || mod.completion === 0) continue;
+      if (EXCLUDED_MODNAMES.has(mod.modname)) continue;
+      if (mod.visible === 0) continue;
+      if (!mod.instance || mod.instance === 0) continue;
+      result.push(mod);
     }
+  }
+  return result;
+}
 
-    setIsLoading(true);
-    setError(null);
+async function getLocalCompletions(courseId: number) {
+  try {
+    const db = await getDBConnection();
+    return await db.getAllAsync<any>(
+      `SELECT module_id as cmid, is_completed, best_score as score, total_score as max_score, type as modname
+       FROM activity_progress
+       WHERE course_id = ?`,
+      [courseId]
+    );
+  } catch { return []; }
+}
 
+async function fetchCourseProgress(token: string, course: CourseInput): Promise<CourseProgress | null> {
+  try {
+    const sections = await moodleCall('core_course_get_contents', { courseid: String(course.id) }, token);
+    if (sections?.exception) throw new Error(sections.message || `Moodle error: ${sections.exception}`);
+
+    const completableModules = getCompletableModules(sections);
+    const totalActivities = completableModules.length;
+
+    let completionMap: Record<number, boolean> = {};
     try {
-      let rawCourses: any[] = [];
-
-      const prefsStr = await AsyncStorage.getItem(PREFERENCES_KEY);
-      const preferences: UserPreferences | null = prefsStr ? JSON.parse(prefsStr) : null;
-
-      console.log('[useMoodleCourses] Token available, fetching courses...');
-      console.log('[useMoodleCourses] Admin token available:', !!ADMIN_TOKEN);
-      console.log('[useMoodleCourses] Preferences:', preferences);
-
-      // Try to get courses by language preference first
-      if (preferences?.language) {
-        try {
-          const langCourses = await getCoursesForLanguageAndGrade(cleanToken, preferences.language, preferences.grade);
-          if (langCourses && langCourses.length > 0) {
-            rawCourses = langCourses;
-          }
-        } catch (e) {
-          console.warn('[useMoodleCourses] Language courses failed, falling back');
+      const completionResult = await moodleCall('core_completion_get_activities_completion_status', { courseid: String(course.id) }, token);
+      if (!completionResult?.exception) {
+        for (const stat of completionResult?.statuses ?? []) {
+          completionMap[stat.cmid] = stat.state >= 1;
         }
       }
+    } catch {}
 
-      // Fallback: Get user's enrolled courses directly
-      if (rawCourses.length === 0) {
-        try {
-          let response = await getEnrolledCoursesByTimeline(cleanToken);
+    const localRows = await getLocalCompletions(course.id);
+    const localMap = new Map(localRows.map(r => [r.cmid, r]));
 
-          if (response?.courses && Array.isArray(response.courses) && response.courses.length > 0) {
-            rawCourses = response.courses;
-          } else if (Array.isArray(response)) {
-            // Sometimes API returns array directly
-            rawCourses = response;
-          }
-        } catch (e) {
-          console.warn('[useMoodleCourses] Enrolled courses failed:', e);
+    const breakdown: Record<string, { completed: number; total: number }> = {};
+    let completedActivities = 0;
+    let totalXP = 0;
+    let perfectScores = 0;
+
+    for (const mod of completableModules) {
+      const type = mod.modname;
+      if (!breakdown[type]) breakdown[type] = { completed: 0, total: 0 };
+      breakdown[type].total++;
+
+      const isCompleted = !!completionMap[mod.id] || (localMap.get(mod.id)?.is_completed === 1);
+      if (isCompleted) {
+        breakdown[type].completed++;
+        completedActivities++;
+        const localRow = localMap.get(mod.id);
+        if (localRow) {
+          totalXP += calculateXP(localRow.score ?? 0, localRow.max_score ?? 0);
+          if (localRow.score > 0 && localRow.score === localRow.max_score) perfectScores++;
+        } else {
+          totalXP += XP_PER_ACTIVITY;
         }
       }
-
-      // Try getUserCourses as alternative
-      if (rawCourses.length === 0) {
-        try {
-          const userCourses = await getUserCourses(cleanToken, 0); // 0 = current user
-          if (userCourses && userCourses.length > 0) {
-            rawCourses = userCourses;
-          }
-        } catch (e) {
-          console.warn('[useMoodleCourses] getUserCourses failed:', e);
-        }
-      }
-
-      // Last resort: Get all courses via admin
-      if (rawCourses.length === 0 && ADMIN_TOKEN) {
-        try {
-          const allCourses = await getAllCourses(ADMIN_TOKEN);
-          rawCourses = allCourses;
-        } catch (e) {
-          console.warn('[useMoodleCourses] Admin fallback failed:', e);
-        }
-      }
-
-      console.log('[useMoodleCourses] Total raw courses found:', rawCourses.length);
-
-      const mappedCourses = await Promise.all(rawCourses.map(async (course: any) => {
-        let realLessonCount = 0;
-        try {
-          // Utilise getCourseContents importé depuis courseService.ts pour avoir le vrai chiffre
-          const sections = await getCourseContents(cleanToken, course.id);
-          if (Array.isArray(sections)) {
-            let count = 0;
-            sections.forEach(sec => {
-              if (sec.modules) count += sec.modules.length;
-            });
-            realLessonCount = count;
-          }
-        } catch (e) {
-          // Ignorer l'erreur pour ne pas bloquer le chargement
-        }
-
-        return {
-          id: course.id,
-          fullname: course.fullname || course.shortname || "Cours",
-          shortname: course.shortname || "",
-          summary: course.summary || "",
-          progress: course.progress || 0,
-          visible: course.visible ?? true,
-          courseimage: course.courseimage || "",
-          coursecategory: course.coursecategory || course.category || "",
-          viewurl: course.viewurl || "",
-          lessonsCount: realLessonCount === 0 && course.progress > 0 ? 1 : realLessonCount // Si 0 mais progrès, on met min 1
-        };
-      }));
-
-      setCourses(mappedCourses);
-
-      if (mappedCourses.length === 0) {
-        setError("Aucun cours trouvé. Inscrivez-vous à des cours sur Moodle.");
-      }
-    } catch (err: any) {
-      console.error("[useMoodleCourses] Catch error:", err.message);
-      setError(err.message || "Erreur chargement cours");
-    } finally {
-      setIsLoading(false);
     }
-  }, [token]);
 
-  useEffect(() => {
-    fetchCourses();
-  }, [fetchCourses]);
+    return {
+      courseId: course.id,
+      courseName: course.name || `Cours ${course.id}`,
+      completedActivities,
+      totalActivities,
+      completionPercent: totalActivities > 0 ? Math.round((completedActivities / totalActivities) * 100) : 0,
+      totalXP,
+      perfectScores,
+      breakdown,
+    };
+  } catch (e: any) {
+    console.error('[useMoodleCourses] Erreur:', e.message);
+    return null;
+  }
+}
+
+export function useMoodleCourses(courses: CourseInput[], userId: number | null) {
+  const [progressList, setProgressList] = useState<CourseProgress[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const { streak, recordActivity } = useStreak(userId);
+
+  const coursesString = JSON.stringify(courses);
+
+  const loadProgress = useCallback(async () => {
+    const inputCourses = JSON.parse(coursesString) as CourseInput[];
+    if (!inputCourses.length) { setLoading(false); return; }
+    setLoading(true); setError(null);
+    try {
+      const token = await getToken();
+      if (!token) throw new Error('Non authentifié');
+      const results = await Promise.all(inputCourses.map(c => fetchCourseProgress(token, c)));
+      setProgressList(results.filter(Boolean) as CourseProgress[]);
+    } catch (e: any) { setError(e.message); } finally { setLoading(false); }
+  }, [coursesString]);
+
+  useEffect(() => { loadProgress(); }, [loadProgress]);
+
+  const totalXP = progressList.reduce((s, c) => s + c.totalXP, 0);
+  const totalCompleted = progressList.reduce((s, c) => s + c.completedActivities, 0);
+  const perfectScores = progressList.reduce((s, c) => s + c.perfectScores, 0);
+
+  const badgesWithStatus = getAllBadgesWithStatus({
+    completedLessons: totalCompleted,
+    currentStreak: streak?.currentStreak ?? 0,
+    totalXP,
+    quizPassed: 0,
+    perfectScores,
+    daysActive: streak?.totalDaysActive ?? 0,
+  });
 
   return {
-    courses,
-    isLoading,
-    error,
-    refetch: fetchCourses
+    progressList, loading, error, reload: loadProgress,
+    totalXP, totalCompleted,
+    currentStreak: streak?.currentStreak ?? 0,
+    bestStreak: streak?.bestStreak ?? 0,
+    earnedBadges: badgesWithStatus.filter(b => b.earned),
+    badgesWithStatus, recordActivity,
   };
-}
-
-// Hook for home screen - fetches only the FIRST course of user's preferred language/grade
-export function useFirstCourse(token: string) {
-  const [course, setCourse] = useState<MoodleCourse | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchCourse = useCallback(async () => {
-    const cleanToken = token?.trim();
-
-    if (!cleanToken || cleanToken.length < 10) {
-      setError("Connectez-vous pour voir vos cours");
-      setIsLoading(false);
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const prefsStr = await AsyncStorage.getItem(PREFERENCES_KEY);
-      const preferences: UserPreferences | null = prefsStr ? JSON.parse(prefsStr) : null;
-
-      console.log('[useFirstCourse] Token available, fetching first course...');
-      console.log('[useFirstCourse] Preferences:', preferences);
-
-      if (!preferences?.language) {
-        setError("Sélectionnez une langue d'apprentissage");
-        setIsLoading(false);
-        return;
-      }
-
-      // Get only the first course from user's language and grade
-      const firstCourse = await getFirstCourseFromLanguageAndGrade(cleanToken, preferences.language, preferences.grade);
-
-      if (firstCourse) {
-        console.log('[useFirstCourse] Found first course:', firstCourse.fullname);
-
-        // Get lesson count for this course
-        let realLessonCount = 0;
-        try {
-          const sections = await getCourseContents(cleanToken, firstCourse.id);
-          if (Array.isArray(sections)) {
-            let count = 0;
-            sections.forEach(sec => {
-              if (sec.modules) count += sec.modules.length;
-            });
-            realLessonCount = count;
-          }
-        } catch (e) {
-          // Ignore error
-        }
-
-        const mappedCourse: MoodleCourse = {
-          id: firstCourse.id,
-          fullname: firstCourse.fullname || firstCourse.shortname || "Cours",
-          shortname: firstCourse.shortname || "",
-          summary: firstCourse.summary || "",
-          progress: firstCourse.progress || 0,
-          visible: firstCourse.visible ?? true,
-          courseimage: firstCourse.courseimage || "",
-          coursecategory: firstCourse.coursecategory || firstCourse.category || "",
-          viewurl: firstCourse.viewurl || "",
-          lessonsCount: realLessonCount
-        };
-
-        setCourse(mappedCourse);
-      } else {
-        console.log('[useFirstCourse] No course found for', preferences.language, 'grade', preferences.grade);
-        setError("Aucun cours trouvé pour votre langue et année.");
-      }
-    } catch (err: any) {
-      console.error("[useFirstCourse] Error:", err.message);
-      setError(err.message || "Erreur chargement cours");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [token]);
-
-  useEffect(() => {
-    fetchCourse();
-  }, [fetchCourse]);
-
-  return {
-    course,
-    isLoading,
-    error,
-    refetch: fetchCourse
-  };
-}
-
-export function useCourseSections(token: string, courseId: number, userId?: number) {
-  const [sections, setSections] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchSections = useCallback(async () => {
-    if (!courseId) {
-      setIsLoading(false);
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      let response = await getCourseContents(token, courseId);
-
-      if ((!response || response.length === 0) && ADMIN_TOKEN) {
-        console.log("[useCourseSections] User token failed, trying admin...");
-        response = await getCourseContents(ADMIN_TOKEN, courseId);
-      }
-
-      if (Array.isArray(response)) {
-        setSections(response);
-      } else {
-        setSections([]);
-      }
-    } catch (err: any) {
-      console.error("Failed to fetch sections:", err);
-      setError(err.message || "Failed to fetch sections");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [token, courseId]);
-
-  useEffect(() => {
-    fetchSections();
-  }, [fetchSections]);
-
-  return { sections, isLoading, error, refetch: fetchSections };
 }

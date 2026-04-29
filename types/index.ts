@@ -85,9 +85,11 @@ export interface IPELANUser {
   grade?: Grade;
   level?: number;
   ipelan_xp: number;
-  xp?: number; 
+  xp?: number;
   coins: number;
+  lives: number;
   streak: number;
+  last_activity?: string;
   badges?: string[];
   modules?: string;
   notifs?: boolean;
@@ -164,7 +166,7 @@ export interface CourseModule {
 }
 
 export interface ModuleContent {
-  id?: number; 
+  id?: number;
   moduleid: number;
   type: string;
   filename: string;

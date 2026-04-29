@@ -25,6 +25,11 @@ Application Mobile - IPELAN.docx
 .vscode/
 .expo/
 .zed/
+
+AUDIT_IPELAN.epub
+AUDIT_IPELAN.pdf
+AUDIT_IPELAN.md
+
 # debug
 npm-debug.*
 yarn-debug.*

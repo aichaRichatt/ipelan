@@ -1,10 +1,10 @@
-import { View, Text,  TextInput, Image, StyleSheet, Alert, ActivityIndicator, Pressable } from "react-native";
-import React, { useState } from "react";
 import { useRouter } from "expo-router";
+import React, { useState } from "react";
+import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useLoginValidation } from "../../hooks/useLoginValidation";
-import { useLogin } from "../../hooks/useLogin";
 import { useSelector } from "react-redux";
+import { useLogin } from "../../hooks/useLogin";
+import { useLoginValidation } from "../../hooks/useLoginValidation";
 import { RootState } from "../../services/redux/store";
 
 export default function Login() {
@@ -22,17 +22,23 @@ export default function Login() {
          await login(username, password);
       } catch (err: any) {
         const errMsg = err.message || "";
+        const errMsgLower = errMsg.toLowerCase();
+        // Check for both English and Arabic error messages
         const isInvalidLogin = 
-          errMsg.toLowerCase().includes("invalid") || 
-          errMsg.toLowerCase().includes("incorrect") ||
-          errMsg.toLowerCase().includes("wrong") ||
-          errMsg.toLowerCase().includes("failed") ||
-          errMsg.toLowerCase().includes("error");
+          errMsgLower.includes("invalid") || 
+          errMsgLower.includes("incorrect") ||
+          errMsgLower.includes("wrong") ||
+          errMsgLower.includes("failed") ||
+          errMsgLower.includes("error") ||
+          errMsgLower.includes("incorrect login") ||
+           errMsg.includes("خطأ") ||
+          errMsg.includes("اسم المستخدم") ||
+          errMsg.includes("كلمة المرور");
         
         if (isInvalidLogin) {
           Alert.alert(
-            "Compte introuvable",
-            "Ce compte n'existe pas. Veuillez créer un compte pour vous connecter.",
+            "Identifiants incorrects",
+            "Email ou mot de passe incorrect. Veuillez réessayer.",
             [
               { text: "S'inscrire", onPress: () => router.replace("/(auth)/signup") },
               { text: "Réessayer", style: "cancel" }

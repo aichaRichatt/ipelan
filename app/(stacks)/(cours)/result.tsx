@@ -1,17 +1,20 @@
 import { getCourseContents } from "@/services/api/courseService";
+import { awardXPForActivity } from "@/services/api/xpService";
 import { getAuthToken } from "@/services/contentLoader";
+import { processActivityResults, triggerGamificationSync } from "@/services/gamification/gamificationService";
+import { updateUser } from "@/services/redux/slices/authSlice";
 import { RootState } from "@/services/redux/store";
 import { getBestScore, saveActivityScore } from "@/services/storage/activity-progress";
 import { updateCourseProgressFromActivities } from "@/services/storage/course-progress";
 import { syncAfterActivityWithRetry } from "@/services/sync/progressSync";
-import { awardXPForActivity } from "@/services/api/xpService";
+import { syncQueue } from "@/services/sync/syncQueue";
 import { ActivityType } from "@/utils/xpCalculator";
 import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useSelector } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 
 const IS_DEV = process.env.NODE_ENV === "development";
 
@@ -43,7 +46,6 @@ export default function ResultScreen() {
   const score = parseInt(params.score || "0", 10);
   const total = parseInt(params.total || "1", 10);
   const xp = parseInt(params.xp || "0", 10);
-  const coins = Math.round(xp / 5);
   const moduleId = parseInt(params.moduleId || "0", 10);
   const instanceId = parseInt(params.instanceId || params.moduleId || "0", 10);
   const courseId = parseInt(params.courseId || "0", 10);
@@ -51,6 +53,12 @@ export default function ResultScreen() {
   
   const percentage = Math.round((score / Math.max(total, 1)) * 100);
   const isCompleted = percentage >= 50;
+
+  const [earnedCoins, setEarnedCoins] = useState(0);
+  const [lostLives, setLostLives] = useState(0);
+  const [newBadge, setNewBadge] = useState<any | null>(null);
+  const dispatch = useDispatch();
+  const user = useSelector((state: RootState) => state.auth.user);
 
  
   const [syncStatus, setSyncStatus] = useState<'pending' | 'syncing' | 'success' | 'error'>('pending');
@@ -92,57 +100,83 @@ export default function ResultScreen() {
         setSyncStatus('pending');
         setSyncMessage('Sauvegarde en cours...');
 
-        await saveActivityScore(moduleId, courseId, activityType, score, total, xp);
+        let cEarned = 0;
+        let lLost = 0;
 
+        if (userId) {
+          const { coinsEarned, livesLost } = await processActivityResults(userId, score, total);
+          cEarned = coinsEarned;
+          lLost = livesLost;
+          setEarnedCoins(coinsEarned);
+          setLostLives(livesLost);
+
+          if (user) {
+             dispatch(updateUser({
+               coins: (user.coins || 0) + coinsEarned,
+               lives: Math.max(0, (user.lives ?? 6) - livesLost)
+             }));
+          }
+        }
+
+        // ✅ Étape 1 : Sauvegarder localement en SQLite
+        setSyncStatus('pending');
+        setSyncMessage('Sauvegarde en cours...');
+
+        await saveActivityScore(moduleId, courseId, activityType, score, total, xp, userId || undefined, cEarned, token || undefined);
         await updateCourseProgressFromActivities(courseId, activityCount);
+
+        // ✅ Étape 1.5 : Calculer les nouveaux badges (APRES avoir mis à jour les stats globales)
+        if (userId) {
+          const { getGlobalGamificationStats } = await import('@/services/gamification/gamificationService');
+          const { calculateNewBadges, saveBadge, getUserBadges } = await import('@/services/storage/badge-storage');
+          
+          const currentStats = await getGlobalGamificationStats(userId);
+          const existingBadges = await getUserBadges(userId);
+          const existingIds = existingBadges.map(b => b.badgeId);
+          
+          const newEarned = calculateNewBadges({
+            completedLessons: currentStats.totalCompletedActivities,
+            currentStreak: currentStats.streak,
+            totalXP: currentStats.totalXp,
+            quizPassed: 0,
+            perfectScores: currentStats.perfectScores,
+            daysActive: currentStats.streak
+          }, existingIds);
+
+          if (newEarned.length > 0) {
+            for (const b of newEarned) {
+              await saveBadge(userId, b.id);
+            }
+            // Mettre à jour l'UI avec le dernier badge gagné
+            setNewBadge(newEarned[newEarned.length - 1]);
+          }
+
+          // ✅ Étape 2 : Déclencher la synchronisation globale (XP, Coins, Lives, Streak, Badges)
+          const { triggerGamificationSync } = await import('@/services/gamification/gamificationService');
+          await triggerGamificationSync(userId, token || undefined);
+        }
 
         if (IS_DEV) {
           console.log('[Result] ✅ Local save successful');
         }
 
-         if (token) {
+        if (token) {
           setSyncStatus('syncing');
           setSyncMessage('Synchronisation avec Moodle...');
 
-          if (IS_DEV) {
-            console.log('[Result] Starting Moodle sync:', {
-              instanceId,
-              moduleId,
-              token: '***',
-            });
-          }
-
+          // ✅ Étape 3 : Synchroniser la complétion de l'activité (Grade/Completion)
           syncAfterActivityWithRetry(moduleId, courseId, activityType, score, total, xp, instanceId, 3, token || undefined, userId)
-            .then(async (syncResult) => {
-              if (syncResult.success) {
-                setSyncStatus('success');
-                setSyncMessage('✅ Synchronisé avec Moodle');
+            .then(() => {
+              setSyncStatus('success');
+              setSyncMessage('✅ Synchronisé avec Moodle');
 
-                if (IS_DEV) {
-                  console.log('[Result] ✅ Moodle sync successful:', syncResult);
-                }
-
-                const validActivityType = (activityType === 'wordOrder' ? 'association' : activityType) as 'quiz' | 'dictation' | 'listening' | 'association';
-                
-                if (userId && token && xp > 0) {
-                  const moodleToken = getAuthToken(token);
-                  await awardXPForActivity(moodleToken, userId, validActivityType, score, total);
-                  if (IS_DEV) {
-                    console.log('[Result] ✅ XP awarded for activity');
-                  }
-                }
-
-                setTimeout(() => {
-                  setSyncMessage(null);
-                }, 2000);
-              } else {
-                setSyncStatus('error');
-                setSyncMessage('⚠️ Sync Moodle en attente (vous êtes hors ligne ?)');
-
-                if (IS_DEV) {
-                  console.warn('[Result] Moodle sync failed:', syncResult);
-                }
+              if (IS_DEV) {
+                console.log('[Result] ✅ Moodle progress sync completed');
               }
+
+              setTimeout(() => {
+                setSyncMessage(null);
+              }, 2000);
             })
             .catch((err) => {
               setSyncStatus('error');
@@ -168,6 +202,50 @@ export default function ResultScreen() {
             totalScore: savedProgress?.totalScore,
             xpEarned: savedProgress?.xpEarned,
           });
+        }
+
+        // Check if course is completed (100%) and move to next course
+        if (isCompleted && courseId) {
+          try {
+            const { getCourseProgressForCompletion } = await import('@/services/storage/course-progress');
+            const courseProgress = await getCourseProgressForCompletion(courseId);
+            
+            if (courseProgress && courseProgress.progress >= 100) {
+              console.log('[Result] Course completed! Finding next course...');
+              
+              // Get all courses for user's language/grade to find next one
+              const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+              const PREFERENCES_KEY = '@ipelan_preferences';
+              const prefsStr = await AsyncStorage.getItem(PREFERENCES_KEY);
+              
+              if (prefsStr && token) {
+                const preferences = JSON.parse(prefsStr);
+                const { getCoursesForLanguageAndGrade } = await import('@/services/api/courseService');
+                const allCourses = await getCoursesForLanguageAndGrade(token, preferences.language, preferences.grade);
+                
+                // Find current course index
+                const currentIndex = allCourses.findIndex((c: any) => c.id === courseId);
+                
+                if (currentIndex >= 0 && currentIndex < allCourses.length - 1) {
+                  const nextCourse = allCourses[currentIndex + 1];
+                  console.log('[Result] Next course found:', nextCourse.fullname);
+                  
+                  // Show success message then redirect
+                  setSyncMessage('🎉 Cours terminé! Passage au suivant...');
+                  
+                  setTimeout(() => {
+                    router.push(`/(stacks)/(cours)/${nextCourse.id}` as any);
+                  }, 2000);
+                  return; // Exit early, we're redirecting
+                } else {
+                  console.log('[Result] All courses completed!');
+                  setSyncMessage('🎉 Félicitations! Vous avez terminé tous les cours!');
+                }
+              }
+            }
+          } catch (err) {
+            console.warn('[Result] Failed to check course completion:', err);
+          }
         }
       } catch (err) {
         setSyncStatus('error');
@@ -236,15 +314,23 @@ export default function ResultScreen() {
               {score} bonnes réponses sur {total}
             </Text>
 
-            <View className="flex-row w-full justify-center mb-6">
-              <View className="bg-purple-100 rounded-2xl px-6 py-3 mr-3 flex-row items-center">
-                <Text className="text-2xl mr-2">⭐</Text>
+            <View className="flex-row w-full justify-center mb-6 flex-wrap">
+              <View className="bg-purple-100 rounded-2xl px-4 py-3 mr-2 mb-2 flex-row items-center">
+                <Text className="text-xl mr-2">⭐</Text>
                 <Text className="text-purple-700 font-bold text-lg">+{xp} XP</Text>
               </View>
-              <View className="bg-yellow-100 rounded-2xl px-6 py-3 flex-row items-center">
-                <Text className="text-2xl mr-2">🪙</Text>
-                <Text className="text-yellow-700 font-bold text-lg">+{coins}</Text>
-              </View>
+              {earnedCoins > 0 && (
+                <View className="bg-yellow-100 rounded-2xl px-4 py-3 mr-2 mb-2 flex-row items-center">
+                  <Text className="text-xl mr-2">🪙</Text>
+                  <Text className="text-yellow-700 font-bold text-lg">+{earnedCoins}</Text>
+                </View>
+              )}
+              {lostLives > 0 && (
+                <View className="bg-red-100 rounded-2xl px-4 py-3 mb-2 flex-row items-center">
+                  <Text className="text-xl mr-2">💔</Text>
+                  <Text className="text-red-700 font-bold text-lg">-{lostLives}</Text>
+                </View>
+              )}
             </View>
 
             {/* ✅ AFFICHER L'ÉTAT DE SYNCHRONISATION */}
@@ -281,11 +367,12 @@ export default function ResultScreen() {
               </View>
             )}
 
-            {percentage >= 70 && (
+            {newBadge && (
               <View className="bg-gradient-to-r from-[#002366] to-[#4a90e2] rounded-2xl p-6 w-full mb-6 items-center">
                 <Text className="text-white text-sm font-medium mb-2">Nouveau badge débloqué !</Text>
-                <Text className="text-5xl mb-2">🏆</Text>
-                <Text className="text-white font-bold text-lg">Quiz Master</Text>
+                <Text className="text-5xl mb-2">{newBadge.icon}</Text>
+                <Text className="text-white font-bold text-lg">{newBadge.name}</Text>
+                <Text className="text-white text-xs text-center opacity-80 mt-1">{newBadge.description}</Text>
               </View>
             )}
 

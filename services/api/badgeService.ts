@@ -4,6 +4,7 @@ import { moodleFetch } from "./moodleClient";
 const ADMIN_TOKEN = process.env.MOODLE_ADMIN_TOKEN;
 const BADGES_STORAGE_KEY = "@ipelan_user_badges";
 const BADGES_TIMESTAMP_KEY = "@ipelan_badges_timestamp";
+const IS_DEV = process.env.NODE_ENV === 'development';
 
 export interface MoodleBadge {
   id: number;
@@ -92,5 +93,126 @@ export async function getAndSyncUserBadges(
     console.warn("[badgeService] getAndSyncUserBadges failed:", error);
     const localBadges = await getUserBadgesLocal();
     return { badges: localBadges, fromCache: true };
+  }
+}
+
+
+export async function syncBadgesToMoodle(
+  token: string,
+  userId: number,
+  badgeIds: string[]
+): Promise<boolean> {
+  try {
+    // Le champ ipelan_badges stocke UNIQUEMENT le dernier badge obtenu
+    // pour indiquer la progression actuelle de l'utilisateur
+    const lastBadge = badgeIds.length > 0 ? badgeIds[badgeIds.length - 1] : '';
+    const today = new Date().toISOString().split('T')[0];
+
+    const result = await moodleFetch('/webservice/rest/server.php', {
+      wstoken: token,
+      wsfunction: 'core_user_update_users',
+      moodlewsrestformat: 'json',
+      'users[0][id]': userId,
+      'users[0][customfields][0][type]': 'ipelan_badges',
+      'users[0][customfields][0][value]': lastBadge, // Dernier badge uniquement !
+      'users[0][customfields][1][type]': 'ipelan_badges_count',
+      'users[0][customfields][1][value]': String(badgeIds.length),
+      'users[0][customfields][2][type]': 'ipelan_last_activity',
+      'users[0][customfields][2][value]': today,
+    });
+
+    if (result?.exception) {
+      console.warn('[badgeService] syncBadgesToMoodle error:', result.message);
+      return false;
+    }
+
+
+    console.log(`[badgeService] Synced to Moodle: lastBadge=${lastBadge}, count=${badgeIds.length}`);
+
+
+    return true;
+  } catch (error) {
+    console.warn('[badgeService] syncBadgesToMoodle failed:', error);
+    return false;
+  }
+}
+
+/**
+ * Récupère les badges IPELAN depuis Moodle (via champs personnalisés)
+ */
+export async function getBadgesFromMoodle(
+  token: string,
+  userId: number
+): Promise<{ badgeIds: string[]; count: number }> {
+  try {
+    const result = await moodleFetch('/webservice/rest/server.php', {
+      wstoken: token,
+      wsfunction: 'core_user_get_users',
+      moodlewsrestformat: 'json',
+      'criteria[0][key]': 'id',
+      'criteria[0][value]': userId,
+    });
+
+    if (result?.exception) {
+      console.warn('[badgeService] getBadgesFromMoodle error:', result.message);
+      return { badgeIds: [], count: 0 };
+    }
+
+    const user = result?.users?.[0];
+    if (!user || !user.customfields) {
+      return { badgeIds: [], count: 0 };
+    }
+
+    const badgesField = user.customfields.find(
+      (f: any) => f.shortname === 'ipelan_badges'
+    );
+    const countField = user.customfields.find(
+      (f: any) => f.shortname === 'ipelan_badges_count'
+    );
+
+    const badgeIds = badgesField?.value
+      ? badgesField.value.split(',').filter((id: string) => id.trim())
+      : [];
+    const count = countField?.value
+      ? parseInt(countField.value, 10)
+      : badgeIds.length;
+
+    return { badgeIds, count };
+  } catch (error) {
+    console.warn('[badgeService] getBadgesFromMoodle failed:', error);
+    return { badgeIds: [], count: 0 };
+  }
+}
+
+/**
+ * Sync bidirectionnelle des badges
+ * Merge les badges locaux et Moodle (union des deux)
+ */
+export async function syncBadgesBidirectional(
+  token: string,
+  userId: number,
+  localBadgeIds: string[]
+): Promise<{ badgeIds: string[]; synced: boolean }> {
+  try {
+    // 1. Récupérer badges depuis Moodle
+    const moodleBadges = await getBadgesFromMoodle(token, userId);
+
+    // 2. Fusionner (union) - pas de perte de badges
+    const mergedBadgeIds = Array.from(new Set([
+      ...localBadgeIds,
+      ...moodleBadges.badgeIds
+    ]));
+
+    // 3. Si local a plus de badges, push vers Moodle
+    if (localBadgeIds.length > moodleBadges.badgeIds.length) {
+      const synced = await syncBadgesToMoodle(token, userId, mergedBadgeIds);
+      return { badgeIds: mergedBadgeIds, synced };
+    }
+
+    // 4. Si Moodle a plus, retourner les badges Moodle
+    return { badgeIds: mergedBadgeIds, synced: true };
+  } catch (error) {
+    console.warn('[badgeService] syncBadgesBidirectional failed:', error);
+    return { badgeIds: localBadgeIds, synced: false };
   }
 }

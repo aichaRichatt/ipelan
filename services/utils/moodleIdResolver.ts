@@ -196,10 +196,84 @@ export function stripHtml(html: string): string {
     .trim();
 }
 
+// ── Cache de modules par cours pour résolution rapide ────────────────────
+const moduleCache = new Map<number, ResolvedActivityIds[]>();
+
+export function clearModuleCache(courseId?: number): void {
+  if (courseId) {
+    moduleCache.delete(courseId);
+  } else {
+    moduleCache.clear();
+  }
+}
+
+export async function getCourseModulesCached(
+  courseId: number,
+  token: string
+): Promise<ResolvedActivityIds[]> {
+  if (moduleCache.has(courseId)) return moduleCache.get(courseId)!;
+
+  const authToken = getAuthToken(token);
+  if (!authToken || !courseId) return [];
+
+  try {
+    const contentsResult = await moodleFetch('/webservice/rest/server.php', {
+      wstoken: authToken,
+      wsfunction: 'core_course_get_contents',
+      moodlewsrestformat: 'json',
+      courseid: courseId,
+      options: [],
+    });
+
+    if (contentsResult?.exception) return [];
+
+    const results: ResolvedActivityIds[] = [];
+    const sections = Array.isArray(contentsResult) ? contentsResult : [contentsResult];
+
+    for (const section of sections) {
+      for (const mod of section.modules || []) {
+        if (!mod.instance || mod.instance === 0) continue;
+
+        results.push({
+          cmid: mod.id,
+          instanceId: mod.instance,
+          modname: mod.modname,
+          name: mod.name || 'Unknown',
+          description: mod.description || mod.intro || '',
+          audioUrl: extractAudioUrl(mod.description || mod.intro || ''),
+        });
+      }
+    }
+
+    moduleCache.set(courseId, results);
+    if (IS_DEV) console.log(`[MoodleIdResolver] Cached ${results.length} modules for course ${courseId}`);
+    return results;
+  } catch (err: any) {
+    if (IS_DEV) console.error('[MoodleIdResolver] Cache fetch error:', err.message);
+    return [];
+  }
+}
+
+export async function resolveIds(
+  courseId: number,
+  cmid: number,
+  token: string
+): Promise<ResolvedActivityIds | null> {
+  const modules = await getCourseModulesCached(courseId, token);
+  const found = modules.find(m => m.cmid === cmid);
+  if (IS_DEV && found) {
+    console.log(`[MoodleIdResolver] Resolved cmid=${cmid} -> instanceId=${found.instanceId}, modname=${found.modname}`);
+  }
+  return found ?? null;
+}
+
 export default {
   resolveActivityInstanceId,
   getModulesByType,
   extractAudioUrl,
   convertFileUrlForAuth,
   stripHtml,
+  resolveIds,
+  getCourseModulesCached,
+  clearModuleCache,
 };

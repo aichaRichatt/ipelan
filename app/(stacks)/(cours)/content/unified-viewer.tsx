@@ -1,23 +1,19 @@
-import { cleanAndAuthUrl } from "@/services/urlAuth";
 import { injectAbsolutePaths, wrapHTMLForEPUB } from "@/services/epub/epubPathHelper";
+import { cleanAndAuthUrl } from "@/services/urlAuth";
 import { Feather, Ionicons } from "@expo/vector-icons";
-import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
-import {
-  deleteAsync,
-  documentDirectory,
-  downloadAsync,
-  readAsStringAsync,
-} from "expo-file-system/legacy";
+import { useAudioPlayer } from "expo-audio";
+import Constants from 'expo-constants';
+import { deleteAsync, documentDirectory, downloadAsync } from "expo-file-system/legacy";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    Pressable,
+    ScrollView,
+    Text,
+    View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
@@ -69,9 +65,8 @@ export default function UnifiedContentViewer() {
   const [audioUri, setAudioUri] = useState<string | null>(null);
   const [videoUri, setVideoUri] = useState<string | null>(null);
   const [pdfLocalPath, setPdfLocalPath] = useState<string | null>(null);
-  const [pdfBase64, setPdfBase64] = useState<string | null>(null);
   const [epubData, setEpubData] = useState<string | null>(null);
-  const [audioPlayer, setAudioPlayer] = useState<ReturnType<typeof useAudioPlayer> | null>(null);
+  const audioPlayer = useAudioPlayer(audioUri);
   const [isPlaying, setIsPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
@@ -307,17 +302,6 @@ export default function UnifiedContentViewer() {
         if (IS_DEV)
           console.log("[UnifiedViewer] PDF downloaded to:", localUri);
         setPdfLocalPath(localUri);
-        
-        // Convertir en base64 pour affichage hors-ligne
-        try {
-          const base64 = await readAsStringAsync(localUri, { encoding: 'base64' });
-          setPdfBase64(base64);
-          if (IS_DEV)
-            console.log("[UnifiedViewer] PDF encoded to base64");
-        } catch (encodeErr) {
-          if (IS_DEV)
-            console.warn("[UnifiedViewer] Base64 encoding failed:", encodeErr);
-        }
       } else {
         if (IS_DEV)
           console.warn(
@@ -407,9 +391,9 @@ export default function UnifiedContentViewer() {
 
   useEffect(() => {
     return () => {
+      // Audio cleanup is mostly handled by the hook, but we pause just in case
       if (audioPlayer) {
         audioPlayer.pause();
-        audioPlayer.remove();
       }
     };
   }, [audioPlayer]);
@@ -591,116 +575,45 @@ export default function UnifiedContentViewer() {
         );
 
       case "pdf":
-        if (pdfBase64) {
-          const pdfJsHtml = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0">
-              <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { 
-                  font-family: -apple-system, BlinkMacSystemFont, sans-serif; 
-                  background: #f5f5f5;
-                  padding: 10px;
-                }
-                .page-container { 
-                  margin-bottom: 15px; 
-                  background: white;
-                  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-                  border-radius: 8px;
-                  overflow: hidden;
-                }
-                canvas { 
-                  display: block; 
-                  width: 100%;
-                  height: auto;
-                }
-                .page-num { 
-                  background: #002366; 
-                  color: white; 
-                  padding: 8px;
-                  text-align: center;
-                  font-size: 12px;
-                }
-                #loading {
-                  text-align: center;
-                  padding: 40px;
-                  color: #666;
-                }
-              </style>
-            </head>
-            <body>
-              <div id="loading">Chargement du PDF...</div>
-              <div id="pages"></div>
-              
-              <script>
-                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-                
-                async function loadPdf() {
-                  try {
-                    const pdfData = atob('${pdfBase64}');
-                    const uint8Array = new Uint8Array(pdfData.length);
-                    for (let i = 0; i < pdfData.length; i++) {
-                      uint8Array[i] = pdfData.charCodeAt(i);
-                    }
-                    
-                    const loadingTask = pdfjsLib.getDocument({ data: uint8Array });
-                    const pdf = await loadingTask.promise;
-                    const numPages = pdf.numPages;
-                    
-                    document.getElementById('loading').textContent = numPages + ' pages trouvées';
-                    
-                    for (let i = 1; i <= numPages; i++) {
-                      const page = await pdf.getPage(i);
-                      const scale = (window.innerWidth - 20) / page.getViewport({ scale: 1 }).width * 2.5;
-                      const viewport = page.getViewport({ scale });
-                      
-                      const canvas = document.createElement('canvas');
-                      canvas.width = viewport.width;
-                      canvas.height = viewport.height;
-                      
-                      const context = canvas.getContext('2d');
-                      context.imageSmoothingEnabled = true;
-                      context.imageSmoothingQuality = 'high';
-                      await page.render({
-                        canvasContext: context,
-                        viewport: viewport
-                      }).promise;
-                      
-                      const pageDiv = document.createElement('div');
-                      pageDiv.className = 'page-container';
-                      pageDiv.innerHTML = '<div class="page-num">Page ' + i + ' / ' + numPages + '</div>';
-                      const img = document.createElement('img');
-                      img.src = canvas.toDataURL('image/png');
-                      img.style.width = '100%';
-                      img.style.height = 'auto';
-                      pageDiv.appendChild(img);
-                      document.getElementById('pages').appendChild(pageDiv);
-                    }
-                    
-                    document.getElementById('loading').style.display = 'none';
-                    
-                  } catch (err) {
-                    document.getElementById('loading').textContent = 'Erreur: ' + err.message;
-                  }
-                }
-                
-                loadPdf();
-              </script>
-            </body>
-            </html>
-          `;
-          return (
-            <View className="flex-1">
+        if (pdfLocalPath) {
+          const authPdfUrl = detectedContent.url ? cleanAndAuthUrl(detectedContent.url, token) : null;
+          if (!authPdfUrl) return null;
+
+          const isExpoGo = Constants.appOwnership === 'expo';
+          
+          if (isExpoGo) {
+            // Expo Go doesn't support react-native-pdf (native module)
+            // Use Google Docs PDF viewer as fallback
+            const googleViewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(authPdfUrl)}&embedded=true`;
+            return (
               <WebView
-                source={{ html: pdfJsHtml }}
+                source={{ uri: googleViewerUrl }}
                 style={{ flex: 1 }}
                 originWhitelist={["*"]}
                 javaScriptEnabled={true}
                 domStorageEnabled={true}
-                scalesPageToFit={true}
+              />
+            );
+          }
+
+          // For native builds, dynamically import react-native-pdf
+          const PdfViewer = require('react-native-pdf').default;
+          return (
+            <View className="flex-1 bg-gray-100">
+              <PdfViewer
+                source={{ uri: authPdfUrl, cache: true }}
+                style={{
+                  flex: 1,
+                  width: Dimensions.get("window").width,
+                  height: Dimensions.get("window").height,
+                }}
+                onLoadComplete={(numberOfPages: number) => {
+                  if (IS_DEV) console.log(`[UnifiedViewer] PDF loaded with ${numberOfPages} pages`);
+                }}
+                onError={(err: any) => {
+                  if (IS_DEV) console.error("[UnifiedViewer] PDF error:", err);
+                  setError("Erreur lors de l'affichage du PDF");
+                }}
               />
             </View>
           );

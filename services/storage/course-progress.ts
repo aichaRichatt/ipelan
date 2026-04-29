@@ -27,12 +27,12 @@ export const saveCourseProgress = async (
 ): Promise<void> => {
   const maxRetries = 3;
   let lastError: any = null;
-  
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const db = await getDBConnection();
       const now = new Date().toISOString();
-      
+
       await db.runAsync(
         `INSERT INTO course_progress (course_id, completed_activities, total_activities, total_xp, best_score, last_activity_at, synced_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -53,14 +53,14 @@ export const saveCourseProgress = async (
           null,
         ]
       );
-      
+
       console.log('[CourseProgress] Saved:', { courseId, completedActivities, totalActivities, totalXP });
       return;
     } catch (error: any) {
       lastError = error;
       const isLockError = error?.message?.includes('database is locked') || error?.code === 'database is locked';
       console.warn('[CourseProgress] Save attempt', attempt, 'failed:', isLockError ? 'database locked' : error.message);
-      
+
       if (isLockError && attempt < maxRetries) {
         await new Promise(r => setTimeout(r, 100 * attempt));
       } else if (!isLockError) {
@@ -68,7 +68,7 @@ export const saveCourseProgress = async (
       }
     }
   }
-  
+
   console.error('[CourseProgress] Failed to save after', maxRetries, 'attempts:', lastError);
 };
 
@@ -103,6 +103,33 @@ export const getCourseProgress = async (
     };
   } catch (error) {
     console.error('Failed to get course progress:', error);
+    return null;
+  }
+};
+
+// Get progress percentage for completion check
+export const getCourseProgressForCompletion = async (
+  courseId: number
+): Promise<{ progress: number; completed: number; total: number } | null> => {
+  try {
+    const db = await getDBConnection();
+    const result = await db.getFirstAsync<{
+      completed_activities: number;
+      total_activities: number;
+    }>(
+      'SELECT completed_activities, total_activities FROM course_progress WHERE course_id = ?',
+      [courseId]
+    );
+
+    if (!result) return null;
+
+    const completed = result.completed_activities || 0;
+    const total = result.total_activities || 0;
+    const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    return { progress, completed, total };
+  } catch (error) {
+    console.error('[getCourseProgressForCompletion] Failed:', error);
     return null;
   }
 };
@@ -194,3 +221,104 @@ export const markActivityCompleted = async (
     console.error('Failed to mark activity completed:', error);
   }
 };
+
+// ── Filtrage strict des activités complétables ──────────────────────────
+
+export interface CompletableModule {
+  cmid: number;
+  instanceId: number;
+  modname: string;
+  name: string;
+  completion: number; // 0=aucun, 1=manuel, 2=automatique
+}
+
+const NON_ACTIVITY_TYPES = ['label', 'section'];
+
+export function getCompletableModules(sections: any[]): CompletableModule[] {
+  const completable: CompletableModule[] = [];
+
+  for (const section of sections ?? []) {
+    for (const mod of section.modules ?? []) {
+      // Règle 1 : completion > 0 = suivi d'achèvement activé dans Moodle
+      if (!mod.completion || mod.completion === 0) continue;
+
+      // Règle 2 : Ignorer les modules non-activités (labels, sections)
+      if (NON_ACTIVITY_TYPES.includes(mod.modname)) continue;
+
+      // Règle 3 : Ignorer les modules cachés
+      if (mod.visible === 0) continue;
+
+      // Règle 4 : instanceId valide obligatoire
+      if (!mod.instance || mod.instance === 0) continue;
+
+      completable.push({
+        cmid: mod.id,
+        instanceId: mod.instance,
+        modname: mod.modname,
+        name: mod.name,
+        completion: mod.completion,
+      });
+    }
+  }
+
+  return completable;
+}
+
+// ── Calcul fiable de la progression d'un cours ──────────────────────────
+
+export async function calculateCourseProgress(
+  courseId: number,
+  sections: any[],
+  moodleCompletionStatuses?: { cmid: number; completionstate: number }[]
+): Promise<{
+  completed: number;
+  total: number;
+  percentage: number;
+}> {
+  const completable = getCompletableModules(sections);
+  const total = completable.length;
+
+  if (total === 0) {
+    return { completed: 0, total: 0, percentage: 0 };
+  }
+
+  // Source 1 : Statut Moodle (plus fiable)
+  const moodleMap = new Map<number, boolean>();
+  if (moodleCompletionStatuses) {
+    for (const stat of moodleCompletionStatuses) {
+      moodleMap.set(stat.cmid, stat.completionstate >= 1);
+    }
+  }
+
+  // Source 2 : Données locales SQLite (pour hors-ligne)
+  const localMap = new Map<number, boolean>();
+  try {
+    const db = await getDBConnection();
+    const rows = await db.getAllAsync<{ module_id: number; is_completed: number }>(
+      `SELECT module_id, is_completed FROM activity_progress WHERE course_id = ? AND is_completed = 1`,
+      [courseId]
+    );
+    rows.forEach(r => localMap.set(r.module_id, true));
+  } catch {
+    console.warn('[calculateCourseProgress] Failed to read local progress');
+  }
+
+  // Fusionner : Priorité Moodle > Local
+  let completedCount = 0;
+  for (const mod of completable) {
+    const isCompleted =
+      moodleMap.get(mod.cmid) ??
+      localMap.get(mod.cmid) ??
+      false;
+
+    if (isCompleted) {
+      completedCount++;
+    }
+  }
+
+  const percentage = Math.round((completedCount / total) * 100);
+
+  console.log('[calculateCourseProgress]', { courseId, total, completed: completedCount, percentage });
+
+  return { completed: completedCount, total, percentage };
+}

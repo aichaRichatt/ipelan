@@ -1,7 +1,7 @@
 import { openDatabaseAsync, SQLiteDatabase } from 'expo-sqlite';
 import { CourseCategory, CourseModule, CourseSection, IPELANUser, ModuleContent } from '../../types';
 
-export type UserDB = Pick<IPELANUser, 'id' | 'username' | 'email' | 'firstname' | 'lastname' | 'fullname' | 'ipelan_xp' | 'coins' | 'streak'> & { token: string; badges?: string };
+export type UserDB = Pick<IPELANUser, 'id' | 'username' | 'email' | 'firstname' | 'lastname' | 'fullname' | 'ipelan_xp' | 'coins' | 'streak' | 'lives'> & { token: string; badges?: string; last_activity?: string };
 
 export interface CourseDB {
   id: number;
@@ -87,6 +87,24 @@ export const getDBConnection = async () => {
 };
 
 export const createTables = async (db: SQLiteDatabase) => {
+  try {
+    await db.execAsync("ALTER TABLE users ADD COLUMN lives INTEGER DEFAULT 6;");
+    console.log("Migration: Added lives column to users table.");
+  } catch (e: any) {
+    console.log("Migration: Column lives already exists.");
+  }
+  try {
+    await db.execAsync("ALTER TABLE users ADD COLUMN last_activity TEXT;");
+    console.log("Migration: Added last_activity column to users table.");
+  } catch (e: any) {
+    console.log("Migration: Column last_activity already exists.");
+  }
+  try {
+    await db.execAsync("ALTER TABLE users ADD COLUMN last_lives_update TEXT;");
+    console.log("Migration: Added last_lives_update column to users table.");
+  } catch (e: any) {
+    console.log("Migration: Column last_lives_update already exists.");
+  }
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS users(
@@ -98,9 +116,11 @@ export const createTables = async (db: SQLiteDatabase) => {
         fullname TEXT NOT NULL,
         ipelan_xp INTEGER DEFAULT 0,
         coins INTEGER DEFAULT 0,
+        lives INTEGER DEFAULT 6,
         streak INTEGER DEFAULT 0,
         badges TEXT DEFAULT '[]',
-        token TEXT NOT NULL
+        token TEXT NOT NULL,
+        last_lives_update TEXT DEFAULT (datetime('now'))
     );
     CREATE TABLE IF NOT EXISTS courses(
         id INTEGER PRIMARY KEY,
@@ -182,15 +202,6 @@ export const createTables = async (db: SQLiteDatabase) => {
         content TEXT,
         FOREIGN KEY (book_id) REFERENCES epub_books(id) ON DELETE CASCADE
     );
-    CREATE TABLE IF NOT EXISTS user_progress(
-        user_id INTEGER PRIMARY KEY,
-        xp INTEGER DEFAULT 0,
-        coins INTEGER DEFAULT 0,
-        streak_current INTEGER DEFAULT 0,
-        streak_best INTEGER DEFAULT 0,
-        last_activity_at INTEGER,
-        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
-    );
     CREATE TABLE IF NOT EXISTS activity_scores(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
@@ -209,6 +220,7 @@ export const createTables = async (db: SQLiteDatabase) => {
     );
     CREATE TABLE IF NOT EXISTS activity_progress(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
         module_id INTEGER NOT NULL,
         course_id INTEGER NOT NULL,
         type TEXT NOT NULL,
@@ -218,8 +230,9 @@ export const createTables = async (db: SQLiteDatabase) => {
         is_completed INTEGER DEFAULT 0,
         last_attempt TEXT,
         xp_earned INTEGER DEFAULT 0,
+        coins_earned INTEGER DEFAULT 0,
         synced_at TEXT,
-        UNIQUE(module_id, course_id)
+        UNIQUE(user_id, module_id, course_id)
     );
     CREATE TABLE IF NOT EXISTS course_progress(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -241,6 +254,23 @@ export const createTables = async (db: SQLiteDatabase) => {
         retries INTEGER DEFAULT 0,
         last_attempt TEXT,
         status TEXT DEFAULT 'pending'
+    );
+    CREATE TABLE IF NOT EXISTS user_streaks (
+        user_id            INTEGER PRIMARY KEY,
+        current_streak     INTEGER DEFAULT 0,
+        best_streak        INTEGER DEFAULT 0,
+        last_activity_date TEXT,
+        total_days_active  INTEGER DEFAULT 0,
+        updated_at         TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS sync_queue (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        type        TEXT NOT NULL,
+        wsfunction  TEXT NOT NULL,
+        payload     TEXT NOT NULL,
+        created_at  TEXT DEFAULT (datetime('now')),
+        retries     INTEGER DEFAULT 0,
+        last_error  TEXT
     );
   `);
 };
@@ -333,8 +363,8 @@ export const getAllEPUBBooks = async (db: SQLiteDatabase): Promise<EPUBBookDB[]>
 export const saveUser = async (db: SQLiteDatabase, user: UserDB) => {
   await db.runAsync(`DELETE FROM users`);
 
-  const query = `INSERT OR REPLACE INTO users(id, username, email, firstname, lastname, fullname, ipelan_xp, coins, streak, badges, token) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  const query = `INSERT OR REPLACE INTO users(id, username, email, firstname, lastname, fullname, ipelan_xp, coins, lives, streak, last_activity, badges, token) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   await db.runAsync(query, [
     user.id,
     user.username,
@@ -344,7 +374,9 @@ export const saveUser = async (db: SQLiteDatabase, user: UserDB) => {
     user.fullname,
     user.ipelan_xp,
     user.coins,
+    user.lives,
     user.streak,
+    user.last_activity || null,
     user.badges || '[]',
     user.token
   ]);

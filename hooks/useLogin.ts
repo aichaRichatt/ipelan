@@ -1,11 +1,11 @@
 import { useRouter } from 'expo-router';
-import { saveToken, saveUserData, removeToken, removeUserData } from '../services/storage/tokenStorage';
-import { loginStart, loginSuccess, loginFailure, logout } from '../services/redux/slices/authSlice';
-import { login as moodleLogin, getMoodleSiteInfo, getMoodleProfile, updateUserProfile, agreeToSitePolicy, enrolUserInCourse } from "../services/api/moodleAuth";
-import { getDBConnection, saveUser, createTables } from '../services/storage/db-service';
-import { IPELANUser } from '../types';
-import { RootState } from '../services/redux/store';
 import { useDispatch, useSelector } from 'react-redux';
+import { agreeToSitePolicy, enrolUserInCourse, getMoodleProfile, getMoodleSiteInfo, login as moodleLogin, updateUserProfile } from "../services/api/moodleAuth";
+import { loginFailure, loginStart, loginSuccess, logout } from '../services/redux/slices/authSlice';
+import { RootState } from '../services/redux/store';
+import { createTables, getDBConnection, saveUser } from '../services/storage/db-service';
+import { removeToken, removeUserData, saveToken, saveUserData } from '../services/storage/tokenStorage';
+import { IPELANUser } from '../types';
 
 const IS_DEV = process.env.NODE_ENV === "development";
 
@@ -19,10 +19,10 @@ export function useLogin() {
 
   const login = async (username: string, password: string, email?: string, firstName?: string, lastName?: string, city?: string) => {
     dispatch(loginStart());
-    
+
     try {
       if (IS_DEV) console.log("[useLogin] Log In Attempt for:", username);
-      
+
       const tokenData = await moodleLogin(username, password);
       const authToken = tokenData.token;
 
@@ -76,7 +76,7 @@ export function useLogin() {
       if (!finalFirstName || !finalLastName) {
         const nameFromUsername = username.includes("@") ? username.split("@")[0] : username;
         const nameParts = nameFromUsername.split(/[_\-\s]/).filter(Boolean);
-        
+
         if (!finalFirstName && nameParts[0]) {
           finalFirstName = nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase();
         }
@@ -88,19 +88,19 @@ export function useLogin() {
       if (IS_DEV) console.log("[useLogin] Final name:", finalFirstName, finalLastName, "| firstName:", firstName, "| lastName:", lastName);
 
       const needProfileUpdate = !moodleUser?.firstname || !moodleUser?.lastname;
-      
+
       if (needProfileUpdate && finalFirstName && finalLastName) {
         try {
           if (IS_DEV) console.log("[useLogin] Updating profile...");
           await updateUserProfile(moodleId, finalFirstName, finalLastName);
           await sleep(1000);
-          
+
           const updatedProfile = await getMoodleProfile(authToken, moodleId, "id");
           const updatedUser = updatedProfile?.[0] || updatedProfile?.users?.[0] || null;
-          
+
           if (updatedUser?.firstname) finalFirstName = updatedUser.firstname.trim();
           if (updatedUser?.lastname) finalLastName = updatedUser.lastname.trim();
-          
+
           if (IS_DEV) console.log("[useLogin] Profile updated:", finalFirstName, finalLastName);
         } catch (updateErr) {
           if (IS_DEV) console.warn("[useLogin] Profile update failed:", updateErr);
@@ -127,6 +127,18 @@ export function useLogin() {
       const finalFullName = `${finalFirstName} ${finalLastName}`.trim() || finalUsername;
       const finalAvatar = moodleUser?.profileimageurl || siteInfo?.userpictureurl || "";
 
+      const getCustomField = (user: any, shortname: string) => {
+        return user?.customfields?.find((f: any) => f.shortname === shortname)?.value;
+      };
+
+      const parsedXp = parseInt(getCustomField(moodleUser, 'ipelan_xp') || '0', 10);
+      const parsedCoins = parseInt(getCustomField(moodleUser, 'ipelan_coins') || '0', 10);
+      const parsedLives = parseInt(getCustomField(moodleUser, 'ipelan_lives') || '6', 10);
+      const parsedStreak = parseInt(getCustomField(moodleUser, 'ipelan_streak') || '0', 10);
+      const parsedLastActivity = getCustomField(moodleUser, 'ipelan_last_activity') || '';
+      const parsedBadge = getCustomField(moodleUser, 'ipelan_badges');
+      const parsedBadgeCount = parseInt(getCustomField(moodleUser, 'ipelan_badges_count') || '0', 10);
+
       const userData: IPELANUser = {
         id: moodleId,
         username: finalUsername,
@@ -134,9 +146,11 @@ export function useLogin() {
         lastname: finalLastName,
         email: finalEmail,
         fullname: finalFullName,
-        ipelan_xp: moodleUser?.ipelan_xp || 0,
-        coins: moodleUser?.coins || 0,
-        streak: moodleUser?.streak || 0,
+        ipelan_xp: parsedXp,
+        coins: parsedCoins,
+        lives: parsedLives,
+        streak: parsedStreak,
+        badges: parsedBadge ? [parsedBadge] : [],
         avatar: finalAvatar,
         token: authToken
       };
@@ -159,9 +173,22 @@ export function useLogin() {
             fullname: userData.fullname,
             ipelan_xp: userData.ipelan_xp,
             coins: userData.coins,
+            lives: userData.lives,
             streak: userData.streak,
+            last_activity: parsedLastActivity,
             token: authToken
           });
+
+          // Save badges from Moodle to SQLite
+          if (parsedBadge) {
+            const { saveBadge, initBadgeTable } = await import('../services/storage/badge-storage');
+            await initBadgeTable();
+            const badgeIds = parsedBadge.split(',').map((id: string) => id.trim()).filter((id: string) => id.length > 0);
+            for (const badgeId of badgeIds) {
+              await saveBadge(userData.id, badgeId);
+            }
+            if (IS_DEV) console.log(`[useLogin] Saved ${badgeIds.length} badges from Moodle to SQLite`);
+          }
           if (IS_DEV) console.log("[useLogin] SQLite: User saved successfully");
         }
       } catch (dbErr) {
@@ -169,10 +196,10 @@ export function useLogin() {
       }
 
       dispatch(loginSuccess({ user: userData, token: authToken }));
-      
+
       await sleep(300);
       router.replace("/(tabs)/(home)" as any);
-      
+
       return { user: userData, token: authToken };
 
     } catch (error: any) {

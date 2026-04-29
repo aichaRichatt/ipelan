@@ -4,7 +4,7 @@ export const Config = {
   baseURL: process.env.EXPO_PUBLIC_MOODLE_API_URL || "https://moodle.richatt.com",
   service: "IPELAN_FULL_SERVICE",
 };
- 
+
 export async function moodleFetch(
   endpoint: string,
   params: Record<string, any> = {},
@@ -19,9 +19,12 @@ export async function moodleFetch(
     body = new URLSearchParams();
     body.append("moodlewsrestformat", "json");
     Object.keys(params).forEach(key => {
+      if (params[key] === null || params[key] === undefined) return;
+
       if (typeof params[key] === 'object' && params[key] !== null) {
-         const flatten = (obj: any, prefix: string = '') => {
+        const flatten = (obj: any, prefix: string = '') => {
           Object.keys(obj).forEach(k => {
+            if (obj[k] === null || obj[k] === undefined) return;
             const propName = prefix ? `${prefix}[${k}]` : k;
             if (typeof obj[k] === 'object' && obj[k] !== null) {
               flatten(obj[k], propName);
@@ -73,4 +76,21 @@ export async function moodleFetch(
     if (IS_DEV) console.error("[API] Error:", error.message);
     throw error;
   }
+}
+
+export async function moodleCall(
+  wsfunction: string,
+  params: Record<string, any> = {},
+  token?: string
+) {
+  const callParams: any = {
+    ...params,
+    wsfunction,
+  };
+
+  if (token) {
+    callParams.wstoken = token;
+  }
+
+  return moodleFetch('/webservice/rest/server.php', callParams, 'POST');
 }

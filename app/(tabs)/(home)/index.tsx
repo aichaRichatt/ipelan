@@ -1,13 +1,11 @@
-import { useFirstCourse } from "@/hooks/useMoodleCourses";
-import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
+import { AntDesign, Feather, Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
-import { getAndSyncUserBadges } from "../../../services/api/badgeService";
-import { getUserProgress, syncUserProgressToMoodle } from "../../../services/api/userProgressService";
-import { getUserXP } from "../../../services/api/xpService";
+import { useSyncStatus } from "../../../hooks/useSyncStatus";
+import { useUserStats } from "../../../hooks/useUserStats";
 import { RootState } from "../../../services/redux/store";
 import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
 import { getAllCourseProgress } from "../../../services/storage/course-progress";
@@ -24,6 +22,7 @@ interface ModuleData {
   iconColor: string;
   iconBg: string;
   levelId: number; 
+  progress?: number;
 }
 
 interface QuickActionData {
@@ -51,6 +50,52 @@ const getIconComponent = (iconName: string, size: number, color: string) => {
 };
 const DefaultProfileImage = require('../../../assets/images/defaultprofile.png');
 
+function useActiveCourse(activeToken: string) {
+  const [courses, setCourses] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchCourses = async () => {
+      if (!activeToken) {
+        setIsLoading(false);
+        return;
+      }
+      
+      try {
+        setIsLoading(true);
+        // Récupérer les cours depuis Moodle
+        const moodleCall = (await import('../../../services/api/moodleClient')).moodleCall;
+        
+        const result = await moodleCall(
+          'core_course_get_enrolled_courses_by_timeline_classification',
+          { classification: 'inprogress', limit: 10 },
+          activeToken
+        );
+        
+        if (result && result.courses) {
+          setCourses(result.courses);
+        } else {
+          setCourses([]);
+        }
+      } catch (err: any) {
+        console.error('[useActiveCourse] Error:', err);
+        setError(err.message || 'Failed to load courses');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchCourses();
+  }, [activeToken]);
+
+  // Le premier cours est le cours actif
+  const course = courses.length > 0 ? courses[0] : null;
+  const allCourses = courses;
+
+  return { course, allCourses, isLoading, error };
+}
+
 export default function HomeScreen() {
   const reduxUser = useSelector((state: RootState) => state.auth.user);
   const reduxToken = useSelector((state: RootState) => state.auth.token);
@@ -59,52 +104,12 @@ export default function HomeScreen() {
   const loggedUser = reduxUser;
   const activeToken = reduxToken || "";
   
-const { course, isLoading, error } = useFirstCourse(activeToken);
-  const [badgesCount, setBadgesCount] = useState(0);
+  const { course, allCourses, isLoading, error } = useActiveCourse(activeToken);
+  const { stats, isLoading: statsLoading, isSyncing } = useUserStats();
+  const { icon, color, opacity, isSyncing: isAutoSyncing } = useSyncStatus();
+  
   const [courseProgressMap, setCourseProgressMap] = useState<any>({});
   const [courseScoreMap, setCourseScoreMap] = useState<any>({});
-  const [totalXP, setTotalXP] = useState(0);
-  const [streak, setStreak] = useState(0);
-  const [isSyncing, setIsSyncing] = useState(false);
-
-  useEffect(() => {
-    const loadUserStats = async () => {
-      if (!loggedUser?.id) return;
-
-      const localProgress = await getUserProgress(loggedUser.id);
-      if (localProgress) {
-        setTotalXP(localProgress.xp);
-        setStreak(localProgress.streak_current);
-      }
-
-      const { badges, fromCache } = await getAndSyncUserBadges(activeToken, loggedUser.id);
-      setBadgesCount(badges.length);
-
-      if (!fromCache && activeToken) {
-        setIsSyncing(true);
-        try {
-          const moodleXP = await getUserXP(activeToken, loggedUser.id);
-          if (moodleXP.xp > 0) {
-            setTotalXP(moodleXP.xp);
-            setStreak(moodleXP.streak);
-          }
-
-          await syncUserProgressToMoodle(
-            loggedUser.id,
-            totalXP,
-            streak,
-            activeToken
-          );
-        } catch (err) {
-          console.warn("[Home] Failed to sync with Moodle:", err);
-        } finally {
-          setIsSyncing(false);
-        }
-      }
-    };
-
-    loadUserStats();
-  }, [loggedUser?.id, activeToken]);
 
   useEffect(() => {
     const loadProgress = async () => {
@@ -151,11 +156,16 @@ const { course, isLoading, error } = useFirstCourse(activeToken);
   };
 
   const getCourseProgress = (course: any) => {
-    const dbProgress = courseProgressMap[course.id];
+    // First use the progress from useActiveCourse (which has correct DB progress)
+    if (course && typeof course.progress === 'number' && course.progress > 0) {
+      return course.progress;
+    }
+    // Fallback to courseProgressMap
+    const dbProgress = courseProgressMap[course?.id];
     if (dbProgress && dbProgress.total > 0) {
       return Math.round((dbProgress.completed / dbProgress.total) * 100);
     }
-    return course.progress || 0;
+    return course?.progress || 0;
   };
   
   const getCourseScore = (courseId: number) => {
@@ -221,50 +231,56 @@ const { course, isLoading, error } = useFirstCourse(activeToken);
               </View>
             </View>
 
-            <View className="flex-row items-center space-x-3">
+            <View className="flex-row items-center space-x-2">
               <View className="flex-row items-center bg-white px-2 py-1 rounded-full border border-gray-100 shadow-sm">
-                <Text className="text-sm mr-1">🔥</Text>
-                <Text className="font-bold text-xs text-[#EF4444]">{streak}</Text>
+                <Text className="text-sm mr-1">❤️</Text>
+                <Text className="font-bold text-xs text-[#EF4444]">{stats.lives}</Text>
               </View>
               <View className="flex-row items-center bg-white px-2 py-1 rounded-full border border-gray-100 shadow-sm">
-                <Ionicons name="medal" size={14} color="#8B5CF6" />
-                <Text className="font-bold text-xs text-[#8B5CF6] ml-1">{badgesCount}</Text>
-                {isSyncing && <ActivityIndicator size="small" color="#8B5CF6" className="ml-1" />}
+                <Text className="text-sm mr-1">🪙</Text>
+                <Text className="font-bold text-xs text-[#F59E0B]">{stats.coins}</Text>
+              </View>
+              <View className="flex-row items-center bg-white px-2 py-1 rounded-full border border-gray-100 shadow-sm">
+                <Text className="text-sm mr-1">🔥</Text>
+                <Text className="font-bold text-xs text-orange-500">{stats.streak}</Text>
               </View>
               <Pressable onPress={handleSettingsPress} className="p-2 bg-white rounded-full border border-gray-100 shadow-sm">
                 <Feather name="settings" size={18} color="#374151" />
               </Pressable>
+              {isAutoSyncing && (
+                <View className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full bg-blue-400" style={{ opacity: 0.6 }} />
+              )}
             </View>
           </View>
 
           <View className="flex-row flex-wrap justify-between mb-8">
             <StatsCard 
               label="XP Total" 
-              value={`${totalXP}`} 
+              value={`${stats.xp}`} 
               icon={<AntDesign name="star" size={16} color="#F59E0B" />}
               bgColor="bg-orange-50"
               textColor="text-orange-600"
             />
             <StatsCard 
-              label="Jours Série" 
-              value={`${streak}`} 
-              icon={<Ionicons name="flame" size={16} color="#EF4444" />}
+              label="Pièces" 
+              value={`${stats.coins}`} 
+              icon={<FontAwesome5 name="coins" size={14} color="#F59E0B" />}
+              bgColor="bg-yellow-50"
+              textColor="text-yellow-600"
+            />
+            <StatsCard 
+              label="Vies" 
+              value={`${stats.lives}/6`} 
+              icon={<AntDesign name="heart" size={16} color="#EF4444" />}
               bgColor="bg-red-50"
               textColor="text-red-600"
             />
             <StatsCard 
-              label="Badges" 
-              value={`${badgesCount}`} 
-              icon={<Ionicons name="medal" size={16} color="#8B5CF6" />}
-              bgColor="bg-purple-50"
-              textColor="text-purple-600"
-            />
-            <StatsCard 
-              label="Cours" 
-              value={course ? "1" : "0"} 
-              icon={<Feather name="book-open" size={16} color="#10B981" />}
-              bgColor="bg-green-50"
-              textColor="text-green-600"
+              label="Série" 
+              value={`${stats.streak} j`} 
+              icon={<Ionicons name="flame" size={16} color="#EF4444" />}
+              bgColor="bg-orange-50"
+              textColor="text-orange-600"
             />
           </View>
 
@@ -355,7 +371,8 @@ const { course, isLoading, error } = useFirstCourse(activeToken);
                     icon: "book",
                     iconColor: "#002366",
                     iconBg: "bg-blue-100",
-                    levelId: getCourseLevel(course.fullname)
+                    levelId: getCourseLevel(course.fullname),
+                    progress: getCourseProgress(course)
                   }}
                   onPress={() => handleCoursePress(course.id)}
                 />
@@ -398,7 +415,10 @@ function HomeModuleCard({ module, onPress }: {
   module: ModuleData;
   onPress: () => void;
 }) {
-  const progress = Math.round((module.completedLessons / module.lessonsCount) * 100);
+  // Safely calculate progress with fallbacks for undefined values
+  const completedLessons = module.completedLessons ?? 0;
+  const lessonsCount = module.lessonsCount ?? 0;
+  const progress = lessonsCount > 0 ? Math.round((completedLessons / lessonsCount) * 100) : 0;
   const isCompleted = progress === 100;
 
   return (
@@ -432,7 +452,7 @@ function HomeModuleCard({ module, onPress }: {
       {!module.isLocked && (
         <View>
           <View className="flex-row justify-between items-center mb-1">
-            <Text className="text-gray-400 text-[9px] font-medium">{module.completedLessons}/{module.lessonsCount} leçons</Text>
+            <Text className="text-gray-400 text-[9px] font-medium">{completedLessons}/{lessonsCount} leçons</Text>
             <Text className="text-gray-600 text-[9px] font-bold">{progress}%</Text>
           </View>
           <View className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -446,4 +466,6 @@ function HomeModuleCard({ module, onPress }: {
     </Pressable>
   );
 }
+
+ 
 

@@ -1,9 +1,9 @@
 import { Feather } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Grade } from "../../types";
 
 const LANGUAGE_STORAGE_KEY = '@ipelan_language';
@@ -63,7 +63,7 @@ export default function GradeSelectionScreen() {
   };
 
   const handleBack = () => {
-    router.back();
+    router.push("/(auth)/language-selection" as any);
   };
 
   return (

@@ -103,48 +103,30 @@ export default function QuizScreen() {
     );
   }
 
-  if (isComplete) {
-    const percentage = Math.round((score.correct / score.total) * 100);
-    const xpEarned = score.correct * 10;
+  const navigateToResult = () => {
+    const earnedXp = score.correct * 10;
+    const returnRoute = `/(stacks)/(cours)/${courseId}`;
     
-    return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F6]">
-        <View className="flex-1 items-center justify-center px-6">
-          <View className="w-24 h-24 rounded-full bg-green-100 items-center justify-center mb-6">
-            <Feather name="check-circle" size={48} color="#10B981" />
-          </View>
-          
-          <Text className="text-2xl font-bold text-gray-900 mb-2">Quiz Terminé!</Text>
-          
-          <Text className="text-5xl font-bold text-[#002366] mb-2">
-            {score.correct}/{score.total}
-          </Text>
-          <Text className="text-gray-500 mb-6">Bonnes réponses</Text>
-          
-          <View className="bg-white rounded-2xl p-6 w-full border border-gray-100 mb-6">
-            <View className="flex-row justify-between mb-2">
-              <Text className="text-gray-500">Score</Text>
-              <Text className="text-gray-900 font-medium">{percentage}%</Text>
-            </View>
-            <View className="flex-row justify-between mb-2">
-              <Text className="text-gray-500">XP gagné</Text>
-              <Text className="text-amber-600 font-medium">+{xpEarned} XP</Text>
-            </View>
-            <View className="flex-row justify-between">
-              <Text className="text-gray-500">Temps</Text>
-              <Text className="text-gray-900 font-medium">{score.timeSpent}s</Text>
-            </View>
-          </View>
-          
-          <Pressable
-            onPress={() => router.back()}
-            className="bg-[#002366] rounded-2xl py-4 w-full items-center"
-          >
-            <Text className="text-white font-bold text-lg">Retour au cours</Text>
-          </Pressable>
-        </View>
-      </SafeAreaView>
-    );
+    router.push({
+      pathname: "/(stacks)/(cours)/result",
+      params: {
+        activity: "Quiz",
+        score: score.correct.toString(),
+        total: score.total.toString(),
+        xp: earnedXp.toString(),
+        courseId: courseId.toString(),
+        moduleId: moduleId.toString(),
+        instanceId: instanceId.toString(),
+        moduleTitle: params.moduleTitle || 'Quiz',
+        returnRoute: encodeURIComponent(returnRoute),
+      }
+    } as any);
+  };
+
+  if (isComplete) {
+    // Navigate automatically to results screen
+    navigateToResult();
+    return null; // Return null while navigating
   }
 
   if (!currentQuestion) {

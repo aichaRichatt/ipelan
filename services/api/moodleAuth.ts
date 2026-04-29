@@ -1,26 +1,27 @@
-import { moodleFetch, Config } from "./moodleClient";
+import { moodleFetch } from "./moodleClient";
 
 const IS_DEV = process.env.NODE_ENV === "development";
 
+const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN;
+
 export async function login(username: string, password: string) {
   if (IS_DEV) console.log("[moodleAuth.login] Starting login for:", username);
-  
+
   let loginUsername = username;
-  
+
   if (username.includes("@")) {
     if (IS_DEV) console.log("[moodleAuth.login] Email detected, finding username...");
-    
+
     try {
-      const adminToken = process.env.MOODLE_ADMIN_TOKEN;
-      if (adminToken) {
+      if (ADMIN_TOKEN) {
         const usersByEmail = await moodleFetch("/webservice/rest/server.php", {
-          wstoken: adminToken,
+          wstoken: ADMIN_TOKEN,
           wsfunction: "core_user_get_users_by_field",
           field: "email",
           values: [username],
           moodlewsrestformat: "json",
         }, "POST");
-        
+
         const userArray = usersByEmail?.users || usersByEmail;
         if (userArray && userArray.length > 0 && userArray[0]?.username) {
           loginUsername = userArray[0].username;
@@ -34,17 +35,17 @@ export async function login(username: string, password: string) {
       throw new Error("Aucun compte trouvé avec cette adresse email");
     }
   }
-  
+
   const result = await moodleFetch("/login/token.php", {
     username: loginUsername,
     password,
-    service: "ipelan_full", 
+    service: "ipelan_full",
   });
-  
+
   if (!result?.token) {
     throw new Error("Identifiants incorrects");
   }
-  
+
   if (IS_DEV) console.log("[moodleAuth.login] Login successful");
   return result;
 }
@@ -69,8 +70,13 @@ export async function getMoodleProfile(token: string, fieldValue: string | numbe
 
 export async function signUp(user: any) {
   const { username, password, email, firstname, lastname, city } = user;
+
+  if (!ADMIN_TOKEN) {
+    throw new Error("Configuration serveur invalide: token administrateur manquant");
+  }
+
   return moodleFetch("/webservice/rest/server.php", {
-    wstoken: process.env.MOODLE_ADMIN_TOKEN,
+    wstoken: ADMIN_TOKEN,
     wsfunction: "auth_email_signup_user",
     username,
     password,
@@ -81,26 +87,24 @@ export async function signUp(user: any) {
   }, "POST");
 }
 
- 
 export async function updateUserProfile(id: number, firstname: string, lastname: string, email?: string, city?: string) {
-   const userUpdate: any = { id: Number(id) };
-   
-   if (firstname) userUpdate.firstname = firstname;
-   if (lastname) userUpdate.lastname = lastname;
-   if (email) userUpdate.email = email;
-   if (city) userUpdate.city = city;
-   
-   return moodleFetch("/webservice/rest/server.php", {
-     wstoken: process.env.MOODLE_ADMIN_TOKEN,
-     wsfunction: "core_user_update_users",
-     users: [userUpdate],
-     moodlewsrestformat: "json"
-   }, "POST");
- }
+  const userUpdate: any = { id: Number(id) };
+
+  if (firstname) userUpdate.firstname = firstname;
+  if (lastname) userUpdate.lastname = lastname;
+  if (email) userUpdate.email = email;
+  if (city) userUpdate.city = city;
+
+  return moodleFetch("/webservice/rest/server.php", {
+    wstoken: ADMIN_TOKEN,
+    wsfunction: "core_user_update_users",
+    users: [userUpdate],
+    moodlewsrestformat: "json"
+  }, "POST");
+}
 
 export async function agreeToSitePolicy(token: string, userId?: number) {
-  const adminToken = process.env.MOODLE_ADMIN_TOKEN;
-  
+
   try {
     return await moodleFetch("/webservice/rest/server.php", {
       wstoken: token,
@@ -108,9 +112,9 @@ export async function agreeToSitePolicy(token: string, userId?: number) {
       moodlewsrestformat: "json"
     }, "POST");
   } catch (e: any) {
-    if (userId && adminToken) {
+    if (userId && ADMIN_TOKEN) {
       return moodleFetch("/webservice/rest/server.php", {
-        wstoken: adminToken,
+        wstoken: ADMIN_TOKEN,
         wsfunction: "core_user_agree_site_policy",
         userid: userId,
         moodlewsrestformat: "json"
@@ -121,14 +125,25 @@ export async function agreeToSitePolicy(token: string, userId?: number) {
 }
 
 export async function enrolUserInCourse(userId: number, courseId: number = 81) {
-  return moodleFetch("/webservice/rest/server.php", {
-    wstoken: process.env.MOODLE_ADMIN_TOKEN,
+  const IS_DEV = process.env.NODE_ENV === "development";
+
+  if (IS_DEV) {
+    console.log(`[enrolUserInCourse] Enrolling user ${userId} in course ${courseId}`);
+  }
+
+  if (!ADMIN_TOKEN) {
+    throw new Error("Configuration serveur invalide: token administrateur manquant");
+  }
+
+  // Format for Moodle REST API - enrolments array with indexed keys
+  const params: any = {
+    wstoken: ADMIN_TOKEN,
     wsfunction: "enrol_manual_enrol_users",
-    enrolments: [{
-      roleid: 5,
-      userid: userId,
-      courseid: courseId
-    }],
-    moodlewsrestformat: "json"
-  }, "POST");
+    moodlewsrestformat: "json",
+    'enrolments[0][roleid]': 5,  // 5 = Student role
+    'enrolments[0][userid]': userId,
+    'enrolments[0][courseid]': courseId,
+  };
+
+  return moodleFetch("/webservice/rest/server.php", params, "POST");
 }

@@ -1,14 +1,16 @@
 import { ActivityCard } from "@/components/ActivityCard";
 import { ActivityTabs } from "@/components/ActivityTabs";
 import { EmptyState } from "@/components/EmptyState";
+import { BuyHeartsModal } from "@/components/BuyHeartsModal";
 import { ActivityWithProgress, FilterTab, PaginationState } from "@/types/activity";
-import { AntDesign, Feather } from "@expo/vector-icons";
+import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useSelector } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import { useCourseContent } from "../../../hooks/useCourseContent";
+import { useUserStats } from "../../../hooks/useUserStats";
 import { isEpubFile } from "../../../services/contentLoader";
 import { RootState } from "../../../services/redux/store";
 import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
@@ -34,12 +36,17 @@ interface Lesson {
   audioUrl?: string;
   moduleName?: string;
   modname?: string;
+  instanceId?: number;
 }
 
 export default function ModuleDetailScreen() {
   const router = useRouter();
   const { courseId: id, title } = useLocalSearchParams<{ courseId: string; title?: string }>();
-  const token = useSelector((state: RootState) => state.auth.token);
+  const dispatch = useDispatch();
+  const { stats } = useUserStats();
+  const { user: reduxUser, token } = useSelector((state: RootState) => state.auth);
+  const userId = reduxUser?.id;
+  const activeToken = token || "";
   const parsedCourseId = parseInt(id || "0", 10);
 
   if (IS_DEV) {
@@ -65,12 +72,18 @@ export default function ModuleDetailScreen() {
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
   const [progressData, setProgressData] = useState<Map<number, ActivityWithProgress['progress']>>(new Map());
   const [progressError, setProgressError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filteredSections, setFilteredSections] = useState<any[]>([]);
   const [pagination, setPagination] = useState<PaginationState>({
     page: 0,
     totalPages: 0,
     itemsPerPage: ITEMS_PER_PAGE,
     hasMore: false,
   });
+
+  // Modal de rachat de vies
+  const [isBuyModalVisible, setIsBuyModalVisible] = useState(false);
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
 
   useEffect(() => {
     const loadProgress = async () => {
@@ -118,7 +131,7 @@ export default function ModuleDetailScreen() {
         const isConnected = await checkInternetConnection();
         if (isConnected) {
           console.log('[ModuleDetail] Online - syncing with Moodle in background...');
-          syncCourseProgress(token, courseId, totalActivities).then(syncResult => {
+          syncCourseProgress(token, courseId, totalActivities, userId).then(syncResult => {
             if (syncResult.success) {
               console.log('[ModuleDetail] Sync completed, reloading scores...');
               getAllScoresForCourse(courseId).then(updatedScores => {
@@ -152,15 +165,47 @@ export default function ModuleDetailScreen() {
     loadProgress();
   }, [courseId, token, sections]);
 
+   useEffect(() => {
+    if (!sections || sections.length === 0) {
+      setFilteredSections([]);
+      return;
+    }
+
+    if (!searchQuery.trim()) {
+      setFilteredSections(sections);
+      return;
+    }
+
+    const query = searchQuery.toLowerCase().trim();
+    const filtered = sections.map(section => {
+       const filteredModules = section.modules?.filter((mod: any) => {
+        const nameMatch = mod.name?.toLowerCase().includes(query);
+        const typeMatch = mod.modname?.toLowerCase().includes(query);
+        return nameMatch || typeMatch;
+      }) || [];
+
+      // Only include section if it has matching modules
+      if (filteredModules.length > 0) {
+        return { ...section, modules: filteredModules };
+      }
+      return null;
+    }).filter(Boolean);
+
+    setFilteredSections(filtered);
+  }, [sections, searchQuery]);
+
   const activities = useMemo(() => {
     const result: ActivityWithProgress[] = [];
     let order = 0;
 
-    if (!sections || sections.length === 0) {
+    // Use filteredSections when searching, otherwise use all sections
+    const sectionsToUse = searchQuery.trim() ? filteredSections : sections;
+
+    if (!sectionsToUse || sectionsToUse.length === 0) {
       return result;
     }
 
-    for (const section of sections) {
+    for (const section of sectionsToUse) {
       const sectionModules = section.modules || [];
       if (IS_DEV && sectionModules.length > 0) {
         console.log('[ModuleDetail] Section', section.id, 'named:', section.title, '- has', sectionModules.length, 'modules');
@@ -207,7 +252,7 @@ export default function ModuleDetailScreen() {
       return result.filter(a => a.type === activeTab);
     }
     return result;
-  }, [sections, activeTab, progressData]);
+  }, [sections, filteredSections, searchQuery, activeTab, progressData]);
 
   const tabCounts = useMemo(() => {
     const counts: Record<FilterTab, number> = {
@@ -244,8 +289,9 @@ export default function ModuleDetailScreen() {
   useEffect(() => {
     setPagination(prev => ({
       ...prev,
+      page: 0, // Reset to first page when activities change (search/filter)
       totalPages,
-      hasMore: (prev.page + 1) * prev.itemsPerPage < activities.length,
+      hasMore: (0 + 1) * prev.itemsPerPage < activities.length,
     }));
   }, [activities.length]);
 
@@ -258,39 +304,76 @@ export default function ModuleDetailScreen() {
     }
   };
 
-const handleActivityPress = (activity: ActivityWithProgress) => {
-    const baseParams = {
-      moduleId: String(activity.id),
-      moduleTitle: activity.title,
-      courseId: String(courseId),
-      instanceId: String(activity.instanceId || activity.id),
-      cmid: String(activity.id),
-    };
-
-    console.log('[handleActivityPress] Activity:', activity.type, 'params:', baseParams);
-
-    switch (activity.type) {
-      case 'quiz':
-        //  const qp = `?moduleId=${activity.id}&courseId=${courseId}&cmid=${activity.id}&instanceId=${activity.instanceId || activity.id}&moduleTitle=${encodeURIComponent(activity.title)}`;
-        // router.push(`/quiz${qp}` as any);
-        // Use WebView for quizzes - more reliable than REST API
-        router.push(`/(stacks)/(cours)/quiz-webview?quizId=${activity.id}&courseId=${courseId}&moduleTitle=${encodeURIComponent(activity.title)}` as any);
-        break;
-      case 'dictation':
-        router.push({ pathname: '/(stacks)/(cours)/dictation', params: baseParams } as any);
-        break;
-      case 'listening':
-        router.push({ pathname: '/(stacks)/(cours)/listening', params: baseParams } as any);
-        break;
-      case 'association':
-        router.push({ pathname: '/(stacks)/(cours)/association', params: baseParams } as any);
-        break;
-      case 'wordOrder':
-        router.push({ pathname: '/(stacks)/(cours)/game', params: baseParams } as any);
-        break;
-      default:
-        console.warn('[handleActivityPress] Unknown activity type:', activity.type);
+  const checkLivesAndProceed = async (onProceed: () => void) => {
+    if (stats.lives <= 0) {
+      setPendingAction(() => onProceed);
+      setIsBuyModalVisible(true);
+      return false;
     }
+    onProceed();
+    return true;
+  };
+
+  const handleBuyLife = async () => {
+    try {
+      const { buyLife, triggerGamificationSync } = await import('@/services/gamification/gamificationService');
+      const result = await buyLife(reduxUser?.id || 0);
+      
+      if (result.success) {
+        const { updateUser } = await import('@/services/redux/slices/authSlice');
+        dispatch(updateUser({
+          lives: result.newLives,
+          coins: result.newCoins
+        }));
+        await triggerGamificationSync(reduxUser?.id || 0, activeToken);
+        
+        const { Alert } = await import('react-native');
+        Alert.alert("Succès", "Vous avez récupéré un cœur ! Bonne chance !");
+        
+        setIsBuyModalVisible(false);
+        if (pendingAction) {
+          pendingAction();
+          setPendingAction(null);
+        }
+      } else {
+        const { Alert } = await import('react-native');
+        Alert.alert("Erreur", result.message);
+      }
+    } catch (error) {
+      console.error("[handleBuyLife] Error:", error);
+    }
+  };
+
+  const handleActivityPress = async (activity: ActivityWithProgress) => {
+    await checkLivesAndProceed(() => {
+      const baseParams = {
+        moduleId: String(activity.id),
+        moduleTitle: activity.title,
+        courseId: String(courseId),
+        instanceId: String(activity.instanceId || activity.id),
+        cmid: String(activity.id),
+      };
+
+      switch (activity.type) {
+        case 'quiz':
+          router.push(`/(stacks)/(cours)/quiz-webview?quizId=${activity.id}&courseId=${courseId}&moduleTitle=${encodeURIComponent(activity.title)}` as any);
+          break;
+        case 'dictation':
+          router.push({ pathname: '/(stacks)/(cours)/dictation', params: baseParams } as any);
+          break;
+        case 'listening':
+          router.push({ pathname: '/(stacks)/(cours)/listening', params: baseParams } as any);
+          break;
+        case 'association':
+          router.push({ pathname: '/(stacks)/(cours)/association', params: baseParams } as any);
+          break;
+        case 'wordOrder':
+          router.push({ pathname: '/(stacks)/(cours)/game', params: baseParams } as any);
+          break;
+        default:
+          console.warn('[handleActivityPress] Unknown activity type:', activity.type);
+      }
+    });
   };
 
   if (isLoading) {
@@ -395,6 +478,7 @@ const handleActivityPress = (activity: ActivityWithProgress) => {
         epubUrl,
         pdfUrl,
         audioUrl,
+        instanceId: mod.instance,
       });
     }
   }
@@ -409,7 +493,7 @@ const handleActivityPress = (activity: ActivityWithProgress) => {
     return { icon: iconName, color };
   };
 
-    const handleLessonPress = (lesson: Lesson) => {
+  const handleLessonPress = async (lesson: Lesson) => {
     if (lesson.isLocked) return;
 
     const params = `?moduleId=${lesson.id}&moduleTitle=${encodeURIComponent(lesson.title)}&courseId=${courseId}&cmid=${lesson.id}&instanceId=${lesson.id}`;
@@ -420,48 +504,50 @@ const handleActivityPress = (activity: ActivityWithProgress) => {
     }
 
     if (lesson.pdfUrl) {
-      router.push(`/(stacks)/(cours)/pdf/pdf-viewer?pdfUrl=${encodeURIComponent(lesson.pdfUrl)}&title=${encodeURIComponent(lesson.title)}` );
+      router.push(`/(stacks)/(cours)/pdf/pdf-viewer?pdfUrl=${encodeURIComponent(lesson.pdfUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
       return;
     }
 
     if (lesson.audioUrl) {
-      router.push(`/(stacks)/(cours)/audio-player?audioUrl=${encodeURIComponent(lesson.audioUrl)}&moduleId=${lesson.id}&title=${encodeURIComponent(lesson.title)}&courseId=${courseId}` );
+      router.push(`/(stacks)/(cours)/audio-player?audioUrl=${encodeURIComponent(lesson.audioUrl)}&moduleId=${lesson.id}&title=${encodeURIComponent(lesson.title)}&courseId=${courseId}` as any);
       return;
     }
 
-    switch (lesson.type) {
-      case 'quiz':
-        // Use WebView for quizzes - more reliable than REST API
-        router.push(`/(stacks)/(cours)/quiz-webview?quizId=${lesson.id}&courseId=${courseId}&moduleTitle=${encodeURIComponent(lesson.title)}` as any);
-        break;
-      case 'dictation':
-        router.push(`/(stacks)/(cours)/dictation${params}` as any);
-        break;
-      case 'listening':
-        router.push(`/(stacks)/(cours)/listening${params}` as any);
-        break;
-      case 'association':
-        router.push(`/(stacks)/(cours)/association${params}` as any);
-        break;
-      case 'wordOrder':
-        router.push(`/(stacks)/(cours)/game${params}` as any);
-        break;
-      case 'resource':
-      case 'folder':
-      case 'lesson':
-      case 'html':
-        if (lesson.epubUrl) {
-          router.push(`/(stacks)/(cours)/epub/epub-reader?epubUrl=${encodeURIComponent(lesson.epubUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
-        } else if (lesson.pdfUrl) {
-          router.push(`/(stacks)/(cours)/pdf/pdf-viewer?pdfUrl=${encodeURIComponent(lesson.pdfUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
-        } else {
+    // Pour les activités, on vérifie les vies
+    await checkLivesAndProceed(() => {
+      switch (lesson.type) {
+        case 'quiz':
+          router.push(`/(stacks)/(cours)/quiz-webview?quizId=${lesson.id}&courseId=${courseId}&moduleTitle=${encodeURIComponent(lesson.title)}` as any);
+          break;
+        case 'dictation':
+          router.push(`/(stacks)/(cours)/dictation${params}` as any);
+          break;
+        case 'listening':
+          router.push(`/(stacks)/(cours)/listening${params}` as any);
+          break;
+        case 'association':
+          router.push(`/(stacks)/(cours)/association${params}` as any);
+          break;
+        case 'wordOrder':
+          router.push(`/(stacks)/(cours)/game${params}` as any);
+          break;
+        case 'resource':
+        case 'folder':
+        case 'lesson':
+        case 'html':
+          if (lesson.epubUrl) {
+            router.push(`/(stacks)/(cours)/epub/epub-reader?epubUrl=${encodeURIComponent(lesson.epubUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
+          } else if (lesson.pdfUrl) {
+            router.push(`/(stacks)/(cours)/pdf/pdf-viewer?pdfUrl=${encodeURIComponent(lesson.pdfUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
+          } else {
+            router.push(`/(stacks)/(cours)/lesson/${lesson.id}?courseId=${courseId}` as any);
+          }
+          break;
+        default:
           router.push(`/(stacks)/(cours)/lesson/${lesson.id}?courseId=${courseId}` as any);
-        }
-        break;
-      default:
-        router.push(`/(stacks)/(cours)/lesson/${lesson.id}?courseId=${courseId}` as any);
-        break;
-    }
+          break;
+      }
+    });
   };
 
   const handleViewTimeline = () => {
@@ -477,6 +563,25 @@ const handleActivityPress = (activity: ActivityWithProgress) => {
         <Text className="text-lg font-bold text-gray-900 flex-1" numberOfLines={1}>
           {courseTitle}
         </Text>
+      </View>
+
+      {/* Search Bar */}
+      <View className="px-5 pb-4 bg-[#FAF9F6]">
+        <View className="flex-row items-center bg-white rounded-xl px-4 py-3 shadow-sm">
+          <Ionicons name="search" size={20} color="#9CA3AF" />
+          <TextInput
+            className="flex-1 ml-3 text-gray-700"
+            placeholder="Rechercher une leçon ou activité..."
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholderTextColor="#9CA3AF"
+          />
+          {searchQuery.length > 0 && (
+            <Pressable onPress={() => setSearchQuery('')}>
+              <Ionicons name="close-circle" size={20} color="#9CA3AF" />
+            </Pressable>
+          )}
+        </View>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
@@ -574,7 +679,8 @@ const handleActivityPress = (activity: ActivityWithProgress) => {
           )}
         </View>
 
-        {sections.map((section) => (
+        {/* Use filtered sections when searching */}
+        {(searchQuery.trim() ? filteredSections : sections).map((section) => (
           <View key={section.id} className="px-5 mb-4">
             <View className="flex-row items-center mb-3">
               <Text className="text-lg font-bold text-gray-900">{section.title}</Text>
@@ -620,6 +726,7 @@ const handleActivityPress = (activity: ActivityWithProgress) => {
                         epubUrl: content?.epubUrl,
                         pdfUrl: content?.pdfUrl,
                         audioUrl: content?.audioUrl,
+                        instanceId: mod.instance,
                       };
                       handleLessonPress(lesson);
                     }
@@ -708,6 +815,15 @@ const handleActivityPress = (activity: ActivityWithProgress) => {
           </Pressable>
         </View>
       </ScrollView>
+
+      <BuyHeartsModal
+        isVisible={isBuyModalVisible}
+        onClose={() => setIsBuyModalVisible(false)}
+        onBuy={handleBuyLife}
+        lives={stats.lives}
+        coins={stats.coins}
+        nextHeartTime={stats.nextHeartTime}
+      />
     </SafeAreaView>
   );
 }

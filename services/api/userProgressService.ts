@@ -13,29 +13,6 @@ async function getDB() {
 export async function initStreakTable(): Promise<void> {
   const db = await getDB();
   await db.execAsync(`
-    CREATE TABLE IF NOT EXISTS streaks (
-      user_id      INTEGER PRIMARY KEY,
-      last_date    TEXT,
-      current      INTEGER DEFAULT 0,
-      best         INTEGER DEFAULT 0
-    );
-  `);
-
-  await db.execAsync(`
-    CREATE TABLE IF NOT EXISTS user_progress (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      xp INTEGER DEFAULT 0,
-      coins INTEGER DEFAULT 0,
-      streak_current INTEGER DEFAULT 0,
-      streak_best INTEGER DEFAULT 0,
-      last_activity TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-
-  await db.execAsync(`
     CREATE TABLE IF NOT EXISTS pending_sync (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       activity_type TEXT NOT NULL,
@@ -55,24 +32,32 @@ export async function updateStreak(userId: number): Promise<number> {
 
   try {
     const db = await getDB();
-    const row = await db.getFirstAsync('SELECT * FROM user_progress WHERE user_id = ?', [userId]) as {
-      user_id: number;
-      last_date: string;
+    const row = await db.getFirstAsync('SELECT streak as streak_current, streak as streak_best, last_activity FROM users WHERE id = ?', [userId]) as {
       streak_current: number;
       streak_best: number;
+      last_activity: string;
     } | null;
 
-    let current = 1;
-    let best = row?.streak_best ?? 1;
+    let current = row?.streak_current ?? 1;
+    let best = row?.streak_best ?? current;
 
-    if (row) {
-      const last = new Date(row.last_date);
-      const diffDays = Math.floor((Date.now() - last.getTime()) / 86_400_000);
+    if (row && row.last_activity) {
+      // Comparaison basée sur les jours calendaires
+      const lastDate = new Date(row.last_activity);
+      const todayDate = new Date(today);
+      
+       lastDate.setHours(0, 0, 0, 0);
+      todayDate.setHours(0, 0, 0, 0);
+      
+      const diffTime = todayDate.getTime() - lastDate.getTime();
+      const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
       if (diffDays === 1) {
-        current = row.streak_current + 1;
+        current = (row.streak_current || 0) + 1;
       } else if (diffDays === 0) {
-        current = row.streak_current;
+        current = row.streak_current || 1;
+      } else if (diffDays > 1) {
+        current = 1; // Série brisée
       }
 
       best = Math.max(best, current);
@@ -80,14 +65,8 @@ export async function updateStreak(userId: number): Promise<number> {
 
     const db2 = await getDB();
     await db2.runAsync(
-      `INSERT INTO user_progress (user_id, streak_current, streak_best, last_activity, updated_at)
-       VALUES (?, ?, ?, ?, datetime('now'))
-       ON CONFLICT(user_id) DO UPDATE SET
-         streak_current = excluded.streak_current,
-         streak_best = excluded.streak_best,
-         last_activity = excluded.last_activity,
-         updated_at = datetime('now')`,
-      [userId, current, best, today]
+      `UPDATE users SET streak = ?, last_activity = ? WHERE id = ?`,
+      [current, today, userId]
     );
 
     return current;
@@ -97,20 +76,69 @@ export async function updateStreak(userId: number): Promise<number> {
   }
 }
 
+// Set XP to a specific value (for sync from Moodle - replaces local value)
+export async function setXP(userId: number, xp: number): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.runAsync(
+      `UPDATE users SET ipelan_xp = ? WHERE id = ?`,
+      [Math.max(0, xp), userId]
+    );
+  } catch (err) {
+    console.warn('[userProgressService] setXP error:', err);
+  }
+}
+
+// Set streak to a specific value (for sync from Moodle - replaces local value)
+export async function setStreak(userId: number, streak: number, best?: number): Promise<void> {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const db = await getDB();
+    await db.runAsync(
+      `UPDATE users SET streak = ?, last_activity = ? WHERE id = ?`,
+      [Math.max(1, streak), today, userId]
+    );
+  } catch (err) {
+    console.warn('[userProgressService] setStreak error:', err);
+  }
+}
+
+// Set coins to a specific value (for sync from Moodle)
+export async function setCoins(userId: number, coins: number): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.runAsync(
+      `UPDATE users SET coins = ? WHERE id = ?`,
+      [Math.max(0, coins), userId]
+    );
+  } catch (err) {
+    console.warn('[userProgressService] setCoins error:', err);
+  }
+}
+
+// Set lives to a specific value (for sync from Moodle)
+export async function setLives(userId: number, lives: number): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.runAsync(
+      `UPDATE users SET lives = ? WHERE id = ?`,
+      [Math.max(0, Math.min(6, lives)), userId]
+    );
+  } catch (err) {
+    console.warn('[userProgressService] setLives error:', err);
+  }
+}
+
 export async function addXP(userId: number, xpToAdd: number): Promise<number> {
   try {
     const db = await getDB();
-    const row = await db.getFirstAsync('SELECT xp FROM user_progress WHERE user_id = ?', [userId]) as { xp: number } | null;
+    const row = await db.getFirstAsync('SELECT ipelan_xp as xp FROM users WHERE id = ?', [userId]) as { xp: number } | null;
 
     const currentXP = (row?.xp ?? 0) + xpToAdd;
 
     await db.runAsync(
-      `INSERT INTO user_progress (user_id, xp, updated_at)
-       VALUES (?, ?, datetime('now'))
-       ON CONFLICT(user_id) DO UPDATE SET
-         xp = excluded.xp,
-         updated_at = datetime('now')`,
-      [userId, currentXP]
+      `UPDATE users SET ipelan_xp = ? WHERE id = ?`,
+      [currentXP, userId]
     );
 
     return currentXP;
@@ -123,17 +151,13 @@ export async function addXP(userId: number, xpToAdd: number): Promise<number> {
 export async function addCoins(userId: number, coinsToAdd: number): Promise<number> {
   try {
     const db = await getDB();
-    const row = await db.getFirstAsync('SELECT coins FROM user_progress WHERE user_id = ?', [userId]) as { coins: number } | null;
+    const row = await db.getFirstAsync('SELECT coins FROM users WHERE id = ?', [userId]) as { coins: number } | null;
 
     const currentCoins = (row?.coins ?? 0) + coinsToAdd;
 
     await db.runAsync(
-      `INSERT INTO user_progress (user_id, coins, updated_at)
-       VALUES (?, ?, datetime('now'))
-       ON CONFLICT(user_id) DO UPDATE SET
-         coins = excluded.coins,
-         updated_at = datetime('now')`,
-      [userId, currentCoins]
+      `UPDATE users SET coins = ? WHERE id = ?`,
+      [currentCoins, userId]
     );
 
     return currentCoins;
@@ -151,7 +175,7 @@ export async function getUserProgress(userId: number): Promise<{
 } | null> {
   try {
     const db = await getDB();
-    const row = await db.getFirstAsync('SELECT xp, coins, streak_current, streak_best FROM user_progress WHERE user_id = ?', [userId]) as {
+    const row = await db.getFirstAsync('SELECT ipelan_xp as xp, coins, streak as streak_current, streak as streak_best FROM users WHERE id = ?', [userId]) as {
       xp: number;
       coins: number;
       streak_current: number;
@@ -165,117 +189,9 @@ export async function getUserProgress(userId: number): Promise<{
   }
 }
 
-export async function syncUserProgressToMoodle(
-  userId: number,
-  xp: number,
-  streak: number,
-  token: string
-): Promise<boolean> {
-  try {
-    const today = new Date().toISOString().split('T')[0];
+// syncUserProgressToMoodle and syncCoinsToMoodle are removed, use syncQueue.syncGamification instead.
 
-    const result = await moodleFetch('/webservice/rest/server.php', {
-      wstoken: token,
-      wsfunction: 'core_user_update_users',
-      moodlewsrestformat: 'json',
-      'users[0][id]': userId,
-      'users[0][customfields][0][type]': 'ipelan_xp',
-      'users[0][customfields][0][value]': String(xp),
-      'users[0][customfields][1][type]': 'ipelan_streak',
-      'users[0][customfields][1][value]': String(streak),
-      'users[0][customfields][2][type]': 'ipelan_last_activity',
-      'users[0][customfields][2][value]': today,
-    });
-
-    if (result?.exception) {
-      console.warn('[userProgressService] sync XP error:', result.message);
-      return false;
-    }
-
-    return true;
-  } catch (err: any) {
-    console.warn('[userProgressService] syncUserProgressToMoodle exception:', err.message);
-    return false;
-  }
-}
-
-export async function syncCoinsToMoodle(
-  userId: number,
-  coins: number,
-  token: string
-): Promise<boolean> {
-  try {
-    const result = await moodleFetch('/webservice/rest/server.php', {
-      wstoken: token,
-      wsfunction: 'core_user_update_users',
-      moodlewsrestformat: 'json',
-      'users[0][id]': userId,
-      'users[0][customfields][0][type]': 'ipelan_coins',
-      'users[0][customfields][0][value]': String(coins),
-    });
-
-    if (result?.exception) {
-      console.warn('[userProgressService] sync coins error:', result.message);
-      return false;
-    }
-
-    return true;
-  } catch (err: any) {
-    console.warn('[userProgressService] syncCoinsToMoodle exception:', err.message);
-    return false;
-  }
-}
-
-export async function saveActivityResult(params: {
-  userId: number;
-  moduleId: number;
-  courseId: number;
-  type: string;
-  score: number;
-  total: number;
-  xpEarned: number;
-  coinsEarned: number;
-  token: string;
-}): Promise<void> {
-  const { userId, xpEarned, coinsEarned, token, moduleId, courseId, type, score, total } = params;
-
-  try {
-    const db = await getDB();
-    await db.runAsync(
-      `INSERT OR REPLACE INTO activity_results
-       (user_id, module_id, course_id, type, score, total, xp_earned, coins_earned, completed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-      [userId, moduleId, courseId, type, score, total, xpEarned, coinsEarned]
-    );
-
-    const currentStreak = await updateStreak(userId);
-    const totalXP = await addXP(userId, xpEarned);
-    const totalCoins = await addCoins(userId, coinsEarned);
-
-    console.log('[userProgressService] Activity saved:', {
-      xp: totalXP,
-      coins: totalCoins,
-      streak: currentStreak,
-    });
-
-    await syncUserProgressToMoodle(userId, totalXP, currentStreak, token);
-
-    if (coinsEarned > 0) {
-      await syncCoinsToMoodle(userId, totalCoins, token);
-    }
-
-    await submitGradeToMoodle({
-      userId,
-      courseId,
-      moduleId,
-      score,
-      total,
-      token,
-    });
-  } catch (err) {
-    console.warn('[userProgressService] saveActivityResult error:', err);
-  }
-}
+// saveActivityResult is deprecated, use saveActivityScore in services/storage/activity-progress.ts instead.
 
 export async function submitGradeToMoodle(params: {
   userId: number;

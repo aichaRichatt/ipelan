@@ -1,8 +1,6 @@
 import { categorizeMoodleError, logActivityFetch } from "../utils/moodleErrorHandler";
 import { moodleFetch } from "./moodleClient";
 
-const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN;
-
 export interface Category {
   id: number;
   name: string;
@@ -52,39 +50,13 @@ export async function getCategories(token: string, parentId?: number): Promise<C
   };
 
   try {
-    // Try with user token first
-    let categories = await tryFetch(token, false);
-
-    // If empty and admin token available, try with admin
-    if (categories.length === 0 && ADMIN_TOKEN && ADMIN_TOKEN !== token) {
-      if (IS_DEV) console.log('[courseService] User token returned 0 categories, trying admin token...');
-      try {
-        categories = await tryFetch(ADMIN_TOKEN, true);
-        if (IS_DEV) {
-          console.log(`[courseService] getCategories (admin): found ${categories.length} categories`);
-        }
-      } catch (adminError) {
-        console.warn("[courseService] getCategories admin fallback failed:", adminError);
-      }
-    }
+    const categories = await tryFetch(token, false);
 
     if (IS_DEV) {
       console.log(`[courseService] getCategories: found ${categories.length} categories` + (parentId ? ` for parent ${parentId}` : ''));
     }
     return categories;
   } catch (error) {
-    // Fallback to admin token if available
-    if (ADMIN_TOKEN && ADMIN_TOKEN !== token) {
-      try {
-        const categories = await tryFetch(ADMIN_TOKEN);
-        if (IS_DEV) {
-          console.log(`[courseService] getCategories (admin fallback): found ${categories.length} categories`);
-        }
-        return categories;
-      } catch (adminError) {
-        console.warn("[courseService] getCategories admin fallback failed:", adminError);
-      }
-    }
     console.warn("[courseService] getCategories failed:", error);
     return [];
   }
@@ -99,19 +71,7 @@ export async function getEnrolledCoursesByTimeline(token: string, forUserId?: nu
 
   let result = await moodleFetch("/webservice/rest/server.php", params, "POST");
 
-  if (result?.exception?.errorcode === "usernotfullysetup" && ADMIN_TOKEN) {
-    params = {
-      wstoken: ADMIN_TOKEN,
-      wsfunction: "core_course_get_enrolled_courses_by_timeline_classification",
-      classification: "all"
-    };
-    result = await moodleFetch("/webservice/rest/server.php", params, "POST");
-
-    if (result?.exception && ADMIN_TOKEN) {
-      const fallbackResult = await getUserCourses(ADMIN_TOKEN, forUserId);
-      return { courses: fallbackResult };
-    }
-  }
+  // Removed admin token fallback for usernotfullysetup
 
   console.log("[courseService] API returned:", result ? "data" : "nothing", typeof result);
   return result;
@@ -178,15 +138,9 @@ export async function getCoursesByCategory(token: string, categoryId: number, li
 export async function getCoursesForLanguageAndGrade(token: string, language: string, grade: number): Promise<any[]> {
   const IS_DEV = process.env.NODE_ENV === "development";
 
-  const getToken = () => {
-    if (token && token.length > 10) return token;
-    if (ADMIN_TOKEN) return ADMIN_TOKEN;
-    return token;
-  };
-
   try {
     // Get ALL categories recursively (including subcategories)
-    const categories = await getCategories(getToken() || token);
+    const categories = await getCategories(token);
 
     if (IS_DEV) {
       console.log("[courseService] All categories:", categories.map(c => ({ id: c.id, name: c.name, parent: c.parent })));
@@ -251,7 +205,7 @@ export async function getCoursesForLanguageAndGrade(token: string, language: str
 
       const courses: any[] = [];
       for (const cat of allChildCategories) {
-        const gradeCourses = await getCoursesByCategory(getToken() || token, cat.id);
+        const gradeCourses = await getCoursesByCategory(token, cat.id);
         if (IS_DEV && gradeCourses.length > 0) console.log("[courseService] Courses in", cat.name, ":", gradeCourses.length, gradeCourses);
         courses.push(...gradeCourses);
       }
@@ -263,7 +217,7 @@ export async function getCoursesForLanguageAndGrade(token: string, language: str
 
     const courses: any[] = [];
     for (const gradeCat of gradeCategories) {
-      const gradeCourses = await getCoursesByCategory(getToken() || token, gradeCat.id);
+      const gradeCourses = await getCoursesByCategory(token, gradeCat.id);
       courses.push(...gradeCourses);
     }
 
@@ -332,11 +286,6 @@ export async function getCourseContents(token: string, courseId: number): Promis
 
   try {
     let result = await tryFetch(token);
-
-    if (result?.exception && ADMIN_TOKEN) {
-      if (IS_DEV) console.log("[courseService] getCourseContents user token failed, trying admin...");
-      result = await tryFetch(ADMIN_TOKEN);
-    }
 
     if (result?.exception) {
       if (IS_DEV) console.warn("[courseService] getCourseContents exception:", result.exception);
@@ -467,22 +416,15 @@ export async function getCourseLevel(token: string, courseId: number): Promise<s
 export async function getAllCoursesFromLanguageCategory(token: string, rootCategoryId: number = 18): Promise<any[]> {
   const IS_DEV = process.env.NODE_ENV === "development";
 
-  const getToken = () => {
-    if (token && token.length > 10) return token;
-    if (ADMIN_TOKEN) return ADMIN_TOKEN;
-    return token;
-  };
-
-  const effectiveToken = getToken();
-  if (!effectiveToken) {
-    if (IS_DEV) console.warn("[courseService] No token available");
+  if (!token || token.length < 10) {
+    if (IS_DEV) console.warn("[courseService] No valid user token available");
     return [];
   }
 
   try {
     if (IS_DEV) console.log("[courseService] Fetching all courses from category:", rootCategoryId);
 
-    const categories = await getCategories(effectiveToken);
+    const categories = await getCategories(token);
 
     if (categories.length === 0) {
       if (IS_DEV) console.warn("[courseService] No categories returned");
@@ -514,7 +456,7 @@ export async function getAllCoursesFromLanguageCategory(token: string, rootCateg
     const allCourses: any[] = [];
 
     for (const categoryId of allCategoryIds) {
-      const courses = await getCoursesByCategory(effectiveToken, categoryId);
+      const courses = await getCoursesByCategory(token, categoryId);
       if (courses.length > 0) {
         if (IS_DEV) console.log("[courseService] Found", courses.length, "courses in category", categoryId);
         allCourses.push(...courses);

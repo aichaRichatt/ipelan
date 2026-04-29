@@ -1,5 +1,7 @@
 import { getDBConnection } from './db-service';
 import { ActivityProgress, ActivityType } from '../../types/activity';
+import { addXP, updateStreak } from '../api/userProgressService';
+import { syncQueue } from '../sync/syncQueue';
 
 export interface ActivityScoreData {
   moduleId: number;
@@ -53,7 +55,10 @@ export const saveActivityScore = async (
   type: ActivityType,
   score: number,
   total: number,
-  xpEarned: number = 0
+  xpEarned: number = 0,
+  userId?: number,
+  coinsEarned: number = 0,
+  token?: string
 ): Promise<void> => {
   const maxRetries = 3;
   let lastError: any = null;
@@ -65,9 +70,9 @@ export const saveActivityScore = async (
       const now = new Date().toISOString();
       
       await db.runAsync(
-        `INSERT INTO activity_progress (module_id, course_id, type, best_score, total_score, attempts_count, is_completed, last_attempt, xp_earned, synced_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(module_id, course_id) DO UPDATE SET
+        `INSERT INTO activity_progress (user_id, module_id, course_id, type, best_score, total_score, attempts_count, is_completed, last_attempt, xp_earned, coins_earned, synced_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, module_id, course_id) DO UPDATE SET
            best_score = CASE 
              WHEN excluded.best_score > best_score THEN excluded.best_score 
              ELSE best_score 
@@ -83,8 +88,13 @@ export const saveActivityScore = async (
              WHEN excluded.xp_earned > xp_earned THEN excluded.xp_earned 
              ELSE xp_earned 
            END,
+           coins_earned = CASE 
+             WHEN excluded.coins_earned > coins_earned THEN excluded.coins_earned 
+             ELSE coins_earned 
+           END,
            synced_at = NULL`,
         [
+          userId || null,
           moduleId,
           courseId,
           type,
@@ -94,9 +104,21 @@ export const saveActivityScore = async (
           isCompleted ? 1 : 0,
           now,
           xpEarned,
+          coinsEarned,
           null,
         ]
       );
+
+      // Si userId est fourni, on met à jour les stats globales (XP, Streak)
+      if (userId) {
+        await addXP(userId, xpEarned);
+        await updateStreak(userId);
+        
+        // Déclencher la synchro vers Moodle
+        if (token) {
+          syncQueue.syncGamification(userId, token);
+        }
+      }
       
       console.log('[ActivityProgress] Saved score:', { moduleId, score, total, bestScore: score, xpEarned });
       return;
