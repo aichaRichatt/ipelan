@@ -138,8 +138,7 @@ export function useUserStats(): UseUserStatsReturn {
             console.log('[useUserStats] Moodle gamification:', moodleProfile);
           }
 
-          // Merge: use MAX for cumulative fields (XP, coins, badges, streakBest)
-          // For streak and lives we take MAX to avoid losing progress
+
           const mergedXP = Math.max(localStats.xp, moodleProfile.xp);
           const mergedCoins = Math.max(localStats.coins, moodleProfile.coins);
           const mergedLives = Math.max(localStats.lives, moodleProfile.lives);
@@ -175,13 +174,12 @@ export function useUserStats(): UseUserStatsReturn {
             coursesInProgress: localStats.coursesInProgress,
             coursesCompleted: localStats.coursesCompleted,
             lastActivity: moodleProfile.lastActivityDate || new Date().toISOString(),
+            nextHeartTime: localStats.nextHeartTime,
           };
 
           setStats(mergedStats);
 
-          // 5.5 PERSISTENCE - Sauvegarder les données fusionnées dans SQLite
-          // Cela garantit que SQLite est toujours à jour avec les meilleures données
-          await Promise.all([
+            await Promise.all([
             setXP(userId, mergedStats.xp),
             setCoins(userId, mergedStats.coins),
             setLives(userId, mergedStats.lives),
