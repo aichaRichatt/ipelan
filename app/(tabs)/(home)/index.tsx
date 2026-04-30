@@ -1,4 +1,4 @@
-import { AntDesign, Feather, Ionicons, FontAwesome5 } from "@expo/vector-icons";
+import { AntDesign, Feather, FontAwesome5, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from "react-native";
@@ -187,11 +187,33 @@ export default function HomeScreen() {
     return null;
   };
 
-  const getCourseLessonsCount = (course: any): number => course.lessonsCount || 0;
-  const getCompletedLessons = (course: any) => {
+  // Nombre total de leçons/activités dans le cours (depuis la DB)
+  const getCourseLessonsCount = (course: any): number => {
+    const dbProgress = courseProgressMap[course?.id];
+    if (dbProgress && dbProgress.total > 0) {
+      return dbProgress.total;
+    }
+    return course?.lessonsCount || 0;
+  };
+
+  // Nombre de leçons complétées (depuis la DB)
+  const getCompletedLessons = (course: any): number => {
+    const dbProgress = courseProgressMap[course?.id];
+    if (dbProgress && dbProgress.completed > 0) {
+      return dbProgress.completed;
+    }
     const progress = getCourseProgress(course);
     const total = getCourseLessonsCount(course);
     return Math.floor((progress / 100) * total);
+  };
+
+  // XP total gagné dans ce cours (depuis la DB)
+  const getXpAllFromCourse = (courseId: number): number => {
+    const dbProgress = courseProgressMap[courseId];
+    if (dbProgress && dbProgress.xp > 0) {
+      return dbProgress.xp;
+    }
+    return 0;
   };
 
   const getCourseLevel = (courseName: string): number => {
@@ -200,8 +222,7 @@ export default function HomeScreen() {
     return match ? parseInt(match[1], 10) : 1;
   };
 
-  // Single course from user's preferred language/grade
-  const currentCourse = course;
+   const currentCourse = course;
 
   return (  
     <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
@@ -364,7 +385,7 @@ export default function HomeScreen() {
                     id: String(course.id),
                     title: course.fullname,
                     description: course.coursecategory || "",
-                    xp: 50,
+                    xp: getXpAllFromCourse(course.id),
                     isLocked: false,
                     lessonsCount: getCourseLessonsCount(course),
                     completedLessons: getCompletedLessons(course),
@@ -379,7 +400,7 @@ export default function HomeScreen() {
               ) : (
                 <View className="bg-white p-8 rounded-3xl border border-dashed border-gray-200 items-center">
                   <Feather name="book-open" size={32} color="#D1D5DB" />
-                  <Text className="text-gray-400 text-sm mt-2 font-medium">Aucun cours dans ce niveau</Text>
+                  <Text className="text-gray-400 text-sm mt-2 font-medium">Aucun cours trouvé</Text>
                 </View>
               )}
             </View>

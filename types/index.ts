@@ -122,7 +122,6 @@ export interface SignupForm {
   lastname: string;
   email: string;
   password: string;
-  city: string;
   username?: string;
   langue?: Langue;
   grade?: Grade;

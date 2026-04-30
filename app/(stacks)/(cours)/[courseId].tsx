@@ -1,7 +1,7 @@
 import { ActivityCard } from "@/components/ActivityCard";
 import { ActivityTabs } from "@/components/ActivityTabs";
-import { EmptyState } from "@/components/EmptyState";
 import { BuyHeartsModal } from "@/components/BuyHeartsModal";
+import { EmptyState } from "@/components/EmptyState";
 import { ActivityWithProgress, FilterTab, PaginationState } from "@/types/activity";
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -507,6 +507,7 @@ export default function ModuleDetailScreen() {
 
     const params = `?moduleId=${lesson.id}&moduleTitle=${encodeURIComponent(lesson.title)}&courseId=${courseId}&cmid=${lesson.id}&instanceId=${lesson.id}`;
 
+    // ✅ Contenu éducatif: accessible SANS vies (visualisation/lecture)
     if (lesson.epubUrl) {
       router.push(`/(stacks)/(cours)/epub/epub-reader?epubUrl=${encodeURIComponent(lesson.epubUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
       return;
@@ -522,7 +523,20 @@ export default function ModuleDetailScreen() {
       return;
     }
 
-    // Pour les activités, on vérifie les vies
+    // Contenu statique (leçons, ressources) : accessible sans vies
+    const isStaticContent = ['resource', 'folder', 'lesson', 'html', 'url', 'page'].includes(lesson.type);
+    if (isStaticContent) {
+      if (lesson.epubUrl) {
+        router.push(`/(stacks)/(cours)/epub/epub-reader?epubUrl=${encodeURIComponent(lesson.epubUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
+      } else if (lesson.pdfUrl) {
+        router.push(`/(stacks)/(cours)/pdf/pdf-viewer?pdfUrl=${encodeURIComponent(lesson.pdfUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
+      } else {
+        router.push(`/(stacks)/(cours)/lesson/${lesson.id}?courseId=${courseId}` as any);
+      }
+      return;
+    }
+
+    // ❌ Activités interactives: nécessitent une vie
     await checkLivesAndProceed(() => {
       switch (lesson.type) {
         case 'quiz':
@@ -548,19 +562,8 @@ export default function ModuleDetailScreen() {
         case 'wordOrder':
           router.push(`/(stacks)/(cours)/game${params}` as any);
           break;
-        case 'resource':
-        case 'folder':
-        case 'lesson':
-        case 'html':
-          if (lesson.epubUrl) {
-            router.push(`/(stacks)/(cours)/epub/epub-reader?epubUrl=${encodeURIComponent(lesson.epubUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
-          } else if (lesson.pdfUrl) {
-            router.push(`/(stacks)/(cours)/pdf/pdf-viewer?pdfUrl=${encodeURIComponent(lesson.pdfUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
-          } else {
-            router.push(`/(stacks)/(cours)/lesson/${lesson.id}?courseId=${courseId}` as any);
-          }
-          break;
         default:
+          // Par défaut, considérer comme du contenu statique
           router.push(`/(stacks)/(cours)/lesson/${lesson.id}?courseId=${courseId}` as any);
           break;
       }

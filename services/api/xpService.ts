@@ -31,6 +31,18 @@ function parseCustomFields(user: any): Record<string, string> {
   return fields;
 }
 
+/**
+ * Vérifie que l'ID utilisateur Moodle correspond à l'ID attendu
+ * Cette sécurité empêche la synchronisation des données d'un autre utilisateur
+ */
+function verifyUserIdentity(moodleUserId: number, expectedUserId: number): boolean {
+  if (moodleUserId !== expectedUserId) {
+    console.error(`[xpService] USER ID MISMATCH! Expected: ${expectedUserId}, Got: ${moodleUserId}`);
+    return false;
+  }
+  return true;
+}
+
 export async function getUserGamificationFromMoodle(
   token: string,
   userId: number
@@ -64,6 +76,15 @@ export async function getUserGamificationFromMoodle(
     }
 
     const user = result.users[0];
+
+    // 🔒 VÉRIFICATION DE SÉCURITÉ : S'assurer que l'ID retourné correspond à l'ID demandé
+    const returnedUserId = parseInt(user.id, 10);
+    if (!verifyUserIdentity(returnedUserId, userId)) {
+      console.error('[xpService] Security alert: User ID mismatch detected. Aborting sync.');
+      // Retourner des valeurs par défaut pour éviter la corruption des données
+      return { xp: 0, coins: 0, lives: 6, streak: 0, badges: [], badgeCount: 0, lastBadgeId: null, lastActivityDate: '' };
+    }
+
     const fields = parseCustomFields(user);
 
     const badgesRaw = fields.ipelan_badges || '';

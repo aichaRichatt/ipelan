@@ -97,7 +97,7 @@ export const BuyHeartsModal: React.FC<BuyHeartsModalProps> = ({
             <Ionicons name="time-outline" size={20} color="#4B5563" />
             <View style={styles.infoTextContainer}>
               <Text style={styles.infoTitle}>Régénération gratuite</Text>
-              <Text style={styles.infoSubtitle}>1 cœur toutes les 12 heures</Text>
+              <Text style={styles.infoSubtitle}>1 cœur toutes les 6 heures</Text>
               {lives < 6 && (
                 <Text style={styles.timerText}>Prochain cœur dans : <Text style={styles.timerBold}>{timeLeft}</Text></Text>
               )}

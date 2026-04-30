@@ -14,6 +14,7 @@ import { RootState } from '@/services/redux/store';
 import { countUserBadges, getUserBadges, initBadgeTable } from '@/services/storage/badge-storage';
 import { getAllCourseProgress } from '@/services/storage/course-progress';
 import { syncQueue } from '@/services/sync/syncQueue';
+import { verifyUserIdentityBeforeSync } from '@/services/utils/userIdentity';
 import { useCallback, useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 
@@ -122,10 +123,25 @@ export function useUserStats(): UseUserStatsReturn {
       // Check network status
       const isOnline = await checkOnline() && token !== null;
 
-      if (isOnline) {
+      if (isOnline && token) {
         try {
+          // 🔒 VÉRIFICATION DE SÉCURITÉ : Vérifier l'identité avant toute synchronisation
+          const identityCheck = await verifyUserIdentityBeforeSync(token);
+
+          if (!identityCheck.isValid) {
+            console.error('[useUserStats] Identity verification failed:', identityCheck.error);
+            // Ne pas synchroniser - utiliser uniquement les données locales
+            setStats(localStats);
+            setIsLoading(false);
+            return;
+          }
+
+          if (IS_DEV) {
+            console.log('[useUserStats] Identity verified, proceeding with sync');
+          }
+
           // Fetch unified gamification profile from Moodle
-          const moodleProfile = await getUserGamificationFromMoodle(token!, userId);
+          const moodleProfile = await getUserGamificationFromMoodle(token, userId);
 
           if (IS_DEV) {
             console.log('[useUserStats] Moodle gamification:', moodleProfile);
@@ -172,7 +188,7 @@ export function useUserStats(): UseUserStatsReturn {
 
           setStats(mergedStats);
 
-            await Promise.all([
+          await Promise.all([
             setXP(userId, mergedStats.xp),
             setCoins(userId, mergedStats.coins),
             setLives(userId, mergedStats.lives),
@@ -228,6 +244,17 @@ export function useUserStats(): UseUserStatsReturn {
       if (!isOnline) {
         console.log('[useUserStats] Cannot sync - offline');
         return false;
+      }
+
+      // 🔒 VÉRIFICATION DE SÉCURITÉ : Vérifier l'identité avant la synchronisation
+      const identityCheck = await verifyUserIdentityBeforeSync(token);
+      if (!identityCheck.isValid) {
+        console.error('[useUserStats] Sync aborted - identity verification failed:', identityCheck.error);
+        return false;
+      }
+
+      if (IS_DEV) {
+        console.log('[useUserStats] Identity verified, proceeding with manual sync');
       }
 
       await syncQueue.syncGamification(userId, token);

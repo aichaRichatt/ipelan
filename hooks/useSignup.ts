@@ -11,7 +11,7 @@ export function useSignup() {
   const [success, setSuccess] = useState(false);
 
   const signup = async (formData: SignupForm) => {
-    const { username, email, password, firstname, lastname, city } = formData;
+    const { username, email, password, firstname, lastname } = formData;
     if (!username) throw new Error("Username is required");
 
     // Check if admin token is configured
@@ -25,7 +25,7 @@ export function useSignup() {
     setSuccess(false);
 
     try {
-      const result = await moodleSignUp({ username, email, password, firstname, lastname, city });
+      const result = await moodleSignUp({ username, email, password, firstname, lastname });
 
       if (IS_DEV) console.log("Signup API response:", JSON.stringify(result));
 

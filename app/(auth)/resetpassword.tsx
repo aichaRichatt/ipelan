@@ -1,59 +1,40 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect } from "react";
 import { ActivityIndicator, Alert, Dimensions, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { moodleFetch } from '../../services/api/moodleClient';
- 
+import { useResetPassword } from '../../hooks/useResetPassword';
+
 const { width } = Dimensions.get("window");
 const IS_DEV = process.env.NODE_ENV === 'development';
 
 export default function ResetPassword() {
   const router = useRouter();
-  const [step, setStep] = useState(1);
-  const [email, setEmail] = useState("");
-  const [loading, setLoading] = useState(false);
+  const {
+    email,
+    isLoading,
+    error,
+    step,
+    setEmail,
+    submitResetRequest,
+    goToLogin,
+  } = useResetPassword();
+
+  // Show error alert when error changes
+  useEffect(() => {
+    if (error) {
+      Alert.alert('Erreur', error);
+    }
+  }, [error]);
 
   const handleContinue = async () => {
     if (step === 1) {
-      if (!email) return;
-      setLoading(true);
-      try {
-        // ✅ Call Moodle API for password reset
-        const response = await moodleFetch('/webservice/rest/server.php', {
-          wsfunction: 'core_auth_request_password_reset',
-          username: email,
-          moodlewsrestformat: 'json',
-        });
-        
-        if (response?.exception) {
-          if (IS_DEV) console.warn('[ResetPassword] Exception:', response);
-          Alert.alert('Erreur', response?.message || 'Email non reconnu');
-          setLoading(false);
-          return;
-        }
-        
-        if (response?.error) {
-          if (IS_DEV) console.warn('[ResetPassword] Error:', response);
-          Alert.alert('Erreur', response?.error || 'Impossible d\'envoyer le lien');
-          setLoading(false);
-          return;
-        }
-        
-        // Moodle returns success even if email doesn't exist (security)
-        setStep(2);
-        setLoading(false);
-      } catch (error: any) {
-        setLoading(false);
-        if (IS_DEV) console.warn('[ResetPassword] Error:', error);
-        
-        if (error?.message?.includes('network') || error?.message?.includes('fetch')) {
-          Alert.alert('Erreur', 'Vérifiez votre connexion');
-        } else {
-          Alert.alert('Erreur', 'Impossible d\'envoyer le lien de réinitialisation');
-        }
+      const success = await submitResetRequest();
+      if (!success && IS_DEV) {
+        console.log('[ResetPassword] Request failed');
       }
     } else if (step === 2) {
+      goToLogin();
       router.replace("/(auth)/login");
     }
   };
@@ -103,12 +84,12 @@ export default function ResetPassword() {
 
         {step !== 2 && (
           <View style={styles.footer}>
-            <Pressable 
+            <Pressable
               style={[styles.button, !email && step === 1 ? styles.buttonDisabled : null]}
               onPress={handleContinue}
-              disabled={loading || !email}
+              disabled={isLoading || !email}
             >
-              {loading ? (
+              {isLoading ? (
                 <ActivityIndicator color="white" />
               ) : (
                 <>

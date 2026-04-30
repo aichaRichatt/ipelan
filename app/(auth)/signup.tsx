@@ -14,7 +14,6 @@ export default function SignUp() {
   const [firstname, setFirstname] = useState("");
   const [lastname, setLastname] = useState("");
   const [email, setEmail] = useState("");
-  const [city, setCity] = useState("");
   const [password, setPassword] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [showPolicy, setShowPolicy] = useState(false);
@@ -26,15 +25,8 @@ export default function SignUp() {
     if (pwd.length < 8) {
       return "Le mot de passe doit contenir au moins 8 caractères";
     }
-    if (!/[A-Z]/.test(pwd)) {
-      return "Le mot de passe doit contenir au moins une majuscule";
-    }
-    if (!/[a-z]/.test(pwd)) {
-      return "Le mot de passe doit contenir au moins une minuscule";
-    }
-    if (!/[0-9]/.test(pwd)) {
-      return "Le mot de passe doit contenir au moins un chiffre";
-    }
+  
+  
     return null;
   };
 
@@ -46,9 +38,9 @@ export default function SignUp() {
     const cleanFirstname = sanitizeInput(firstname);
     const cleanLastname = sanitizeInput(lastname);
     const cleanEmail = sanitizeInput(email).toLowerCase();
-    const cleanCity = sanitizeInput(city);
+ 
 
-    if (!cleanFirstname || !cleanLastname || !cleanEmail || !password || !cleanCity) {
+    if (!cleanFirstname || !cleanLastname || !cleanEmail || !password) {
       Alert.alert("Erreur", "Tous les champs sont obligatoires");
       return;
     }
@@ -79,7 +71,13 @@ export default function SignUp() {
 
     setIsProcessing(true);
     try {
-      await signup({ username: generatedUsername, email: cleanEmail, password, firstname: cleanFirstname, lastname: cleanLastname, city: cleanCity });
+      await signup({
+        username: generatedUsername,
+        email: cleanEmail,
+        password,
+        firstname: cleanFirstname,
+        lastname: cleanLastname
+      });
       
       const userData = {
         id: 0,
@@ -193,16 +191,6 @@ export default function SignUp() {
                 className="flex-1 h-full"
                 placeholder="Email"
                 onChangeText={setEmail}
-              />
-            </View>
-
-            <View className="flex-row items-center bg-gray-50 border border-gray-200 h-14 rounded-xl my-2 px-4 w-full">
-              <TextInput
-                value={city}
-                className="flex-1 h-full"
-                placeholder="Ville"
-                autoCapitalize="words"
-                onChangeText={setCity}
               />
             </View>
 

@@ -80,7 +80,7 @@ export async function getMoodleProfile(token: string, fieldValue: string | numbe
 }
 
 export async function signUp(user: any) {
-  const { username, password, email, firstname, lastname, city } = user;
+  const { username, password, email, firstname, lastname } = user;
 
   if (!ADMIN_TOKEN) {
     throw new Error("Configuration serveur invalide: token administrateur manquant");
@@ -98,29 +98,7 @@ export async function signUp(user: any) {
     moodlewsrestformat: "json",
   };
 
-  // Le champ city n'est pas accepté nativement par auth_email_signup_user :
-  // on le passe via customprofile pour que Moodle le persiste.
-  if (city) {
-    params['customprofilefields[0][type]'] = 'text';
-    params['customprofilefields[0][name]'] = 'city';
-    params['customprofilefields[0][value]'] = String(city);
-  }
-
   const result = await moodleFetch("/webservice/rest/server.php", params, "POST");
-
-  // Si l'utilisateur est créé mais city n'a pas été persisté (pas de customprofile),
-  // on tente une mise à jour postérieure via core_user_update_users.
-  if (city && result?.success && (result.id || result.userid)) {
-    const userId = Number(result.id || result.userid);
-    try {
-      await updateUserProfile(userId, firstname, lastname, email, city);
-    } catch (e: any) {
-      // Best-effort : ne casse pas l'inscription si la mise à jour échoue
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('[moodleAuth.signUp] city update failed:', e?.message);
-      }
-    }
-  }
 
   return result;
 }
@@ -139,6 +117,53 @@ export async function updateUserProfile(id: number, firstname: string, lastname:
     users: [userUpdate],
     moodlewsrestformat: "json"
   }, "POST");
+}
+
+/**
+ * Demande une réinitialisation de mot de passe via l'API Moodle
+ * Utilise la fonction core_auth_request_password_reset
+ * 
+ * @param email Email de l'utilisateur
+ * @returns Résultat de la demande
+ */
+export async function requestPasswordReset(email: string) {
+  const IS_DEV = process.env.NODE_ENV === "development";
+
+  if (!email || !email.trim()) {
+    throw new Error("Veuillez entrer votre adresse email");
+  }
+
+  // Nettoyer l'email
+  const cleanEmail = email.trim().toLowerCase();
+
+  if (IS_DEV) {
+    console.log('[moodleAuth.requestPasswordReset] Requesting reset for:', cleanEmail);
+  }
+
+  // Utiliser l'API Moodle pour demander la réinitialisation
+  const result = await moodleFetch("/webservice/rest/server.php", {
+    wstoken: ADMIN_TOKEN,
+    wsfunction: "core_auth_request_password_reset",
+    email: cleanEmail,
+    moodlewsrestformat: "json",
+  }, "POST");
+
+  if (IS_DEV) {
+    console.log('[moodleAuth.requestPasswordReset] Result:', result);
+  }
+
+  // Vérifier les erreurs retournées par Moodle
+  if (result?.exception) {
+    throw new Error(result.message || 'Erreur lors de la demande de réinitialisation');
+  }
+
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+
+  // Moodle retourne généralement: { status: "success", notice: "..." }
+  // ou { warning: "..." } si l'email n'existe pas (pour des raisons de sécurité)
+  return result;
 }
 
 export async function agreeToSitePolicy(token: string, userId?: number) {
