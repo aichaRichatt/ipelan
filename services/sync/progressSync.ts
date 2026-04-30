@@ -5,9 +5,8 @@
 // ✅ Fix 3 : Queue offline pour les syncs ratés
 // ✅ Fix 4 : resolveIds utilisé partout correctement
 
-import { moodleFetch } from '../api/moodleClient';
+import { isMoodleOnline, moodleFetch } from '../api/moodleClient';
 import { markActivitySynced } from '../storage/activity-progress';
-import { updateStreakAfterActivity } from '../storage/streak';
 import { addToSyncQueue } from '../storage/sync-queue';
 import { getToken } from '../storage/tokenStorage';
 import { resolveIds } from '../utils/moodleIdResolver';
@@ -36,17 +35,8 @@ const GRADED_MODULES = new Set([
 
 // ─── Vérifier connectivité ────────────────────────────────────────────────────
 
-async function isOnline(): Promise<boolean> {
-  try {
-    const res = await fetch(
-      `${process.env.EXPO_PUBLIC_MOODLE_URL || "https://moodle.richatt.com"}/login/index.php`,
-      { method: 'HEAD', signal: AbortSignal.timeout(3000) }
-    );
-    return res.ok || res.status < 500;
-  } catch {
-    return false;
-  }
-}
+// Délégué à services/api/moodleClient.ts pour éviter la duplication
+const isOnline = isMoodleOnline;
 
 // ─── Envoi de note (sans hack activityId) ────────────────────────────
 
@@ -186,14 +176,10 @@ export async function syncActivityCompletion(
     await markManualCompletion(token, cmid);
   }
 
-  // ── Mettre à jour le streak ───────────────────────────────────────────────
-  if (userId) {
-    try {
-      await updateStreakAfterActivity(userId);
-    } catch (e: any) {
-      if (IS_DEV) console.warn('[ProgressSync] Streak update échoué:', e.message);
-    }
-  }
+  // Le streak est désormais mis à jour par saveActivityScore →
+  // userProgressService.updateStreak → updateStreakAfterActivity
+  // (source de vérité unique). On ne le rappelle plus ici pour éviter
+  // les doubles écritures dans user_streaks.
 }
 
 // ─── syncAfterActivity — point d'entrée depuis les écrans ─────────────────────

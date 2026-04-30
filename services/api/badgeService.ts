@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { moodleFetch } from "./moodleClient";
 
-const ADMIN_TOKEN = process.env.MOODLE_ADMIN_TOKEN;
+const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN;
 const BADGES_STORAGE_KEY = "@ipelan_user_badges";
 const BADGES_TIMESTAMP_KEY = "@ipelan_badges_timestamp";
 const IS_DEV = process.env.NODE_ENV === 'development';

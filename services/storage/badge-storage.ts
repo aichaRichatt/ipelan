@@ -14,6 +14,12 @@ export interface UserBadge {
 }
 
  
+/**
+ * Filet de sécurité : la table user_badges est aussi créée par
+ * services/storage/db-service.ts → createTables(). Cette fonction est
+ * idempotente (CREATE IF NOT EXISTS) et reste utile dans les flux où
+ * createTables n'a pas encore tourné (ex. accès direct hors login).
+ */
 export async function initBadgeTable(): Promise<void> {
   try {
     const db = await getDBConnection();
@@ -26,12 +32,12 @@ export async function initBadgeTable(): Promise<void> {
         synced_at TEXT,
         UNIQUE(user_id, badge_id)
       );
-      
+
       CREATE INDEX IF NOT EXISTS idx_user_badges_user_id ON user_badges(user_id);
     `);
-    
+
     if (IS_DEV) {
-      console.log('[badgeStorage] Badge table initialized');
+      console.log('[badgeStorage] Badge table verified');
     }
   } catch (err) {
     console.error('[badgeStorage] Failed to init badge table:', err);

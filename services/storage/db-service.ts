@@ -86,25 +86,68 @@ export const getDBConnection = async () => {
   return dbInitPromise;
 };
 
+/**
+ * Version de schéma actuelle. Incrémenter à chaque ajout de migration.
+ *  v1 : initial (lives, last_activity, last_lives_update sur users)
+ *  v2 : table user_badges + index (centralisée depuis badge-storage.ts)
+ */
+const CURRENT_SCHEMA_VERSION = 2;
+
+async function getUserSchemaVersion(db: SQLiteDatabase): Promise<number> {
+  try {
+    const row = await db.getFirstAsync<{ user_version: number }>(
+      'PRAGMA user_version;'
+    );
+    return row?.user_version ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function setUserSchemaVersion(db: SQLiteDatabase, version: number): Promise<void> {
+  // PRAGMA n'accepte pas de paramètres bind → injection littérale (entier validé)
+  await db.execAsync(`PRAGMA user_version = ${Number(version) | 0};`);
+}
+
+/**
+ * Migrations idempotentes versionnées. Chaque migration n'est exécutée
+ * qu'une seule fois par device, en fonction de PRAGMA user_version.
+ */
+async function runMigrations(db: SQLiteDatabase): Promise<void> {
+  const fromVersion = await getUserSchemaVersion(db);
+  if (fromVersion >= CURRENT_SCHEMA_VERSION) return;
+
+  console.log(`[DB] Migration schema v${fromVersion} → v${CURRENT_SCHEMA_VERSION}`);
+
+  // v1 : colonnes ajoutées historiquement à la table users
+  if (fromVersion < 1) {
+    const columns = [
+      ['lives', 'INTEGER DEFAULT 6'],
+      ['last_activity', 'TEXT'],
+      ['last_lives_update', 'TEXT'],
+    ];
+    for (const [name, def] of columns) {
+      try {
+        await db.execAsync(`ALTER TABLE users ADD COLUMN ${name} ${def};`);
+        console.log(`[DB] v1: colonne users.${name} ajoutée`);
+      } catch {
+        // Colonne déjà présente → migration partielle déjà appliquée
+      }
+    }
+  }
+
+  // v2 : la création de user_badges est idempotente (CREATE IF NOT EXISTS
+  //      dans la SQL ci-dessous). Aucune migration impérative à effectuer.
+
+  await setUserSchemaVersion(db, CURRENT_SCHEMA_VERSION);
+  console.log(`[DB] Schema migré vers v${CURRENT_SCHEMA_VERSION}`);
+}
+
 export const createTables = async (db: SQLiteDatabase) => {
-  try {
-    await db.execAsync("ALTER TABLE users ADD COLUMN lives INTEGER DEFAULT 6;");
-    console.log("Migration: Added lives column to users table.");
-  } catch (e: any) {
-    console.log("Migration: Column lives already exists.");
-  }
-  try {
-    await db.execAsync("ALTER TABLE users ADD COLUMN last_activity TEXT;");
-    console.log("Migration: Added last_activity column to users table.");
-  } catch (e: any) {
-    console.log("Migration: Column last_activity already exists.");
-  }
-  try {
-    await db.execAsync("ALTER TABLE users ADD COLUMN last_lives_update TEXT;");
-    console.log("Migration: Added last_lives_update column to users table.");
-  } catch (e: any) {
-    console.log("Migration: Column last_lives_update already exists.");
-  }
+  // Étape 1 : appliquer les migrations versionnées (sur bases existantes)
+  await runMigrations(db);
+
+  // Étape 2 : créer toutes les tables si elles n'existent pas (nouvelle install)
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS users(
@@ -118,6 +161,7 @@ export const createTables = async (db: SQLiteDatabase) => {
         coins INTEGER DEFAULT 0,
         lives INTEGER DEFAULT 6,
         streak INTEGER DEFAULT 0,
+        last_activity TEXT,
         badges TEXT DEFAULT '[]',
         token TEXT NOT NULL,
         last_lives_update TEXT DEFAULT (datetime('now'))
@@ -272,7 +316,22 @@ export const createTables = async (db: SQLiteDatabase) => {
         retries     INTEGER DEFAULT 0,
         last_error  TEXT
     );
+    CREATE TABLE IF NOT EXISTS user_badges (
+        id         TEXT PRIMARY KEY,
+        user_id    INTEGER NOT NULL,
+        badge_id   TEXT NOT NULL,
+        earned_at  TEXT NOT NULL,
+        synced_at  TEXT,
+        UNIQUE(user_id, badge_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_badges_user_id ON user_badges(user_id);
   `);
+
+  try {
+    await db.execAsync('ALTER TABLE users ADD COLUMN last_activity TEXT;');
+  } catch {
+    // Column already exists or users table is not present yet.
+  }
 };
 
 export interface EPUBBookDB {

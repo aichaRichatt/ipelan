@@ -356,7 +356,16 @@ export default function ModuleDetailScreen() {
 
       switch (activity.type) {
         case 'quiz':
-          router.push(`/(stacks)/(cours)/quiz-webview?quizId=${activity.id}&courseId=${courseId}&moduleTitle=${encodeURIComponent(activity.title)}` as any);
+          // UI native (mod_quiz_*) — plus fiable que la WebView SSO
+          router.push({
+            pathname: '/(stacks)/(cours)/quiz-native',
+            params: {
+              cmid: String(activity.id),
+              instanceId: String(activity.instanceId || activity.id),
+              courseId: String(courseId),
+              moduleTitle: activity.title,
+            },
+          } as any);
           break;
         case 'dictation':
           router.push({ pathname: '/(stacks)/(cours)/dictation', params: baseParams } as any);
@@ -517,7 +526,15 @@ export default function ModuleDetailScreen() {
     await checkLivesAndProceed(() => {
       switch (lesson.type) {
         case 'quiz':
-          router.push(`/(stacks)/(cours)/quiz-webview?quizId=${lesson.id}&courseId=${courseId}&moduleTitle=${encodeURIComponent(lesson.title)}` as any);
+          router.push({
+            pathname: '/(stacks)/(cours)/quiz-native',
+            params: {
+              cmid: String(lesson.id),
+              instanceId: String((lesson as any).instanceId || lesson.id),
+              courseId: String(courseId),
+              moduleTitle: lesson.title,
+            },
+          } as any);
           break;
         case 'dictation':
           router.push(`/(stacks)/(cours)/dictation${params}` as any);

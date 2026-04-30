@@ -1,3 +1,4 @@
+import { getToken } from "../storage/tokenStorage";
 import { moodleFetch } from "./moodleClient";
 
 const IS_DEV = process.env.NODE_ENV === "development";
@@ -58,6 +59,16 @@ export async function getMoodleSiteInfo(token: string) {
   }, "POST");
 }
 
+export async function getCurrentUserSiteInfo() {
+  const token = await getToken();
+
+  if (!token) {
+    throw new Error("Token Moodle introuvable");
+  }
+
+  return getMoodleSiteInfo(token);
+}
+
 export async function getMoodleProfile(token: string, fieldValue: string | number, field: string = "username") {
   return moodleFetch("/webservice/rest/server.php", {
     wstoken: token,
@@ -75,7 +86,8 @@ export async function signUp(user: any) {
     throw new Error("Configuration serveur invalide: token administrateur manquant");
   }
 
-  return moodleFetch("/webservice/rest/server.php", {
+  // Champs de base attendus par auth_email_signup_user
+  const params: Record<string, any> = {
     wstoken: ADMIN_TOKEN,
     wsfunction: "auth_email_signup_user",
     username,
@@ -84,7 +96,33 @@ export async function signUp(user: any) {
     lastname,
     email,
     moodlewsrestformat: "json",
-  }, "POST");
+  };
+
+  // Le champ city n'est pas accepté nativement par auth_email_signup_user :
+  // on le passe via customprofile pour que Moodle le persiste.
+  if (city) {
+    params['customprofilefields[0][type]'] = 'text';
+    params['customprofilefields[0][name]'] = 'city';
+    params['customprofilefields[0][value]'] = String(city);
+  }
+
+  const result = await moodleFetch("/webservice/rest/server.php", params, "POST");
+
+  // Si l'utilisateur est créé mais city n'a pas été persisté (pas de customprofile),
+  // on tente une mise à jour postérieure via core_user_update_users.
+  if (city && result?.success && (result.id || result.userid)) {
+    const userId = Number(result.id || result.userid);
+    try {
+      await updateUserProfile(userId, firstname, lastname, email, city);
+    } catch (e: any) {
+      // Best-effort : ne casse pas l'inscription si la mise à jour échoue
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[moodleAuth.signUp] city update failed:', e?.message);
+      }
+    }
+  }
+
+  return result;
 }
 
 export async function updateUserProfile(id: number, firstname: string, lastname: string, email?: string, city?: string) {
@@ -124,8 +162,23 @@ export async function agreeToSitePolicy(token: string, userId?: number) {
   }
 }
 
-export async function enrolUserInCourse(userId: number, courseId: number = 81) {
+/**
+ * Inscrit un utilisateur dans un cours Moodle (rôle élève = 5).
+ *
+ * @param userId   ID Moodle de l'utilisateur
+ * @param courseId ID Moodle du cours (obligatoire — aucun fallback codé en dur)
+ *
+ * Le courseId doit être déterminé par l'appelant en fonction de la langue
+ * et du niveau choisis par l'élève (cf. courseService.getCoursesForLanguageAndGrade).
+ */
+export async function enrolUserInCourse(userId: number, courseId: number) {
   const IS_DEV = process.env.NODE_ENV === "development";
+
+  if (!Number.isFinite(courseId) || courseId <= 0) {
+    throw new Error(
+      "courseId invalide: utilisez courseService.getCoursesForLanguageAndGrade pour le déterminer"
+    );
+  }
 
   if (IS_DEV) {
     console.log(`[enrolUserInCourse] Enrolling user ${userId} in course ${courseId}`);

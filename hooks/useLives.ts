@@ -2,21 +2,21 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../services/redux/store';
 import { updateUser } from '../services/redux/slices/authSlice';
-import { buyLife as buyLifeService } from '../services/gamification/gamificationService';
+import { buyLife as buyLifeService, LIFE_COST, MAX_LIVES } from '../services/gamification/gamificationService';
 import { syncQueue } from '../services/sync/syncQueue';
 
 export const useLives = () => {
   const dispatch = useDispatch();
   const user = useSelector((state: RootState) => state.auth.user);
   const token = useSelector((state: RootState) => state.auth.token);
-  
+
   const [isBuying, setIsBuying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const lives = user?.lives ?? 6;
+  const lives = user?.lives ?? MAX_LIVES;
   const coins = user?.coins ?? 0;
-  const maxLives = 6;
-  const lifeCost = 20;
+  const maxLives = MAX_LIVES;
+  const lifeCost = LIFE_COST;
 
   const canBuyLife = lives < maxLives && coins >= lifeCost;
   const canPlay = lives > 0;

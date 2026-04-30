@@ -93,7 +93,7 @@ export async function loadActivityFromMoodle(
   questions: ActivityQuestion[];
   error?: string;
 }> {
-  const activityToken = process.env.MOODLE_ADMIN_TOKEN || token;
+  const activityToken = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN || token;
 
   if (IS_DEV) console.log('[ActivityLoader] Loading activity:', moduleType, instanceId);
 
@@ -144,7 +144,7 @@ async function loadQuizActivity(
       if (IS_DEV) console.warn('[Quiz] start_attempt failed:', startResult.message);
       return { activity: null, questions: [] };
     }
-
+    
     const attemptId = startResult?.attemptid;
     if (!attemptId) {
       if (IS_DEV) console.warn('[Quiz] No attempt ID returned');

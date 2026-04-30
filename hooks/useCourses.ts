@@ -33,7 +33,7 @@ export function useCourses() {
 
        if (!apiCourses || apiCourses.length === 0) {
         try {
-          const adminCourses = await getUserCourses(process.env.MOODLE_ADMIN_TOKEN!, Number(user.id));
+          const adminCourses = await getUserCourses(process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN!, Number(user.id));
           if (Array.isArray(adminCourses) && adminCourses.length > 0) apiCourses = adminCourses;
         } catch (adminErr: any) {
           console.warn("[useCourses] Tier 2 failed:", adminErr.message);

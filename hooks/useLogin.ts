@@ -4,7 +4,7 @@ import { agreeToSitePolicy, enrolUserInCourse, getMoodleProfile, getMoodleSiteIn
 import { loginFailure, loginStart, loginSuccess, logout } from '../services/redux/slices/authSlice';
 import { RootState } from '../services/redux/store';
 import { createTables, getDBConnection, saveUser } from '../services/storage/db-service';
-import { removeToken, removeUserData, saveToken, saveUserData } from '../services/storage/tokenStorage';
+import { removeCredentials, removeToken, removeUserData, saveCredentials, saveToken, saveUserData } from '../services/storage/tokenStorage';
 import { IPELANUser } from '../types';
 
 const IS_DEV = process.env.NODE_ENV === "development";
@@ -116,10 +116,25 @@ export function useLogin() {
         }
       }
 
+      // L'inscription au cours est désormais déclenchée à la sélection
+      // langue+grade (voir hooks/useMoodleCourses.ts) — plus de courseId
+      // codé en dur ici. Si les préférences sont déjà présentes, on tente
+      // une inscription dans le premier cours adapté.
       try {
-        await enrolUserInCourse(moodleId, 81);
+        const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+        const prefsStr = await AsyncStorage.getItem('@ipelan_preferences');
+        if (prefsStr) {
+          const { language, grade } = JSON.parse(prefsStr);
+          if (language && grade && authToken) {
+            const { getFirstCourseFromLanguageAndGrade } = await import('../services/api/courseService');
+            const targetCourse = await getFirstCourseFromLanguageAndGrade(authToken, language, Number(grade));
+            if (targetCourse?.id) {
+              await enrolUserInCourse(moodleId, targetCourse.id);
+            }
+          }
+        }
       } catch (enrolErr) {
-        if (IS_DEV) console.warn("[useLogin] Course enrollment failed:", enrolErr);
+        if (IS_DEV) console.warn("[useLogin] Course enrollment skipped/failed:", enrolErr);
       }
 
       const finalEmail = moodleUser?.email || siteInfo?.email || email || username;
@@ -159,6 +174,7 @@ export function useLogin() {
 
       await saveToken(authToken);
       await saveUserData(userData);
+      await saveCredentials(username, password);
 
       try {
         const db = await getDBConnection();
@@ -213,6 +229,7 @@ export function useLogin() {
     try {
       await removeToken();
       await removeUserData();
+      await removeCredentials();
       dispatch(logout());
       router.replace("/(auth)/login");
     } catch (error) {

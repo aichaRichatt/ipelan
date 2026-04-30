@@ -1,5 +1,4 @@
 import { getCourseContents } from "@/services/api/courseService";
-import { awardXPForActivity } from "@/services/api/xpService";
 import { getAuthToken } from "@/services/contentLoader";
 import { processActivityResults, triggerGamificationSync } from "@/services/gamification/gamificationService";
 import { updateUser } from "@/services/redux/slices/authSlice";
@@ -164,8 +163,7 @@ export default function ResultScreen() {
           setSyncStatus('syncing');
           setSyncMessage('Synchronisation avec Moodle...');
 
-          // ✅ Étape 3 : Synchroniser la complétion de l'activité (Grade/Completion)
-          syncAfterActivityWithRetry(moduleId, courseId, activityType, score, total, xp, instanceId, 3, token || undefined, userId)
+           syncAfterActivityWithRetry(moduleId, courseId, activityType, score, total, xp, instanceId, 3, token || undefined, userId)
             .then(() => {
               setSyncStatus('success');
               setSyncMessage('✅ Synchronisé avec Moodle');
@@ -204,8 +202,7 @@ export default function ResultScreen() {
           });
         }
 
-        // Check if course is completed (100%) and move to next course
-        if (isCompleted && courseId) {
+         if (isCompleted && courseId) {
           try {
             const { getCourseProgressForCompletion } = await import('@/services/storage/course-progress');
             const courseProgress = await getCourseProgressForCompletion(courseId);

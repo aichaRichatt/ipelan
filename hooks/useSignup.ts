@@ -36,7 +36,7 @@ export function useSignup() {
         // If no ID returned, try to get it by looking up the user
         if (!userId && username) {
           try {
-            const adminToken = process.env.MOODLE_ADMIN_TOKEN;
+            const adminToken = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN;
             if (adminToken) {
               const userData = await getMoodleProfile(adminToken, username, 'username');
               if (userData?.users && userData.users.length > 0) {

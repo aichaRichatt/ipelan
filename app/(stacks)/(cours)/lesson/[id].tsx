@@ -10,7 +10,7 @@ import { getCourseContents } from "../../../../services/api/courseService";
 import { mapModuleToContentType } from "../../../../utils/contentMapper";
 import { getMoodleLesson, getMoodleLessonPages } from "../../../../services/contentLoader";
 
-const ADMIN_TOKEN = process.env.MOODLE_ADMIN_TOKEN;
+const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN;
 const MOODLE_URL = process.env.EXPO_PUBLIC_MOODLE_API_URL || "https://moodle.richatt.com";
 
 const IS_DEV = process.env.NODE_ENV === "development";

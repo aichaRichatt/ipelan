@@ -94,3 +94,22 @@ export async function moodleCall(
 
   return moodleFetch('/webservice/rest/server.php', callParams, 'POST');
 }
+
+/**
+ * Vérifie la connectivité avec le serveur Moodle.
+ * Implémentation centralisée — ne pas dupliquer dans les services de sync.
+ *
+ * Stratégie : HEAD /login/index.php (endpoint léger toujours présent),
+ * timeout 3 s. Toute réponse < 500 (200, 302...) est considérée comme « online ».
+ */
+export async function isMoodleOnline(timeoutMs: number = 3000): Promise<boolean> {
+  try {
+    const res = await fetch(`${Config.baseURL}/login/index.php`, {
+      method: 'HEAD',
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return res.ok || res.status < 500;
+  } catch {
+    return false;
+  }
+}

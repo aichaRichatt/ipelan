@@ -1,4 +1,5 @@
 import { moodleFetch } from '@/services/api/moodleClient';
+import { getCredentials } from '@/services/storage/tokenStorage';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -26,6 +27,50 @@ interface QuizWebViewProps {
   onError?: (error: string) => void;
 }
 
+function makeLoginForm(user: string, pass: string, dest: string): string {
+  const safeUser = user.replace(/"/g, '&quot;');
+  const safePass = pass.replace(/"/g, '&quot;');
+  const safeDest = dest.replace(/"/g, '&quot;');
+
+  return `<!DOCTYPE html><html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#EEF2FF;font-family:system-ui,-apple-system}
+  .card{background:white;padding:32px;border-radius:20px;text-align:center;box-shadow:0 4px 20px rgba(0,34,102,.1);max-width:300px;width:90%}
+  .logo{font-size:48px;margin-bottom:16px}
+  h2{color:#002366;margin:0 0 8px;font-size:20px}
+  p{color:#666;margin:0 0 24px;font-size:14px}
+  .spinner{width:40px;height:40px;border:3px solid #EEF2FF;border-top:3px solid #002366;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style></head><body>
+<div class="card">
+  <div class="logo">📚</div>
+  <h2>IPELAN</h2>
+  <p>Connexion en cours...</p>
+  <div class="spinner"></div>
+</div>
+<form id="loginForm" method="POST" action="${MOODLE_BASE_URL}/login/index.php" style="display:none">
+  <input name="username" value="${safeUser}">
+  <input name="password" value="${safePass}" type="password">
+  <input name="wantsurl" value="${safeDest}">
+  <input name="logintoken" value="" id="tok">
+  <input name="anchor" value="">
+  <input name="rememberusername" value="1">
+</form>
+<script>
+  fetch('${MOODLE_BASE_URL}/login/index.php')
+    .then(r => r.text())
+    .then(html => {
+      const m = html.match(/name="logintoken"[^>]*value="([^"]+)"/);
+      if (m && m[1]) document.getElementById('tok').value = m[1];
+      document.getElementById('loginForm').submit();
+    })
+    .catch(() => document.getElementById('loginForm').submit());
+</script>
+</body></html>`;
+}
+
 /**
  * QuizWebView - Component to display Moodle quizzes in a WebView
  * 
@@ -51,8 +96,7 @@ export default function QuizWebView({
   const [currentUrl, setCurrentUrl] = useState<string>('');
   const [quizState, setQuizState] = useState<'loading' | 'start' | 'inprogress' | 'finished'>('loading');
   const [loadTimeout, setLoadTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
-  const [isRedirectingToLogin, setIsRedirectingToLogin] = useState(false);
-  const [sessionCookie, setSessionCookie] = useState<string | null>(null);
+  const [source, setSource] = useState<React.ComponentProps<typeof WebView>['source'] | null>(null);
 
   // Build the quiz URL
   const getQuizUrl = useCallback(() => {
@@ -63,62 +107,24 @@ export default function QuizWebView({
     return url;
   }, [quizId]);
 
-  // Get login URL with user token for auto-authentication
-  const getAutoLoginUrl = useCallback(async () => {
-    if (!userToken || !quizId) return null;
-    
-    try {
-      // Try to get user private token for auto-login
-      const response = await moodleFetch('/webservice/rest/server.php', {
-        wstoken: userToken,
-        wsfunction: 'core_user_get_course_user_profiles',
-        courseid: courseId || 1,
-        moodlewsrestformat: 'json',
-      });
-      
-      if (IS_DEV) {
-        console.log('[QuizWebView] User profile response:', response);
-      }
-      
-      // If we have user data, we can try to construct an auto-login URL
-      // This requires the 'privatetoken' which might be available
-      if (response && !response.exception && Array.isArray(response) && response.length > 0) {
-        const user = response[0];
-        if (user.privatetoken) {
-          // Build auto-login URL with privatetoken
-          const loginUrl = `${MOODLE_BASE_URL}/login/index.php?privatetoken=${encodeURIComponent(user.privatetoken)}&redirect=${encodeURIComponent(getQuizUrl())}`;
-          if (IS_DEV) {
-            console.log('[QuizWebView] Built auto-login URL with privatetoken');
-          }
-          return loginUrl;
-        }
-      }
-    } catch (e) {
-      if (IS_DEV) {
-        console.log('[QuizWebView] Could not get auto-login URL:', e);
-      }
-    }
-    return null;
-  }, [userToken, courseId, quizId, getQuizUrl]);
-
-  // Get initial URL - use SSO if available to establish session
-  const getInitialUrl = useCallback(() => {
-    // If we have an SSO URL, use it first to establish session
-    if (sessionCookie?.startsWith('sso:')) {
-      const ssoUrl = sessionCookie.replace('sso:', '');
-      if (IS_DEV) {
-        console.log('[QuizWebView] Using SSO launch URL first');
-      }
-      return ssoUrl;
-    }
-    return getQuizUrl();
-  }, [sessionCookie, getQuizUrl]);
-
-  // Get Moodle session from WS token
   useEffect(() => {
     const getSession = async () => {
+      const quizUrl = getQuizUrl();
+      const credentials = await getCredentials();
+
+      if (credentials?.username && credentials?.password) {
+        if (IS_DEV) {
+          console.log('[QuizWebView] Stored credentials found, using login form');
+        }
+
+        setSource({ html: makeLoginForm(credentials.username, credentials.password, quizUrl), baseUrl: MOODLE_BASE_URL });
+        setIsLoading(false);
+        return;
+      }
+
       if (!userToken) {
         setError('Token non disponible. Veuillez vous reconnecter.');
+        setSource({ uri: quizUrl });
         setIsLoading(false);
         return;
       }
@@ -128,7 +134,6 @@ export default function QuizWebView({
           console.log('[QuizWebView] Validating token...');
         }
 
-        // Step 1: Validate token by getting site info
         const response = await moodleFetch('/webservice/rest/server.php', {
           wstoken: userToken,
           wsfunction: 'core_webservice_get_site_info',
@@ -143,7 +148,6 @@ export default function QuizWebView({
           console.log('[QuizWebView] Token valid for user:', response?.fullname || response?.username);
         }
 
-        // Step 2: Check if user is enrolled in the course
         if (courseId) {
           try {
             const enrolledCourses = await moodleFetch('/webservice/rest/server.php', {
@@ -152,7 +156,7 @@ export default function QuizWebView({
               userid: response?.userid || 0,
               moodlewsrestformat: 'json',
             });
-            
+
             if (enrolledCourses && !enrolledCourses.exception && Array.isArray(enrolledCourses)) {
               const isEnrolled = enrolledCourses.some((c: any) => c.id === courseId);
               if (IS_DEV) {
@@ -165,73 +169,23 @@ export default function QuizWebView({
               }
             }
           } catch (enrolErr) {
-            // Silent fail - continue to try loading anyway
             if (IS_DEV) {
               console.log('[QuizWebView] Could not verify enrolment:', enrolErr);
             }
           }
         }
 
-        // Step 3: Check for mobile app support and get SSO URL
-        let ssoUrl: string | null = null;
-        try {
-          const mobileConfig = await moodleFetch('/webservice/rest/server.php', {
-            wstoken: userToken,
-            wsfunction: 'tool_mobile_get_public_config',
-            moodlewsrestformat: 'json',
-          });
-          
-          if (IS_DEV) {
-            console.log('[QuizWebView] Mobile config response:', mobileConfig);
-          }
-          
-          if (mobileConfig && !mobileConfig.exception && mobileConfig.wwwroot) {
-            // Build SSO launch URL with the token
-            // Use the service name from the mobile config or default to ipelan_full
-            const serviceName = mobileConfig?.service || 'ipelan_full';
-            // Generate a dynamic passport (random number) - should be unique per request
-            const passport = Math.floor(Math.random() * 1000000).toString();
-            // Build SSO URL - remove urlscheme to stay in WebView, add redirect to go to quiz after auth
-            const redirectUrl = encodeURIComponent(getQuizUrl());
-            ssoUrl = `${mobileConfig.wwwroot}/admin/tool/mobile/launch.php?service=${serviceName}&passport=${passport}&wstoken=${userToken}&redirect=${redirectUrl}`;
-            if (IS_DEV) {
-              console.log('[QuizWebView] Got mobile SSO URL:', ssoUrl);
-              console.log('[QuizWebView] Service:', serviceName, 'Passport:', passport);
-              console.log('[QuizWebView] Will redirect to quiz after SSO');
-            }
-          } else if (mobileConfig?.exception) {
-            if (IS_DEV) {
-              console.log('[QuizWebView] Mobile config error:', mobileConfig.message);
-            }
-          }
-        } catch (e: any) {
-          // Silent fail - mobile support might not be enabled
-          if (IS_DEV) {
-            console.log('[QuizWebView] Mobile config not available:', e.message);
-          }
-        }
-
-        // Step 3: Use WebView with shared cookies enabled
-        // The WebView will share cookies with the fetch calls made by the app
-        if (IS_DEV) {
-          console.log('[QuizWebView] Using shared cookies approach');
-        }
-        
-        // Store SSO URL if available for potential use
-        if (ssoUrl) {
-          setSessionCookie('sso:' + ssoUrl);
-        } else {
-          setSessionCookie('shared');
-        }
+        setSource({ uri: quizUrl });
+        setIsLoading(false);
       } catch (err: any) {
         console.warn('[QuizWebView] Failed to validate token:', err);
-        // Don't fail - try loading anyway, WebView might have existing session
-        setSessionCookie('fallback');
+        setSource({ uri: quizUrl });
+        setIsLoading(false);
       }
     };
 
     getSession();
-  }, [userToken, quizId]);
+  }, [courseId, getQuizUrl, quizId, userToken]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -679,7 +633,7 @@ export default function QuizWebView({
           // Form was submitted, quiz might be progressing
           break;
       }
-    } catch (err) {
+    } catch {
       if (IS_DEV) {
         console.log('[QuizWebView] Raw message:', event.nativeEvent.data);
       }
@@ -696,48 +650,12 @@ export default function QuizWebView({
       clearTimeout(loadTimeout);
     }
 
-    // Handle SSO completion - if we were on SSO page and now on a different Moodle page
-    if (sessionCookie?.startsWith('sso:') && url.includes(MOODLE_BASE_URL) && !url.includes('/admin/tool/mobile/')) {
-      if (IS_DEV) {
-        console.log('[QuizWebView] SSO completed, now at:', url);
-        console.log('[QuizWebView] Session cookie cleared, redirecting to quiz...');
-      }
-      
-      // Clear SSO flag
-      setSessionCookie('authenticated');
-      
-      // Always redirect to quiz after SSO, regardless of current page
-      // The SSO page often redirects to dashboard, not to the intended URL
-      setTimeout(() => {
-        if (IS_DEV) {
-          console.log('[QuizWebView] Forcing redirect to quiz URL');
-        }
-        webViewRef.current?.injectJavaScript(`
-          window.location.href = '${getQuizUrl()}';
-          true;
-        `);
-      }, 500); // Small delay to ensure page is ready
-      
-      return;
-    }
-    
-    // Skip SSO launch page - it's part of auth process
-    if (url.includes('/admin/tool/mobile/launch.php')) {
-      if (IS_DEV) {
-        console.log('[QuizWebView] On SSO launch page, waiting for redirect...');
-      }
-      // Don't show error, keep loading
-      return;
-    }
-
     // Check if redirecting to login page
     if (url.includes('/login/') || url.includes('login.php')) {
       if (IS_DEV) {
         console.log('[QuizWebView] Detected redirect to login page - URL:', url);
-        console.log('[QuizWebView] Session status:', sessionCookie);
         console.log('[QuizWebView] User token available:', !!userToken);
       }
-      setIsRedirectingToLogin(true);
       setError('Authentification requise. Le quiz Moodle nécessite une connexion via navigateur. Veuillez ouvrir le quiz dans votre navigateur.');
       setIsLoading(false);
       return;
@@ -772,14 +690,11 @@ export default function QuizWebView({
       setIsLoading(false);
     } else if (url.includes('attempt.php')) {
       setQuizState('inprogress');
-      setIsRedirectingToLogin(false);
       setIsLoading(false);
     } else if (url.includes('/mod/quiz/')) {
-      // Any quiz page (view.php, attempt.php, etc.)
       if (url.includes('view.php')) {
         setQuizState('start');
       }
-      setIsRedirectingToLogin(false);
       setIsLoading(false);
       if (IS_DEV) {
         console.log('[QuizWebView] Quiz page loaded:', url);
@@ -801,7 +716,7 @@ export default function QuizWebView({
     if (IS_DEV) {
       console.log('[QuizWebView] Navigation:', url, 'State:', quizState);
     }
-  }, [quizState, loadTimeout, sessionCookie, getQuizUrl]);
+  }, [quizState, loadTimeout, userToken, courseId]);
 
   // Handle errors
   const handleError = useCallback((error: any) => {
@@ -832,8 +747,8 @@ export default function QuizWebView({
     }
   }, [currentUrl, getQuizUrl, quizState, router]);
 
-  // Loading screen with timeout message - also wait for session to be ready
-  if ((isLoading || !sessionCookie) && !error) {
+  // Loading screen with timeout message - also wait for source to be ready
+  if ((isLoading || !source) && !error) {
     return (
       <View className="flex-1 bg-[#FAF9F6]">
         {/* Header */}
@@ -849,16 +764,16 @@ export default function QuizWebView({
         <View className="flex-1 items-center justify-center px-6">
           <ActivityIndicator size="large" color="#4a90e2" />
           <Text className="mt-4 text-gray-500 text-center">
-            {!sessionCookie ? 'Préparation de l\'authentification...' : 'Chargement du quiz...'}
+            {!source ? 'Préparation de l\'authentification...' : 'Chargement du quiz...'}
           </Text>
-          {!sessionCookie && (
+          {!source && (
             <Text className="mt-2 text-gray-400 text-sm text-center">
               Vérification de votre accès au cours...
             </Text>
           )}
           
           {/* Force reload button - shown after 5 seconds */}
-          {sessionCookie && (
+          {source && (
             <Pressable
               onPress={() => {
                 webViewRef.current?.reload();
@@ -960,12 +875,8 @@ export default function QuizWebView({
       {/* WebView */}
       <WebView
         ref={webViewRef}
-        source={{
-          uri: getInitialUrl(),
-          headers: sessionCookie && sessionCookie !== 'fallback' && sessionCookie !== 'shared' && !sessionCookie?.startsWith('sso:')
-            ? { Cookie: `MoodleSession=${sessionCookie}` } 
-            : undefined,
-        }}
+        originWhitelist={['*']}
+        source={source ?? { uri: getQuizUrl() }}
         injectedJavaScript={injectedJavaScript}
         onMessage={handleMessage}
         onNavigationStateChange={handleNavigationStateChange}

@@ -1,843 +1,305 @@
+/**
+ * useQuiz — hook React qui orchestre le flux Moodle Quiz natif.
+ *
+ * Flux :
+ *   1. mount       → resolve cmid → instanceId, getOrCreateAttempt, fetchAllQuizQuestions
+ *   2. selectAnswer→ stocke localement la sélection
+ *   3. submitAnswer→ saveQuizAnswers + reload questions (sync sequencecheck)
+ *   4. nextQuestion / prevQuestion → navigation locale dans la liste
+ *   5. finishQuiz  → finishQuizAttempt + getAttemptReview → score final
+ *
+ * Évite `submissionoutofsequence` en rechargeant TOUJOURS le sequencecheck
+ * après chaque save.
+ */
+
 import { useCallback, useEffect, useState } from 'react';
-import { moodleFetch } from '../services/api/moodleClient';
 import {
-  finishQuizAttempt as finishQuizAttemptApi,
-  processSingleAnswer
+  extractFinalScore,
+  fetchAllQuizQuestions,
+  finishQuizAttempt,
+  getAttemptReview,
+  getOrCreateAttempt,
+  ParsedQuestion,
+  saveQuizAnswers,
 } from '../services/api/quizService';
-import { getAuthToken } from '../services/contentLoader';
-import { categorizeMoodleError, getUserFriendlyError, logActivityFetch } from '../services/utils/moodleErrorHandler';
-import { extractAudioUrl, resolveActivityInstanceId, stripHtml } from '../services/utils/moodleIdResolver';
+import { resolveActivityInstanceId } from '../services/utils/moodleIdResolver';
+
+const IS_DEV = process.env.NODE_ENV === 'development';
 
 export interface QuizScore {
-  correct: number;
-  total: number;
-  timeSpent: number;
+  correct: number;       // sumgrades arrondi
+  total: number;         // maxgrade arrondi (ou nombre de questions)
+  percentage: number;    // 0–100
+  timeSpent: number;     // secondes
 }
 
-export interface QuizQuestion {
-  id: number;
-  question: string;
-  type: 'text-mcq' | 'audio-mcq';
-  options: { value: string; label: string; inputName: string }[];
-  correctIndex: number;
-  points: number;
-  explanation?: string;
-  sequencecheck?: number;
-  audioUrl?: string;
-  slot?: number;
-  inputName?: string;
-}
-
-export interface QuizData {
-  id: number;
-  name: string;
-  intro: string;
-  questions: QuizQuestion[];
-  timeLimit?: number;
-  maxAttempts?: number;
-  shuffleQuestions: boolean;
-  shuffleAnswers: boolean;
-}
-
-export interface UseQuizReturn {
-  quiz: QuizData | null;
-  questions: QuizQuestion[];
-  isLoading: boolean;
-  error: string | null;
-  userError: string | null;
-  currentQuestion: QuizQuestion | null;
-  currentIndex: number;
-  totalQuestions: number;
-  selectedAnswer: number | null;
-  isComplete: boolean;
-  score: QuizScore;
+export interface UseQuizState {
+  // Données
+  questions: ParsedQuestion[];
   attemptId: number | null;
-  setSelectedAnswer: (index: number | null) => void;
-  submitAnswer: () => void;
+  quizName: string;
+  // Navigation
+  currentIndex: number;
+  isFirstQuestion: boolean;
+  isLastQuestion: boolean;
+  // Réponses (inputName → value)
+  answers: Record<string, string>;
+  selectedValue: string | null;
+  // États
+  isLoading: boolean;
+  isSaving: boolean;
+  isComplete: boolean;
+  error: string | null;
+  score: QuizScore | null;
+}
+
+export interface UseQuizActions {
+  selectAnswer: (value: string) => void;
+  submitAnswer: () => Promise<boolean>;
   nextQuestion: () => void;
   prevQuestion: () => void;
-  refetch: () => Promise<void>;
-  resetQuiz: () => void;
-  saveAndFinish: () => Promise<boolean>;
-  isLastQuestion: boolean;
-  isFirstQuestion: boolean;
+  finishQuiz: () => Promise<QuizScore | null>;
+  reload: () => Promise<void>;
+  reset: () => void;
 }
+
+export type UseQuizReturn = UseQuizState & UseQuizActions;
 
 export function useQuiz(
   token: string,
-  quizInstanceId: number,
+  cmid: number,
   courseId: number,
-  instanceId: number
+  fallbackInstanceId?: number
 ): UseQuizReturn {
-  const [quiz, setQuiz] = useState<QuizData | null>(null);
-  const [allQuestions, setAllQuestions] = useState<QuizQuestion[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [userError, setUserError] = useState<string | null>(null);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
-  const [startTime] = useState(Date.now());
-  const [answers, setAnswers] = useState<(number | null)[]>([]);
-  const [score, setScore] = useState<QuizScore>({ correct: 0, total: 0, timeSpent: 0 });
+  // ─── State ───────────────────────────────────────────────────────────────
+  const [questions, setQuestions] = useState<ParsedQuestion[]>([]);
   const [attemptId, setAttemptId] = useState<number | null>(null);
+  const [quizName, setQuizName] = useState<string>('Quiz');
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [selectedValue, setSelectedValue] = useState<string | null>(null);
 
-  const fetchQuizContent = useCallback(async () => {
-    const authToken = getAuthToken(token);
-    if (!authToken) {
-      const err = { type: 'auth' as const, message: 'Token manquant', originalError: null, fallbackUsed: true };
-      setUserError(getUserFriendlyError(err));
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [score, setScore] = useState<QuizScore | null>(null);
+  const [startTime] = useState(Date.now());
+
+  const currentQuestion = questions[currentIndex] ?? null;
+
+  // ─── Loader ──────────────────────────────────────────────────────────────
+  const loadQuiz = useCallback(async () => {
+    if (!token) {
+      setError('Token manquant');
+      setIsLoading(false);
+      return;
+    }
+    if (!cmid && !fallbackInstanceId) {
+      setError('Identifiant de quiz manquant');
+      setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
     setError(null);
-    setUserError(null);
 
     try {
-      logActivityFetch('Quiz', 'START', { quizInstanceId, courseId });
-
-      let actualQuizId = quizInstanceId;
-      let quizName = 'Quiz';
-
-      if (courseId && courseId > 0) {
-        const resolved = await resolveActivityInstanceId(
-          courseId,
-          'quiz',
-          quizInstanceId,
-          token
-        );
-
+      // 1. Résoudre cmid → instanceId
+      let instanceId = fallbackInstanceId ?? cmid;
+      if (courseId > 0 && cmid > 0) {
+        const resolved = await resolveActivityInstanceId(courseId, 'quiz', cmid, token);
         if (resolved) {
-          actualQuizId = resolved.instanceId;
-          quizName = resolved.name;
-          logActivityFetch('Quiz', 'RESOLVED', { cmid: quizInstanceId, instanceId: actualQuizId });
-        } else {
-          logActivityFetch('Quiz', 'RESOLVE_FAILED', { quizInstanceId });
+          instanceId = resolved.instanceId;
+          if (resolved.name) setQuizName(resolved.name);
+          if (IS_DEV) console.log('[useQuiz] Resolved cmid', cmid, '→ instance', instanceId);
         }
       }
 
-      setQuiz({
-        id: actualQuizId,
-        name: quizName,
-        intro: '',
-        questions: [],
-        shuffleQuestions: false,
-        shuffleAnswers: true,
-      });
-
-      let currentAttemptId: number | null = null;
-
-      // ===== FLUX OBLIGATOIRE =====
-      // 1. get_user_attempts (status=all)
-      // 2. si attempt.state == "inprogress" → RESUME
-      // 3. sinon → start_attempt
-
-      try {
-        // ÉTAPE 1: Récupérer TOUTES les tentatives
-        const attemptsResult = await moodleFetch('/webservice/rest/server.php', {
-          wstoken: authToken,
-          wsfunction: 'mod_quiz_get_user_attempts',
-          moodlewsrestformat: 'json',
-          quizid: actualQuizId,
-          status: 'all',
-        });
-
-        if (attemptsResult?.exception) {
-          logActivityFetch('Quiz', 'GET_ATTEMPTS_ERROR', { error: attemptsResult.message });
-        }
-
-        // ÉTAPE 2: Chercher tentative "inprogress"
-        if (attemptsResult?.attempts?.length > 0) {
-          const validAttempts = attemptsResult.attempts.filter(
-            (a: any) => a.state === 'inprogress' && a.sumgrades != null
-          );
-          const corruptedAttempts = attemptsResult.attempts.filter(
-            (a: any) => a.state === 'inprogress' && a.sumgrades == null
-          );
-
-          // Supprimer les tentatives corrompues d'abord
-          for (const corrupted of corruptedAttempts) {
-            logActivityFetch('Quiz', 'CLEANUP_CORRUPTED', { id: corrupted.id });
-            try {
-              await moodleFetch('/webservice/rest/server.php', {
-                wstoken: authToken,
-                wsfunction: 'mod_quiz_process_attempt',
-                moodlewsrestformat: 'json',
-                attemptid: corrupted.id,
-                timeup: '0',
-                finishattempt: '0',
-              }).catch(() => { });
-            } catch (e) { }
-          }
-
-          if (validAttempts.length > 0) {
-            currentAttemptId = validAttempts[0].id;
-            setAttemptId(currentAttemptId);
-            logActivityFetch('Quiz', 'RESUME', { attemptId: currentAttemptId });
-          }
-        }
-
-        // ÉTAPE 3: Si pas d'inprogress, démarrer une nouvelle tentative
-        if (!currentAttemptId) {
-          logActivityFetch('Quiz', 'NO_INPROGRESS', 'Starting new attempt');
-
-          const startResult = await moodleFetch('/webservice/rest/server.php', {
-            wstoken: authToken,
-            wsfunction: 'mod_quiz_start_attempt',
-            moodlewsrestformat: 'json',
-            quizid: actualQuizId,
-            forcenew: '1',
-            'preflightdata[0][name]': 'confirm',
-            'preflightdata[0][value]': '1',
-          });
-
-          if (startResult?.exception) {
-            const errMsg = startResult.message || '';
-
-            // Gérer l'erreur "données non enregistrées" - attempt bloquée côté Moodle
-            if (errMsg.includes('non enregistrées')) {
-              logActivityFetch('Quiz', 'BLOCKED', { error: errMsg });
-              setUserError("Une tentative de quiz est bloquée sur le serveur Moodle. Veuillez la terminer depuis Moodle Web.");
-              setError("Tentative bloquée");
-              setIsLoading(false);
-              return;
-            }
-
-            // Gérer l'erreur "attemptstillinprogress"
-            if (errMsg.includes('attemptstillinprogress')) {
-              logActivityFetch('Quiz', 'ALREADY_EXISTS', 'Cannot start new attempt');
-              setUserError("Vous avez déjà une tentative en cours pour ce quiz. Veuillez la terminer ou attendre.");
-              setError("Tentative en cours");
-              setIsLoading(false);
-              return;
-            }
-
-            logActivityFetch('Quiz', 'START_ERROR', { error: errMsg });
-            setUserError(errMsg);
-            setIsLoading(false);
-            return;
-          }
-
-          //Nouvelle tentative créée
-          currentAttemptId = startResult?.attempt?.id;
-          setAttemptId(currentAttemptId);
-          logActivityFetch('Quiz', 'STARTED', { attemptId: currentAttemptId });
-
-          // Initialiser la tentative pour éviter l'erreur "données non enregistrées"
-          try {
-            await moodleFetch('/webservice/rest/server.php', {
-              wstoken: authToken,
-              wsfunction: 'mod_quiz_process_attempt',
-              moodlewsrestformat: 'json',
-              attemptid: currentAttemptId,
-              finishattempt: '0',
-              timeup: '0',
-            });
-            logActivityFetch('Quiz', 'INIT_FIRST_ATTEMPT', { attemptId: currentAttemptId });
-          } catch (initErr) {
-            logActivityFetch('Quiz', 'INIT_FIRST_ATTEMPT_FAILED', { error: (initErr as Error).message });
-          }
-        }
-      } catch (err: any) {
-        logActivityFetch('Quiz', 'ATTEMPTS_EXCEPTION', err.message);
+      if (!instanceId || instanceId <= 0) {
+        throw new Error("Impossible de résoudre l'ID du quiz");
       }
 
-      if (!currentAttemptId) {
-        const errMsg = "Impossible de récupérer la tentative de quiz. Soit le quiz n'existe pas, soit vous n'y êtes pas enrolled.";
-        logActivityFetch('Quiz', 'NO_ATTEMPT', errMsg);
-        setUserError(errMsg);
-        setError(errMsg);
-        setIsLoading(false);
-        return;
+      // 2. Démarrer / reprendre une tentative
+      const aId = await getOrCreateAttempt(token, instanceId);
+      if (!aId) {
+        throw new Error(
+          "Impossible de démarrer le quiz. Vérifiez que vous êtes inscrit au cours."
+        );
       }
+      setAttemptId(aId);
 
-      let questions = await loadQuestionsFromAttempt(authToken, currentAttemptId);
-
-      // Si pas de questions à cause d'une tentative invalide, essayer de la terminer et recommencer
-      if (questions.length === 0 && currentAttemptId) {
-        const isInvalidState = await attemptIsInvalidState(authToken, currentAttemptId);
-        if (isInvalidState) {
-          logActivityFetch('Quiz', 'TRYING_RECOVERY', { attemptId: currentAttemptId });
-
-          // Essayer de terminer la tentative corrompue
-          try {
-            await moodleFetch('/webservice/rest/server.php', {
-              wstoken: authToken,
-              wsfunction: 'mod_quiz_process_attempt',
-              moodlewsrestformat: 'json',
-              attemptid: currentAttemptId,
-              finishattempt: '1',
-              timeup: '0',
-            });
-            logActivityFetch('Quiz', 'CLEANUP_FINISHED', { attemptId: currentAttemptId });
-          } catch (e) {
-            logActivityFetch('Quiz', 'CLEANUP_FAILED', { attemptId: currentAttemptId, error: (e as Error).message });
-          }
-
-          // Créer une nouvelle tentative
-          const newStartResult = await moodleFetch('/webservice/rest/server.php', {
-            wstoken: authToken,
-            wsfunction: 'mod_quiz_start_attempt',
-            moodlewsrestformat: 'json',
-            quizid: actualQuizId,
-            forcenew: '1',
-            'preflightdata[0][name]': 'confirm',
-            'preflightdata[0][value]': '1',
-          });
-
-          if (!newStartResult?.exception && newStartResult?.attempt?.id) {
-            const newAttemptId = newStartResult.attempt.id;
-            setAttemptId(newAttemptId);
-            logActivityFetch('Quiz', 'RECOVERY_STARTED', { attemptId: newAttemptId });
-
-            // Initialiser la nouvelle tentative avec process_attempt (sans terminer)
-            try {
-              await moodleFetch('/webservice/rest/server.php', {
-                wstoken: authToken,
-                wsfunction: 'mod_quiz_process_attempt',
-                moodlewsrestformat: 'json',
-                attemptid: newAttemptId,
-                finishattempt: '0',
-                timeup: '0',
-                'preflight_data[0][name]': 'confirm',
-                'preflight_data[0][value]': '1',
-              });
-              logActivityFetch('Quiz', 'INIT_ATTEMPT', { attemptId: newAttemptId });
-            } catch (initErr) {
-              logActivityFetch('Quiz', 'INIT_ATTEMPT_FAILED', { error: (initErr as Error).message });
-            }
-
-            questions = await loadQuestionsFromAttempt(authToken, newAttemptId);
-          }
-        }
+      // 3. Charger TOUTES les questions (multi-pages)
+      const qs = await fetchAllQuizQuestions(token, aId);
+      if (qs.length === 0) {
+        throw new Error('Aucune question dans ce quiz.');
       }
-
-      if (questions.length === 0) {
-        const errMsg = "Aucune question trouvée pour cette tentative. Le quiz peut être vide ou les questions ne sont pas accessibles.";
-        logActivityFetch('Quiz', 'NO_QUESTIONS', errMsg);
-        setError(errMsg);
-        setUserError(errMsg);
-      } else {
-        setAllQuestions(questions);
-        setAnswers(new Array(questions.length).fill(null));
-        logActivityFetch('Quiz', 'SUCCESS', { questionsCount: questions.length });
+      setQuestions(qs);
+      setCurrentIndex(0);
+      setSelectedValue(null);
+      if (IS_DEV) {
+        console.log('[useQuiz] Loaded', qs.length, 'questions for attempt', aId);
       }
-
     } catch (err: any) {
-      const moodleError = categorizeMoodleError(err, 'fetch_quiz');
-      logActivityFetch('Quiz', 'ERROR', moodleError);
-      setError(moodleError.message);
-      setUserError(getUserFriendlyError(moodleError));
+      if (IS_DEV) console.warn('[useQuiz] load failed:', err?.message);
+      setError(err?.message || 'Erreur de chargement du quiz');
     } finally {
       setIsLoading(false);
     }
-  }, [token, quizInstanceId, courseId]);
-
-  async function attemptIsInvalidState(authToken: string, attemptId: number): Promise<boolean> {
-    try {
-      const result = await moodleFetch('/webservice/rest/server.php', {
-        wstoken: authToken,
-        wsfunction: 'mod_quiz_get_attempt_data',
-        moodlewsrestformat: 'json',
-        attemptid: attemptId,
-        page: 0,
-        'preflightdata[0][name]': 'confirm',
-        'preflightdata[0][value]': '1',
-      });
-
-      if (result?.exception) {
-        const errMsg = result.message || '';
-        return errMsg.includes('non enregistrées') || errMsg.includes('Veuillez vérifier');
-      }
-      return false;
-    } catch {
-      return false;
-    }
-  }
-
-  async function loadQuestionsFromCourse(authToken: string, courseId: number, cmid: number): Promise<QuizQuestion[]> {
-    const questions: QuizQuestion[] = [];
-
-    try {
-      // Récupérer le contenu du cours
-      const contentsResult = await moodleFetch('/webservice/rest/server.php', {
-        wstoken: authToken,
-        wsfunction: 'core_course_get_contents',
-        moodlewsrestformat: 'json',
-        courseid: courseId,
-      });
-
-      if (contentsResult?.exception || !Array.isArray(contentsResult)) {
-        logActivityFetch('Quiz', 'COURSE_CONTENTS_FAILED', { error: contentsResult?.message || 'Invalid response' });
-        return [];
-      }
-
-      // Chercher le module quiz dans le contenu du cours
-      for (const section of contentsResult) {
-        if (!section.modules) continue;
-
-        for (const module of section.modules) {
-          if (module.id === cmid && module.modname === 'quiz') {
-            logActivityFetch('Quiz', 'FOUND_MODULE', { cmid, quizId: module.instance });
-
-            // Si le module a des questions intégrées (format H5P ou similaire)
-            if (module.contents && Array.isArray(module.contents)) {
-              for (const content of module.contents) {
-                if (content.type === 'file' && content.fileurl) {
-                  logActivityFetch('Quiz', 'FOUND_CONTENT', { type: content.type, filename: content.filename });
-                }
-              }
-            }
-          }
-        }
-      }
-    } catch (err) {
-      logActivityFetch('Quiz', 'COURSE_CONTENTS_EXCEPTION', { error: (err as Error).message });
-    }
-
-    return questions;
-  }
-
-  async function loadQuestionsFromAttempt(authToken: string, attemptId: number): Promise<QuizQuestion[]> {
-    const questions: QuizQuestion[] = [];
-
-    // Vérifier les informations d'accès pour connaître les preflights requis
-    try {
-      const accessInfo = await moodleFetch('/webservice/rest/server.php', {
-        wstoken: authToken,
-        wsfunction: 'mod_quiz_get_attempt_access_information',
-        moodlewsrestformat: 'json',
-        attemptid: attemptId,
-      });
-
-      if (!accessInfo?.exception) {
-        logActivityFetch('Quiz', 'ACCESS_INFO', {
-          ispreflightcheckrequired: accessInfo?.ispreflightcheckrequired,
-          preflightdata: accessInfo?.preflightdata,
-          state: accessInfo?.attempt?.state,
-        });
-
-        // Si preflight est requis, essayer de le remplir
-        if (accessInfo?.ispreflightcheckrequired && accessInfo?.preflightdata) {
-          const preflightParams: Record<string, any> = {
-            wstoken: authToken,
-            wsfunction: 'mod_quiz_process_attempt',
-            moodlewsrestformat: 'json',
-            attemptid: attemptId,
-            finishattempt: '0',
-            timeup: '0',
-          };
-
-          // Ajouter les champs preflight requis
-          accessInfo.preflightdata.forEach((field: any, index: number) => {
-            preflightParams[`preflightdata[${index}][name]`] = field.name;
-            preflightParams[`preflightdata[${index}][value]`] = field.value || '1';
-          });
-
-          await moodleFetch('/webservice/rest/server.php', preflightParams);
-          logActivityFetch('Quiz', 'PREFLIGHT_SUBMITTED', { attemptId });
-        }
-      }
-    } catch (err) {
-      logActivityFetch('Quiz', 'ACCESS_INFO_FAILED', { error: (err as Error).message });
-    }
-
-    try {
-      const summaryResult = await moodleFetch('/webservice/rest/server.php', {
-        wstoken: authToken,
-        wsfunction: 'mod_quiz_get_attempt_summary',
-        moodlewsrestformat: 'json',
-        attemptid: attemptId,
-      });
-
-      if (!summaryResult?.exception && summaryResult?.questions?.length > 0) {
-        logActivityFetch('Quiz', 'SUMMARY_LOADED', { count: summaryResult.questions.length });
-
-        for (const q of summaryResult.questions) {
-          const html = q.html || '';
-          const questionText = extractQuestionText(html);
-          const parsedOptions = extractOptionsFromHtml(html);
-
-          if (parsedOptions.length >= 2) {
-            questions.push({
-              id: q.slot || questions.length + 1,
-              question: questionText || `Question ${questions.length + 1}`,
-              type: html.includes('audio') || html.match(/\.(mp3|wav|m4a)/i) ? 'audio-mcq' : 'text-mcq',
-              options: parsedOptions,
-              correctIndex: 0,
-              points: q.maxmark || 1,
-              sequencecheck: q.sequencecheck,
-              audioUrl: extractAudioUrl(html),
-              slot: q.slot,
-            });
-          }
-        }
-
-        if (questions.length > 0) {
-          return questions;
-        }
-      }
-    } catch (err) {
-      logActivityFetch('Quiz', 'SUMMARY_FAILED', { error: (err as Error).message });
-    }
-
-    // Fallback: essayer mod_quiz_get_attempt_review (pour tentatives terminées)
-    try {
-      const reviewResult = await moodleFetch('/webservice/rest/server.php', {
-        wstoken: authToken,
-        wsfunction: 'mod_quiz_get_attempt_review',
-        moodlewsrestformat: 'json',
-        attemptid: attemptId,
-      });
-
-      if (!reviewResult?.exception && reviewResult?.questions?.length > 0) {
-        logActivityFetch('Quiz', 'REVIEW_LOADED', { count: reviewResult.questions.length });
-
-        for (const q of reviewResult.questions) {
-          const html = q.html || '';
-          const questionText = extractQuestionText(html);
-          const parsedOptions = extractOptionsFromHtml(html);
-
-          if (parsedOptions.length >= 2) {
-            questions.push({
-              id: q.slot || questions.length + 1,
-              question: questionText || `Question ${questions.length + 1}`,
-              type: html.includes('audio') || html.match(/\.(mp3|wav|m4a)/i) ? 'audio-mcq' : 'text-mcq',
-              options: parsedOptions,
-              correctIndex: 0,
-              points: q.maxmark || 1,
-              sequencecheck: q.sequencecheck,
-              audioUrl: extractAudioUrl(html),
-              slot: q.slot,
-            });
-          }
-        }
-
-        if (questions.length > 0) {
-          return questions;
-        }
-      }
-    } catch (err) {
-      logActivityFetch('Quiz', 'REVIEW_FAILED', { error: (err as Error).message });
-    }
-
-    // Dernier recours: attempt_data avec preflight
-    let page = 0;
-    try {
-      while (true) {
-        const dataResult = await moodleFetch('/webservice/rest/server.php', {
-          wstoken: authToken,
-          wsfunction: 'mod_quiz_get_attempt_data',
-          moodlewsrestformat: 'json',
-          attemptid: attemptId,
-          page: page,
-          'preflightdata[0][name]': 'confirm',
-          'preflightdata[0][value]': '1',
-        });
-
-        if (dataResult?.exception) {
-          const errMsg = dataResult.message || '';
-
-          if (errMsg.includes('non enregistrées') || errMsg.includes(' Veuillez vérifier')) {
-            logActivityFetch('Quiz', 'ATTEMPT_INVALID_STATE', { error: errMsg });
-            return [];
-          }
-
-          const moodleError = categorizeMoodleError(dataResult, `load_page_${page}`);
-          logActivityFetch('Quiz', 'PAGE_ERROR', moodleError);
-          break;
-        }
-
-        if (!dataResult?.questions || !Array.isArray(dataResult.questions)) {
-          logActivityFetch('Quiz', 'NO_QUESTIONS_PAGE', page);
-          break;
-        }
-
-        logActivityFetch('Quiz', `PAGE_${page}`, { count: dataResult.questions.length });
-
-        for (const q of dataResult.questions) {
-          const html = q.html || '';
-
-          const questionText = extractQuestionText(html);
-          const parsedOptions = extractOptionsFromHtml(html);
-
-          if (parsedOptions.length >= 2) {
-            questions.push({
-              id: q.slot || questions.length + 1,
-              question: questionText || `Question ${questions.length + 1}`,
-              type: html.includes('audio') || html.match(/\.(mp3|wav|m4a)/i) ? 'audio-mcq' : 'text-mcq',
-              options: parsedOptions,
-              correctIndex: 0,
-              points: q.maxmark || 1,
-              sequencecheck: q.sequencecheck,
-              audioUrl: extractAudioUrl(html),
-              slot: q.slot,
-            });
-          }
-        }
-
-        if (dataResult.nextpage === -1) break;
-        page++;
-
-        if (page > 100) {
-          logActivityFetch('Quiz', 'SAFETY_LIMIT', page);
-          break;
-        }
-      }
-    } catch (err: any) {
-      const moodleError = categorizeMoodleError(err, 'load_questions');
-      logActivityFetch('Quiz', 'LOAD_EXCEPTION', moodleError);
-    }
-
-    return questions;
-  }
-
-  async function saveAnswerToMoodle(
-    authToken: string,
-    attemptId: number,
-    slot: number,
-    answerIndex: number,
-    sequenceCheck: number
-  ): Promise<boolean> {
-    try {
-      const question = allQuestions.find(q => q.id === slot || q.id === slot);
-      if (!question) {
-        logActivityFetch('Quiz', 'SAVE_ANSWER_NO_QUESTION', { slot });
-        return false;
-      }
-
-      const data = await moodleFetch('/webservice/rest/server.php', {
-        wstoken: authToken,
-        wsfunction: 'mod_quiz_process_attempt',
-        moodlewsrestformat: 'json',
-        attemptid: attemptId,
-        'data[0]': {
-          name: `q${slot}:_sequencecheck`,
-          value: sequenceCheck || 0
-        },
-        'data[1]': {
-          name: `q${slot}:_answer`,
-          value: answerIndex
-        },
-      });
-
-      if (data?.exception) {
-        logActivityFetch('Quiz', 'SAVE_ANSWER_ERROR', { slot, error: data.message });
-        return false;
-      }
-
-      logActivityFetch('Quiz', 'ANSWER_SAVED', { slot, answerIndex });
-      return true;
-    } catch (err: any) {
-      logActivityFetch('Quiz', 'SAVE_ANSWER_EXCEPTION', { slot, error: err.message });
-      return false;
-    }
-  }
-
-  async function finishQuizAttempt(authToken: string, attemptId: number): Promise<boolean> {
-    try {
-      const result = await moodleFetch('/webservice/rest/server.php', {
-        wstoken: authToken,
-        wsfunction: 'mod_quiz_finish_attempt',
-        moodlewsrestformat: 'json',
-        attemptid: attemptId,
-      });
-
-      if (result?.exception) {
-        logActivityFetch('Quiz', 'FINISH_ERROR', { error: result.message });
-        return false;
-      }
-
-      logActivityFetch('Quiz', 'FINISHED', { attemptId });
-      return true;
-    } catch (err: any) {
-      logActivityFetch('Quiz', 'FINISH_EXCEPTION', { error: err.message });
-      return false;
-    }
-  }
-
-  async function saveAnswersToMoodle(authToken: string, attemptId: number): Promise<boolean> {
-    let allSaved = true;
-
-    for (let i = 0; i < answers.length; i++) {
-      if (answers[i] !== null) {
-        const question = allQuestions[i];
-        if (question) {
-          const saved = await saveAnswerToMoodle(
-            authToken,
-            attemptId,
-            question.id,
-            answers[i] as number,
-            question.sequencecheck || 0
-          );
-          if (!saved) allSaved = false;
-        }
-      }
-    }
-
-    return allSaved;
-  }
-
-  function extractQuestionText(html: string): string {
-    const match = html.match(/class="[^"]*qtext[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-    if (match) return stripHtml(match[1]);
-
-    const textOnly = html.replace(/<[^>]*>/g, '').trim();
-    return textOnly.length > 0 ? textOnly.slice(0, 500) : '';
-  }
-
-  function extractOptionsFromHtml(html: string): { value: string; label: string; inputName: string }[] {
-    const options: { value: string; label: string; inputName: string }[] = [];
-
-    const inputMatches = Array.from(html.matchAll(/<input[^>]+type="(?:radio|checkbox)"[^>]+name="([^"]+)"[^>]+value="([^"]*)"[^>]*>[\s\S]*?<label[^>]*>([\s\S]*?)<\/label>/gi));
-    for (const match of inputMatches) {
-      const inputName = match[1];
-      const value = match[2];
-      const label = stripHtml(match[3]);
-      if (label && !options.find(o => o.value === value)) {
-        options.push({ inputName, value, label });
-      }
-    }
-
-    if (options.length === 0) {
-      const labelMatches = Array.from(html.matchAll(/<label[^>]*>([\s\S]*?)<\/label>/gi));
-      for (const match of labelMatches) {
-        const label = stripHtml(match[1]);
-        if (label && !options.find(o => o.label === label)) {
-          options.push({ inputName: '', value: String(options.length), label });
-        }
-      }
-    }
-
-    return options;
-  }
+  }, [token, cmid, courseId, fallbackInstanceId]);
 
   useEffect(() => {
-    fetchQuizContent();
-  }, [fetchQuizContent]);
+    loadQuiz();
+  }, [loadQuiz]);
 
-  const totalQuestions = allQuestions.length;
-  const currentQuestion = allQuestions[currentIndex] || null;
-  const isFirstQuestion = currentIndex === 0;
-  const isLastQuestion = totalQuestions > 0 && currentIndex >= totalQuestions - 1;
-  const isComplete = score.total > 0 && currentIndex >= totalQuestions - 1 && answers.filter(a => a !== null).length === totalQuestions;
+  // ─── Actions ─────────────────────────────────────────────────────────────
 
-  const handleSubmitAnswer = useCallback(async () => {
-    if (selectedAnswer === null) return;
+  const selectAnswer = useCallback((value: string) => {
+    setSelectedValue(value);
+  }, []);
 
-    const newAnswers = [...answers];
-    newAnswers[currentIndex] = selectedAnswer;
-    setAnswers(newAnswers);
+  /**
+   * Sauvegarde la réponse courante puis recharge les questions pour mettre à
+   * jour les sequencechecks. Idempotent.
+   */
+  const submitAnswer = useCallback(async (): Promise<boolean> => {
+    if (!attemptId || !currentQuestion || selectedValue === null) return false;
+    if (!currentQuestion.answerInputName) return false;
 
-    const moodleToken = getAuthToken(token);
-    const currentQ = allQuestions[currentIndex];
-    const slot = currentQ?.id || currentIndex + 1;
+    setIsSaving(true);
+    try {
+      const newAnswers = {
+        ...answers,
+        [currentQuestion.answerInputName]: selectedValue,
+      };
+      setAnswers(newAnswers);
 
-    if (attemptId && moodleToken && currentQ) {
-      const answerValue = currentQ.options[selectedAnswer]?.value || String(selectedAnswer);
-      await processSingleAnswer(
-        moodleToken,
+      const ok = await saveQuizAnswers(
+        token,
         attemptId,
-        slot,
-        answerValue,
-        currentQ.sequencecheck || 0
+        { [currentQuestion.answerInputName]: selectedValue },
+        { [currentQuestion.slot]: currentQuestion.sequencecheck }
       );
-    }
 
-    let correctCount = 0;
-    for (let i = 0; i < newAnswers.length; i++) {
-      if (newAnswers[i] === allQuestions[i]?.correctIndex) {
-        correctCount++;
+      if (!ok) {
+        if (IS_DEV) console.warn('[useQuiz] save failed for slot', currentQuestion.slot);
+        return false;
       }
-    }
 
-    setScore({
-      correct: correctCount,
-      total: currentIndex + 1,
-      timeSpent: Math.round((Date.now() - startTime) / 1000)
-    });
-  }, [selectedAnswer, currentIndex, answers, allQuestions, startTime, attemptId, token]);
-
-  const handleSaveAndFinish = useCallback(async (): Promise<boolean> => {
-    const moodleToken = getAuthToken(token);
-    if (!attemptId || !moodleToken) return false;
-
-    const answersObj: Record<string, string> = {};
-    const seqChecks: Record<number, number> = {};
-
-    for (let i = 0; i < answers.length; i++) {
-      if (answers[i] !== null) {
-        const question = allQuestions[i];
-        if (question && question.options[answers[i] as number]) {
-          const slot = question.id;
-          answersObj[`q${slot}:_answer`] = question.options[answers[i] as number].value || String(answers[i]);
-          seqChecks[slot] = question.sequencecheck || 0;
-        }
+      // Recharger pour rafraîchir les sequencechecks
+      const refreshed = await fetchAllQuizQuestions(token, attemptId);
+      if (refreshed.length > 0) {
+        setQuestions(refreshed);
       }
+      return true;
+    } catch (err: any) {
+      if (IS_DEV) console.warn('[useQuiz] submitAnswer:', err?.message);
+      return false;
+    } finally {
+      setIsSaving(false);
     }
+  }, [token, attemptId, currentQuestion, selectedValue, answers]);
 
-    return await finishQuizAttemptApi(moodleToken, attemptId, answersObj, seqChecks);
-  }, [attemptId, token, answers, allQuestions]);
-
-  const handleNextQuestion = useCallback(() => {
-    if (currentIndex < totalQuestions - 1) {
-      setCurrentIndex(prev => prev + 1);
-      setSelectedAnswer(answers[currentIndex + 1]);
+  const nextQuestion = useCallback(() => {
+    if (currentIndex < questions.length - 1) {
+      setCurrentIndex(i => i + 1);
+      setSelectedValue(null);
     }
-  }, [currentIndex, totalQuestions, answers]);
+  }, [currentIndex, questions.length]);
 
-  const handlePrevQuestion = useCallback(() => {
+  const prevQuestion = useCallback(() => {
     if (currentIndex > 0) {
-      setCurrentIndex(prev => prev - 1);
-      setSelectedAnswer(answers[currentIndex - 1]);
+      setCurrentIndex(i => i - 1);
+      setSelectedValue(null);
     }
-  }, [currentIndex, answers]);
+  }, [currentIndex]);
 
-  const handleResetQuiz = useCallback(() => {
-    setCurrentIndex(0);
-    setSelectedAnswer(null);
-    setAnswers(new Array(allQuestions.length).fill(null));
-    setScore({ correct: 0, total: 0, timeSpent: 0 });
-  }, [allQuestions]);
+  /**
+   * Termine la tentative et récupère le score final via la review Moodle.
+   */
+  const finishQuiz = useCallback(async (): Promise<QuizScore | null> => {
+    if (!attemptId) return null;
 
-  useEffect(() => {
-    if (allQuestions.length > 0 && answers.filter(a => a !== null).length === allQuestions.length) {
-      let correctCount = 0;
-      for (let i = 0; i < allQuestions.length; i++) {
-        if (answers[i] === allQuestions[i].correctIndex) {
-          correctCount++;
-        }
+    setIsSaving(true);
+    try {
+      const sequencechecks: Record<number, number> = {};
+      for (const q of questions) {
+        sequencechecks[q.slot] = q.sequencecheck;
       }
-      setScore({
-        correct: correctCount,
-        total: allQuestions.length,
-        timeSpent: Math.round((Date.now() - startTime) / 1000)
-      });
+
+      const ok = await finishQuizAttempt(token, attemptId, answers, sequencechecks);
+      if (!ok) {
+        if (IS_DEV) console.warn('[useQuiz] finish failed');
+        return null;
+      }
+
+      const review = await getAttemptReview(token, attemptId);
+      let finalScore: QuizScore;
+
+      if (review) {
+        const { sumgrades, maxgrade, percentage } = extractFinalScore(review);
+        finalScore = {
+          correct: Math.round(sumgrades),
+          total: Math.round(maxgrade) || questions.length,
+          percentage,
+          timeSpent: Math.floor((Date.now() - startTime) / 1000),
+        };
+      } else {
+        // Fallback : score local basé sur les réponses saisies
+        const answered = Object.keys(answers).length;
+        finalScore = {
+          correct: 0,
+          total: questions.length,
+          percentage: questions.length > 0
+            ? Math.round((answered / questions.length) * 100)
+            : 0,
+          timeSpent: Math.floor((Date.now() - startTime) / 1000),
+        };
+      }
+
+      setScore(finalScore);
+      setIsComplete(true);
+      return finalScore;
+    } catch (err: any) {
+      if (IS_DEV) console.warn('[useQuiz] finishQuiz:', err?.message);
+      return null;
+    } finally {
+      setIsSaving(false);
     }
-  }, [answers, allQuestions, startTime]);
+  }, [token, attemptId, questions, answers, startTime]);
+
+  const reset = useCallback(() => {
+    setQuestions([]);
+    setAttemptId(null);
+    setCurrentIndex(0);
+    setAnswers({});
+    setSelectedValue(null);
+    setIsComplete(false);
+    setError(null);
+    setScore(null);
+  }, []);
 
   return {
-    quiz,
-    questions: allQuestions,
-    isLoading,
-    error,
-    userError,
-    currentQuestion,
-    currentIndex,
-    totalQuestions,
-    selectedAnswer,
-    isComplete,
-    score,
+    questions,
     attemptId,
-    setSelectedAnswer,
-    submitAnswer: handleSubmitAnswer,
-    nextQuestion: handleNextQuestion,
-    prevQuestion: handlePrevQuestion,
-    refetch: fetchQuizContent,
-    resetQuiz: handleResetQuiz,
-    saveAndFinish: handleSaveAndFinish,
-    isLastQuestion,
-    isFirstQuestion,
+    quizName,
+    currentIndex,
+    isFirstQuestion: currentIndex === 0,
+    isLastQuestion: currentIndex === questions.length - 1,
+    answers,
+    selectedValue,
+    isLoading,
+    isSaving,
+    isComplete,
+    error,
+    score,
+    selectAnswer,
+    submitAnswer,
+    nextQuestion,
+    prevQuestion,
+    finishQuiz,
+    reload: loadQuiz,
+    reset,
   };
 }
 

@@ -4,6 +4,7 @@
  * Sans interruption utilisateur
  */
 
+import { isMoodleOnline } from '../api/moodleClient';
 import { getGlobalGamificationStats, syncUserGamificationToMoodle, triggerGamificationSync } from '../gamification/gamificationService';
 import { getDBConnection } from '../storage/db-service';
 
@@ -177,15 +178,7 @@ class SyncQueue {
 
 
   private async checkOnline(): Promise<boolean> {
-    try {
-      const response = await fetch(process.env.EXPO_PUBLIC_API_URL || 'https://moodle.richatt.com', {
-        method: 'HEAD',
-        timeout: 3000,
-      } as any);
-      return response.ok;
-    } catch {
-      return false;
-    }
+    return isMoodleOnline();
   }
 
   // API publique pour les composants

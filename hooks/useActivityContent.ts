@@ -4,7 +4,7 @@ import { moodleFetch } from '../services/api/moodleClient';
 import { shuffle } from '../utils/shuffle';
 
 const IS_DEV = process.env.NODE_ENV === "development";
-const ADMIN_TOKEN = process.env.MOODLE_ADMIN_TOKEN;
+const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN;
 
 async function moodleFetchWithFallback(endpoint: string, params: Record<string, any>, userToken: string) {
   let result = await moodleFetch(endpoint, params);
@@ -116,7 +116,7 @@ export function useActivityContent(
     setError(null);
 
     try {
-      const activityToken = token || process.env.MOODLE_ADMIN_TOKEN;
+      const activityToken = token || process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN;
       if (!activityToken) {
         setError('Token d\'authentification manquant');
         setIsLoading(false);
@@ -304,8 +304,12 @@ async function loadQuizWithRetry(
         }
       }
 
-       if (questions.length === 0) {
-        questions.push({ question: 'Quel est le contraire de "Ko" (Oui) en Pulaar ?', options: ['Alelu (Non)', 'Alelu', 'Kanji', 'Aboro'], correctIndex: 0, points: 1 });
+      if (questions.length === 0) {
+        if (IS_DEV) {
+          console.warn(`[loadQuizWithRetry] Aucune question Moodle exploitable pour ${type}=${id}`);
+        }
+        setError(`Aucune question disponible pour ce quiz (id=${id}). Vérifiez le contenu Moodle.`);
+        continue;
       }
 
       if (IS_DEV) {
@@ -325,8 +329,69 @@ async function loadQuizWithRetry(
 }
 
 /**
- *  charger une Dictée avec stratégie de retry
+ * Extrait une liste de mots à dicter depuis le HTML d'intro Moodle.
+ *
+ * Conventions supportées (par ordre de priorité) :
+ *   1. Balises <li>...</li>  → un mot par item
+ *   2. Marqueurs `mot | indice` → format <mot>|<hint optionnel>
+ *   3. Lignes séparées par <br> ou retours chariot
+ *   4. Mots séparés par virgules ou points-virgules
+ *
+ * Renvoie [] si rien d'exploitable n'est trouvé.
  */
+function parseDictationWordsFromIntro(
+  introHtml: string
+): { word: string; hint?: string }[] {
+  if (!introHtml) return [];
+
+  const decoded = introHtml
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#039;/gi, "'");
+
+  // 1. Liste <li>
+  const liMatches = Array.from(decoded.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi));
+  if (liMatches.length > 0) {
+    return liMatches
+      .map(m => m[1].replace(/<[^>]+>/g, '').trim())
+      .filter(s => s.length > 0)
+      .map(splitWordHint);
+  }
+
+  
+  const plain = decoded.replace(/<br\s*\/?\s*>/gi, '\n').replace(/<[^>]+>/g, '\n');
+  const lines = plain
+    .split(/\n|\r/)
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+
+  let candidates: string[] = [];
+  if (lines.length >= 2) {
+    candidates = lines;
+  } else if (lines.length === 1) {
+     candidates = lines[0]
+      .split(/[,;]/)
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+  }
+
+  return candidates
+    .filter(s => /\S/.test(s))
+    .map(splitWordHint);
+}
+
+function splitWordHint(raw: string): { word: string; hint?: string } {
+  const parts = raw.split('|').map(s => s.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    return { word: parts[0], hint: parts.slice(1).join(' | ') };
+  }
+  return { word: parts[0] || raw.trim() };
+}
+
+ 
 async function loadDictationWithRetry(
   token: string,
   moduleId: number,
@@ -336,8 +401,7 @@ async function loadDictationWithRetry(
   setDictation: (d: DictationData | null) => void,
   setError: (e: string) => void
 ) {
-  // API mod_assign_get_assignments attend courseids[], pas assignmentids[]
-  const idsToTry = [courseId]; // Utiliser courseId uniquement
+   const idsToTry = [courseId];  
 
   for (const id of idsToTry) {
     try {
@@ -363,7 +427,7 @@ async function loadDictationWithRetry(
       // Rechercher l'assignment par instanceId
       const courses = result?.courses || [];
       let assignment: any = null;
-      
+
       for (const course of courses) {
         const assignments = course.assignments || [];
         assignment = assignments.find((a: any) => a.id === instanceId);
@@ -375,14 +439,31 @@ async function loadDictationWithRetry(
         continue;
       }
 
+       const introFiles: any[] = assignment.introfiles || [];
+      const audioFile = introFiles.find((f: any) =>
+        f?.filename && /\.(mp3|wav|ogg|m4a|aac)$/i.test(f.filename)
+      );
+      const audioUrl = audioFile?.fileurl
+        ? `${audioFile.fileurl.replace('/pluginfile.php/', '/webservice/pluginfile.php/')}?token=${token}`
+        : undefined;
+
+       const words = parseDictationWordsFromIntro(assignment.intro || '');
+
+      if (words.length === 0) {
+        const msg = `Aucun mot trouvé dans l'intro de la dictée (assignment ${instanceId}). Format attendu : liste <li> ou un mot par ligne.`;
+        if (IS_DEV) console.warn('[loadDictationWithRetry]', msg);
+        setError(msg);
+      }
+
       const dictation: DictationData = {
         id: instanceId,
         title: assignment.name || 'Dictée audio',
-        words: [],
+        audioUrl,
+        words,
       };
 
       if (IS_DEV) {
-        console.log(`[loadDictationWithRetry] ✅ SUCCESS: instanceId ${instanceId} in course ${id}`);
+        console.log(`[loadDictationWithRetry] ✅ instanceId ${instanceId}: ${words.length} mots, audio=${audioUrl ? 'oui' : 'non'}`);
       }
 
       setDictation(dictation);
@@ -495,11 +576,9 @@ async function loadLessonWithRetry(
     if (lessonsResult?.exception) {
       if (IS_DEV) console.warn(`[loadLessonWithRetry] Get lessons failed:`, lessonsResult.message);
     } else if (lessonsResult?.lessons?.length > 0) {
-      // Trouver la lesson avec le bon cmid
-      let targetLesson = lessonsResult.lessons.find((l: any) => l.cmid === moduleId || l.cmid === cmid);
+       let targetLesson = lessonsResult.lessons.find((l: any) => l.cmid === moduleId || l.cmid === cmid);
 
-      // Fallback: utiliser la première lesson
-      if (!targetLesson && lessonsResult.lessons.length > 0) {
+       if (!targetLesson && lessonsResult.lessons.length > 0) {
         targetLesson = lessonsResult.lessons[0];
         if (IS_DEV) console.log(`[loadLessonWithRetry] Using fallback lesson:`, targetLesson.id, targetLesson.name);
       }

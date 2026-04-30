@@ -91,15 +91,14 @@ class DownloadService {
   }
 
   async downloadAudio(audioUrl: string): Promise<string> {
-    const filename = this.getFilenameFromUrl(audioUrl);
-    const audioDir = new Directory(this.baseDir, 'audio');
-    
-    if (!audioDir.exists) {
-      await audioDir.create();
-    }
+    // Cache key (sans paramètre token) pour rester cohérent avec getLocalUri()
+    const cacheKey = audioUrl.split('?')[0];
+    const filename = this.getFilenameFromUrl(cacheKey);
 
-    const localFile = new File(audioDir, filename);
-    
+    await this.ensureBaseDir();
+
+    const localFile = new File(this.baseDir, filename);
+
     if (localFile.exists) {
       return localFile.uri;
     }
@@ -109,7 +108,7 @@ class DownloadService {
     } catch (error) {
       console.warn('Failed to download audio:', error);
     }
-    
+
     return localFile.uri;
   }
 

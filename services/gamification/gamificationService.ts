@@ -12,37 +12,64 @@ export const evaluateLatestBadge = (stats: BadgeProgressData): string | null => 
   return earnedBadges[earnedBadges.length - 1].id;
 };
 
+export const MAX_LIVES = 6;
+export const REGEN_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 h
+
 /**
- * Vérifie et régénère les vies (1 toutes les 12h, max 6)
+ * Vérifie et régénère les vies (1 toutes les 6h, max 6).
+ *
+ * Garantie : après une absence prolongée, l'utilisateur retrouve
+ * progressivement toutes ses vies (1 par tranche de 6h écoulées),
+ * dans la limite de MAX_LIVES.
+ *
+ * Le reliquat de temps (ex. 18h écoulées → +1 vie + 6h en banque) est
+ * conservé pour le prochain cycle via `last_lives_update`.
  */
 export const checkAndRegenerateLives = async (userId: number): Promise<{ newLives: number; regenerated: boolean }> => {
   const db = await getDBConnection();
-  const user = await db.getFirstAsync<{ lives: number; last_lives_update: string }>(
+  const user = await db.getFirstAsync<{ lives: number; last_lives_update: string | null }>(
     `SELECT lives, last_lives_update FROM users WHERE id = ?`,
     [userId]
   );
 
   if (!user) return { newLives: 0, regenerated: false };
-  if (user.lives >= 6) return { newLives: 6, regenerated: false };
+  if (user.lives >= MAX_LIVES) return { newLives: MAX_LIVES, regenerated: false };
 
-  const lastUpdate = new Date(user.last_lives_update || new Date()).getTime();
-  const now = new Date().getTime();
+  const now = Date.now();
+
+  // Si last_lives_update n'a jamais été initialisé, on l'initialise maintenant
+  // sans rendre de vie (le compteur de 12h démarre).
+  if (!user.last_lives_update) {
+    await db.runAsync(
+      `UPDATE users SET last_lives_update = ? WHERE id = ?`,
+      [new Date(now).toISOString(), userId]
+    );
+    return { newLives: user.lives, regenerated: false };
+  }
+
+  const lastUpdate = new Date(user.last_lives_update).getTime();
   const diffMs = now - lastUpdate;
-  
-  const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
-  const livesToAdd = Math.floor(diffMs / TWELVE_HOURS_MS);
+
+  if (diffMs <= 0) {
+    return { newLives: user.lives, regenerated: false };
+  }
+
+  const livesToAdd = Math.floor(diffMs / REGEN_INTERVAL_MS);
 
   if (livesToAdd > 0) {
-    const newLives = Math.min(6, user.lives + livesToAdd);
-    // On garde le reliquat de temps pour le prochain cycle
-    const remainingMs = diffMs % TWELVE_HOURS_MS;
-    const newUpdateDate = new Date(now - remainingMs).toISOString();
+    const newLives = Math.min(MAX_LIVES, user.lives + livesToAdd);
+    // Reliquat conservé pour le prochain cycle
+    const remainingMs = diffMs % REGEN_INTERVAL_MS;
+    // Si on a atteint le max, on remet le timer à 0 pour être propre
+    const newUpdateDate = newLives >= MAX_LIVES
+      ? new Date(now).toISOString()
+      : new Date(now - remainingMs).toISOString();
 
     await db.runAsync(
       `UPDATE users SET lives = ?, last_lives_update = ? WHERE id = ?`,
       [newLives, newUpdateDate, userId]
     );
-    
+
     return { newLives, regenerated: true };
   }
 
@@ -64,8 +91,8 @@ export const getGlobalGamificationStats = async (userId: number): Promise<{
   nextHeartTime: string | null;
 }> => {
   const db = await getDBConnection();
-  
-  // ✅ Régénérer les vies si nécessaire (1/12h)
+
+  // ✅ Régénérer les vies si nécessaire (1/6h)
   await checkAndRegenerateLives(userId);
 
   // Stats globales d'activités
@@ -106,7 +133,7 @@ export const getGlobalGamificationStats = async (userId: number): Promise<{
   let nextHeartTime = null;
   if ((userInfo?.lives ?? 6) < 6 && userInfo?.last_lives_update) {
     const lastUpdate = new Date(userInfo.last_lives_update).getTime();
-    nextHeartTime = new Date(lastUpdate + 12 * 60 * 60 * 1000).toISOString();
+    nextHeartTime = new Date(lastUpdate + 6 * 60 * 60 * 1000).toISOString();
   }
 
   return {
@@ -220,8 +247,15 @@ export const syncUserGamificationToMoodle = async (
   return false;
 };
 
+export const LIFE_COST = 20;
+
 /**
- * Met à jour les vies et les pièces après une activité
+ * Met à jour les vies et les pièces après une activité.
+ *
+ * Règles :
+ *  - score ≥ 50% → coins gagnés = floor((percentage/100) * 10), max 10
+ *  - score < 50% → 1 vie perdue (plancher à 0)
+ *  - Si on passe de MAX_LIVES à MAX_LIVES-1 → on (re)démarre le timer 6h
  */
 export const processActivityResults = async (
   userId: number,
@@ -235,19 +269,22 @@ export const processActivityResults = async (
   const percentage = totalScore > 0 ? (score / totalScore) * 100 : 0;
 
   if (percentage >= 50) {
-    // Succès: Gain proportionnel (max 10)
     coinsEarned = Math.floor((percentage / 100) * 10);
   } else {
-    // Échec: Perte d'une vie
     livesLost = 1;
   }
 
   if (coinsEarned > 0 || livesLost > 0) {
+    // Démarre le timer de régénération uniquement si on quitte MAX_LIVES
+    // (on n'écrase pas un timer en cours quand on perd une N-ième vie)
     await db.runAsync(
-      `UPDATE users SET 
-        coins = coins + ?, 
+      `UPDATE users SET
+        coins = coins + ?,
         lives = MAX(0, lives - ?),
-        last_lives_update = CASE WHEN lives = 6 AND ? > 0 THEN datetime('now') ELSE last_lives_update END
+        last_lives_update = CASE
+          WHEN lives = ${MAX_LIVES} AND ? > 0 THEN datetime('now')
+          ELSE last_lives_update
+        END
        WHERE id = ?`,
       [coinsEarned, livesLost, livesLost, userId]
     );
@@ -257,11 +294,11 @@ export const processActivityResults = async (
 };
 
 /**
- * Achat d'une vie
+ * Achat d'une vie avec des pièces.
+ * Coût : LIFE_COST pièces.
  */
 export const buyLife = async (userId: number): Promise<{ success: boolean; message: string; newLives: number; newCoins: number }> => {
   const db = await getDBConnection();
-  const cost = 20;
 
   const user = await db.getFirstAsync<{ coins: number; lives: number }>(
     `SELECT coins, lives FROM users WHERE id = ?`,
@@ -269,24 +306,25 @@ export const buyLife = async (userId: number): Promise<{ success: boolean; messa
   );
 
   if (!user) return { success: false, message: "Utilisateur introuvable", newLives: 0, newCoins: 0 };
-  if (user.lives >= 6) return { success: false, message: "Vous avez déjà le maximum de vies", newLives: user.lives, newCoins: user.coins };
-  if (user.coins < cost) return { success: false, message: "Pas assez de pièces", newLives: user.lives, newCoins: user.coins };
+  if (user.lives >= MAX_LIVES) return { success: false, message: "Vous avez déjà le maximum de vies", newLives: user.lives, newCoins: user.coins };
+  if (user.coins < LIFE_COST) return { success: false, message: `Pas assez de pièces (${LIFE_COST} requises)`, newLives: user.lives, newCoins: user.coins };
 
-  const newCoins = user.coins - cost;
+  const newCoins = user.coins - LIFE_COST;
   const newLives = user.lives + 1;
 
-  await db.runAsync(`UPDATE users SET coins = ?, lives = ? WHERE id = ?`, [newCoins, newLives, userId]);
+  await db.runAsync(
+    `UPDATE users SET coins = ?, lives = ? WHERE id = ?`,
+    [newCoins, newLives, userId]
+  );
 
   return { success: true, message: "Vie achetée avec succès", newLives, newCoins };
 };
 
-/**
- * Point d'entrée principal pour synchroniser après toute modification
- */
+
 export const triggerGamificationSync = async (userId: number, userToken?: string): Promise<boolean> => {
   try {
     const stats = await getGlobalGamificationStats(userId);
-    return await syncUserGamificationToMoodle(userId, {
+    const success = await syncUserGamificationToMoodle(userId, {
       totalXp: stats.totalXp,
       coins: stats.coins,
       lives: stats.lives,
@@ -294,6 +332,18 @@ export const triggerGamificationSync = async (userId: number, userToken?: string
       allBadgeIds: stats.allBadgeIds,
       latestBadge: stats.latestBadge
     }, userToken);
+
+    // Marquer les badges comme synchronisés en cas de succès
+    if (success && stats.allBadgeIds.length > 0) {
+      try {
+        const { markBadgesAsSynced } = await import('../storage/badge-storage');
+        await markBadgesAsSynced(userId, stats.allBadgeIds);
+      } catch (e: any) {
+        if (IS_DEV) console.warn('[Gamification] markBadgesAsSynced failed:', e?.message);
+      }
+    }
+
+    return success;
   } catch (error) {
     console.error("[Gamification] Trigger sync failed:", error);
     return false;

@@ -2,9 +2,10 @@ import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
+import { useLives } from "../../../hooks/useLives";
 import { getAllCoursesFromLanguageCategory, getCourseContents, getCoursesForLanguageAndGrade, getEnrolledCoursesByTimeline } from "../../../services/api/courseService";
 import { RootState } from "../../../services/redux/store";
 import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
@@ -56,10 +57,24 @@ const getLevelFromCourse = (name: string): number => {
 export default function CoursScreen() {
   const router = useRouter();
   const token = useSelector((state: RootState) => state.auth.token);
+  const { canPlay } = useLives();
   const [courses, setCourses] = useState<CourseData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
+
+  // Garde commun pour les raccourcis d'activité (sans cmid spécifique)
+  const guardActivity = (path: string) => {
+    if (!canPlay) {
+      Alert.alert(
+        "Plus de vies",
+        "Tu n'as plus de vies. Achète-en une avec tes pièces ou attends 12 h.",
+        [{ text: "OK" }]
+      );
+      return;
+    }
+    router.push(path as any);
+  };
 
   useEffect(() => {
     const loadPreferences = async () => {
@@ -325,8 +340,8 @@ export default function CoursScreen() {
         </View>
 
         <View className="px-5 mb-8">
-          <Pressable 
-            onPress={() => router.push("/quiz" as any)}
+          <Pressable
+            onPress={() => guardActivity("/quiz")}
             className="bg-[#002366] rounded-3xl p-5 flex-row items-center justify-between"
             style={{
               shadowColor: "#002366",
@@ -349,33 +364,33 @@ export default function CoursScreen() {
         <View className="px-5 mb-8">
           <Text className="text-lg font-bold text-gray-900 mb-4">Activités Récentes</Text>
           <View className="flex-row flex-wrap justify-between">
-            <ActivityIconCard 
-              title="Oral" 
-              icon="headphones" 
-              color="#10B981" 
-              bgColor="bg-green-50" 
-              onPress={() => router.push("/(stacks)/(cours)/listening" as any)} 
+            <ActivityIconCard
+              title="Oral"
+              icon="headphones"
+              color="#10B981"
+              bgColor="bg-green-50"
+              onPress={() => guardActivity("/(stacks)/(cours)/listening")}
             />
-            <ActivityIconCard 
-              title="Dictée" 
-              icon="edit-3" 
-              color="#F59E0B" 
-              bgColor="bg-amber-50" 
-              onPress={() => router.push("/(stacks)/(cours)/dictation" as any)} 
+            <ActivityIconCard
+              title="Dictée"
+              icon="edit-3"
+              color="#F59E0B"
+              bgColor="bg-amber-50"
+              onPress={() => guardActivity("/(stacks)/(cours)/dictation")}
             />
-            <ActivityIconCard 
-              title="Association" 
-              icon="link" 
-              color="#9333EA" 
-              bgColor="bg-purple-50" 
-              onPress={() => router.push("/(stacks)/(cours)/association" as any)} 
+            <ActivityIconCard
+              title="Association"
+              icon="link"
+              color="#9333EA"
+              bgColor="bg-purple-50"
+              onPress={() => guardActivity("/(stacks)/(cours)/association")}
             />
-            <ActivityIconCard 
-              title="Ordre" 
-              icon="layers" 
-              color="#4a90e2" 
-              bgColor="bg-blue-50" 
-              onPress={() => router.push("/(stacks)/(cours)/game" as any)} 
+            <ActivityIconCard
+              title="Ordre"
+              icon="layers"
+              color="#4a90e2"
+              bgColor="bg-blue-50"
+              onPress={() => guardActivity("/(stacks)/(cours)/game")}
             />
           </View>
         </View>

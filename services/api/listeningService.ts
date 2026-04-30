@@ -60,12 +60,20 @@ export async function getListeningExercise(
       return null;
     }
 
+    // Moodle ne renvoie pas la "bonne réponse" via mod_choice côté élève.
+    // On tente plusieurs heuristiques, sinon on renvoie -1 (à gérer côté UI).
+    const answerId = result?.choice?.answer ?? result?.choice?.optionid ?? null;
+    let correctIndex = -1;
+    if (answerId !== null && answerId !== undefined) {
+      correctIndex = options.findIndex((o: any) => o.id === answerId);
+    }
+
     return {
       choiceId: mod.instance,
       name: mod.name,
       audioUrl: buildAudioUrl(audioFile.fileurl, token),
       options,
-      correctIndex: options.findIndex((o: any) => o.id === result?.choice?.answer || -1),
+      correctIndex,
     };
   } catch (err: any) {
     console.warn('[listeningService] Exception:', err.message);

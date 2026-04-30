@@ -104,23 +104,60 @@ app/
 
 services/
 ├── api/
-│   └── moodleAuth.ts        # Auth Moodle
-├── epub/
-│   ├── epubParserLite.ts    # Parse OPF/spine
-│   ├── epubService.ts       # Service EPUB principal
-│   ├── pathResolver.ts      # Résolution chemins
-│   └── unzipService.ts      # Décompression EPUB
-├── sync/
-│   └── downloadService.ts   # Téléchargement fichiers
+│   ├── moodleClient.ts       # fetch + isMoodleOnline (centralisé)
+│   ├── moodleAuth.ts         # Login / signup / enrolment
+│   ├── courseService.ts      # Catégories + cours par langue/grade
+│   ├── quizService.ts        # mod_quiz_*
+│   ├── dictationService.ts   # mod_assign_*
+│   ├── listeningService.ts   # mod_choice_*
+│   ├── associationService.ts # mod_glossary_*
+│   ├── wordOrderService.ts   # mod_lesson_*
+│   ├── xpService.ts          # Custom fields IPELAN
+│   ├── badgeService.ts
+│   ├── leaderboardService.ts
+│   ├── userProgressService.ts
+│   ├── moduleResolver.ts
+│   └── backgroundSync.ts     # expo-background-fetch (optionnel)
+├── activity/
+│   └── activityIdentifier.ts
 ├── audio/
-│   └── audioService.ts      # Service audio
+│   └── audioService.ts       # Lecture + cache offline
+├── epub/
+│   ├── epubLoader.ts
+│   ├── epubParserLite.ts     # Parse OPF/spine
+│   ├── epubService.ts
+│   ├── unzipService.ts
+│   ├── pathResolver.ts
+│   ├── epubPathHelper.ts
+│   └── imageOptimizer.ts
+├── gamification/
+│   └── gamificationService.ts # XP/Coins/Lives/Badges + sync
+├── redux/
+│   ├── store.ts
+│   └── slices/authSlice.ts
 ├── storage/
-│   ├── db-service.ts        # SQLite
-│   ├── tokenStorage.ts       # Secure storage
-│   └── migrations.ts        # Migrations BDD
-└── redux/
-    ├── store.ts
-    └── slices/authSlice.ts
+│   ├── db-service.ts          # SQLite + migrations versionnées
+│   ├── tokenStorage.ts        # SecureStore
+│   ├── activity-progress.ts
+│   ├── course-progress.ts
+│   ├── badge-storage.ts
+│   ├── streak.ts
+│   └── sync-queue.ts          # Queue persistante
+├── sync/
+│   ├── syncQueue.ts           # Queue mémoire (gamification)
+│   ├── queueProcessor.ts      # Traite la queue persistante
+│   ├── progressSync.ts        # Sync grade + completion
+│   └── downloadService.ts     # Téléchargement EPUB / audio
+├── utils/
+│   ├── moodleErrorHandler.ts
+│   ├── moodleIdResolver.ts
+│   └── urlNormalizer.ts
+├── contentLoader.ts
+├── activityHandlers.ts
+├── activityLoader.ts
+├── moodleParser.ts
+├── epubParser.ts
+└── urlAuth.ts
 ```
 
 ---
@@ -183,16 +220,24 @@ MOODLE_ADMIN_TOKEN=your_admin_token_here
 
 | Composant | Status |
 |-----------|--------|
-| Authentification | ✅ Fonctionnel |
+| Authentification (login + signup + restore) | ✅ Fonctionnel |
 | Navigation tabs | ✅ Fonctionnel |
-| Écrans activités | ✅ Fonctionnel |
-| Quiz | ✅ Fonctionnel |
-| SQLite | ✅ Fonctionnel |
-| EPUB Download | ✅ Fonctionnel |
-| EPUB Parse | ✅ Fonctionnel |
-| EPUB Assets (images/audio) | ✅ Fonctionnel |
-| Navigation chapitres | ✅ Fonctionnel |
-| Moodle Sync | 🔜 À venir |
+| Quiz (mod_quiz) | ✅ Fonctionnel |
+| Listening (mod_choice) | ✅ Fonctionnel |
+| Dictée (mod_assign) | ✅ Fonctionnel — mots extraits de l'intro HTML |
+| Association (mod_glossary) | ✅ Fonctionnel |
+| Word Order (mod_lesson) | ✅ Fonctionnel |
+| SQLite + migrations versionnées | ✅ Fonctionnel |
+| EPUB Download / Parse / Assets / Navigation | ✅ Fonctionnel |
+| Cache audio offline | ✅ Fonctionnel (téléchargement async) |
+| Moodle Sync (XP/Coins/Lives/Streak/Badges) | ✅ Fonctionnel |
+| File de sync persistante (offline → online retry) | ✅ Fonctionnel |
+| Background sync | ⚠️ Optionnel — `expo-background-fetch` non installé |
+| Détection réseau native | ⚠️ Fallback HEAD HTTP — `@react-native-community/netinfo` non installé |
+
+> **Préalable Moodle** : créer les customfields `ipelan_xp`, `ipelan_coins`, `ipelan_lives`, `ipelan_streak`, `ipelan_badges`, `ipelan_badges_count`, `ipelan_last_badge` (Site administration → Users → User profile fields). Sans eux, la synchronisation gamification retourne une erreur de permission qui est gérée gracieusement.
+
+Voir [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) pour les diagrammes complets.
 
 ---
 

@@ -1,3 +1,4 @@
+import { isMoodleOnline } from '@/services/api/moodleClient';
 import {
   getUserProgress,
   initStreakTable,
@@ -71,16 +72,8 @@ export function useUserStats(): UseUserStatsReturn {
     initBadgeTable().catch(console.warn);
   }, []);
 
-  const checkOnline = useCallback(async (): Promise<boolean> => {
-    try {
-      const url = process.env.EXPO_PUBLIC_API_URL || 'https://moodle.richatt.com';
-      const response = await fetch(url, {
-        method: 'HEAD',
-      });
-      return response.ok;
-    } catch {
-      return false;
-    }
+  const checkOnline = useCallback((): Promise<boolean> => {
+    return isMoodleOnline();
   }, []);
 
   const loadStats = useCallback(async () => {

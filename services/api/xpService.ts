@@ -190,6 +190,20 @@ export async function updateUserStreak(
   }
 }
 
+/**
+ * @deprecated Ne plus utiliser cette fonction.
+ *
+ * Le flux de récompense d'XP passe désormais par :
+ *   1. saveActivityScore (services/storage/activity-progress.ts) → SQLite local
+ *   2. triggerGamificationSync (services/gamification/gamificationService.ts)
+ *      → push de tous les customfields Moodle (xp/coins/lives/streak/badges)
+ *
+ * Appeler awardXPForActivity en plus dupliquerait l'XP côté Moodle puisque
+ * triggerGamificationSync écrit déjà la valeur courante de `ipelan_xp`.
+ *
+ * Conservée uniquement pour compatibilité ascendante. Sera retirée dans
+ * une version future.
+ */
 export async function awardXPForActivity(
   token: string,
   userId: number,
@@ -197,6 +211,9 @@ export async function awardXPForActivity(
   score: number,
   maxScore: number
 ): Promise<number> {
+  if (process.env.NODE_ENV === 'development') {
+    console.warn('[xpService] awardXPForActivity est déprécié - utilisez triggerGamificationSync');
+  }
   const baseXP: Record<string, number> = {
     quiz: 20,
     listening: 15,

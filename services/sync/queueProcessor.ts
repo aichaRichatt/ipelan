@@ -1,6 +1,6 @@
  
 import { AppState, AppStateStatus } from 'react-native';
-import { moodleCall }               from '../api/moodleClient';
+import { isMoodleOnline, moodleCall } from '../api/moodleClient';
 import { getToken }                 from '../storage/tokenStorage';
 import {
   getPendingItems,
@@ -14,19 +14,9 @@ import {
 const MAX_RETRIES     = 3;
 const BACKOFF_BASE_MS = 2000; // 2s, 4s, 8s
 
-// ─── Vérifier la connectivité ─────────────────────────────────────────────────
+// ─── Vérifier la connectivité (délégué) ──────────────────────────────────────
 
-async function isOnline(): Promise<boolean> {
-  try {
-    const res = await fetch(
-      `${process.env.EXPO_PUBLIC_MOODLE_URL || "https://moodle.richatt.com"}/login/index.php`,
-      { method: 'HEAD', signal: AbortSignal.timeout(3000) }
-    );
-    return res.ok || res.status < 500;
-  } catch {
-    return false;
-  }
-}
+const isOnline = isMoodleOnline;
 
 // ─── Traiter un item avec backoff ─────────────────────────────────────────────
 

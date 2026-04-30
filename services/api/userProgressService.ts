@@ -27,49 +27,30 @@ export async function initStreakTable(): Promise<void> {
   `);
 }
 
+/**
+ * Met à jour le streak utilisateur après une activité.
+ *
+ * Source de vérité : table `user_streaks` (gérée par services/storage/streak.ts).
+ * Cette fonction délègue à `updateStreakAfterActivity` puis met à jour le miroir
+ * dans `users.streak` pour les lectures rapides côté UI.
+ *
+ * Avant : deux systèmes parallèles (users.streak + user_streaks) qui divergeaient
+ * et perdaient le best_streak.
+ */
 export async function updateStreak(userId: number): Promise<number> {
-  const today = new Date().toISOString().split('T')[0];
-
   try {
+    // Délégation à la source de vérité (table user_streaks)
+    const { updateStreakAfterActivity } = await import('../storage/streak');
+    const updated = await updateStreakAfterActivity(userId);
+
+    // Miroir dans users (pour les lectures Redux/UI rapides)
     const db = await getDB();
-    const row = await db.getFirstAsync('SELECT streak as streak_current, streak as streak_best, last_activity FROM users WHERE id = ?', [userId]) as {
-      streak_current: number;
-      streak_best: number;
-      last_activity: string;
-    } | null;
-
-    let current = row?.streak_current ?? 1;
-    let best = row?.streak_best ?? current;
-
-    if (row && row.last_activity) {
-      // Comparaison basée sur les jours calendaires
-      const lastDate = new Date(row.last_activity);
-      const todayDate = new Date(today);
-      
-       lastDate.setHours(0, 0, 0, 0);
-      todayDate.setHours(0, 0, 0, 0);
-      
-      const diffTime = todayDate.getTime() - lastDate.getTime();
-      const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
-
-      if (diffDays === 1) {
-        current = (row.streak_current || 0) + 1;
-      } else if (diffDays === 0) {
-        current = row.streak_current || 1;
-      } else if (diffDays > 1) {
-        current = 1; // Série brisée
-      }
-
-      best = Math.max(best, current);
-    }
-
-    const db2 = await getDB();
-    await db2.runAsync(
+    await db.runAsync(
       `UPDATE users SET streak = ?, last_activity = ? WHERE id = ?`,
-      [current, today, userId]
+      [updated.currentStreak, updated.lastActivityDate, userId]
     );
 
-    return current;
+    return updated.currentStreak;
   } catch (err) {
     console.warn('[userProgressService] updateStreak error:', err);
     return 1;
@@ -175,7 +156,19 @@ export async function getUserProgress(userId: number): Promise<{
 } | null> {
   try {
     const db = await getDB();
-    const row = await db.getFirstAsync('SELECT ipelan_xp as xp, coins, streak as streak_current, streak as streak_best FROM users WHERE id = ?', [userId]) as {
+    // Joindre user_streaks pour récupérer le vrai best_streak
+    // (avant : streak as streak_best donnait toujours la valeur courante)
+    const row = await db.getFirstAsync(
+      `SELECT
+         u.ipelan_xp as xp,
+         u.coins,
+         COALESCE(s.current_streak, u.streak, 0) as streak_current,
+         COALESCE(s.best_streak, u.streak, 0) as streak_best
+       FROM users u
+       LEFT JOIN user_streaks s ON s.user_id = u.id
+       WHERE u.id = ?`,
+      [userId]
+    ) as {
       xp: number;
       coins: number;
       streak_current: number;
