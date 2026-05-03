@@ -1,19 +1,20 @@
 // hooks/useMoodleCourses.ts
-import { useState, useEffect, useCallback } from 'react';
-import { moodleCall } from '../services/api/moodleClient';
-import { getToken } from '../services/storage/tokenStorage';
-import { useStreak } from '../services/storage/streak';
+import { useCallback, useEffect, useState } from 'react';
 import { getAllBadgesWithStatus } from '../constants/badges';
+import { moodleCall } from '../services/api/moodleClient';
 import { getDBConnection } from '../services/storage/db-service';
+import { useStreak } from '../services/storage/streak';
+import { getToken } from '../services/storage/tokenStorage';
+import { ActivityType, XP_CONFIG } from '../utils/xpCalculator';
 
 export interface CourseProgress {
-  courseId:           number;
-  courseName:         string;
+  courseId: number;
+  courseName: string;
   completedActivities: number;
-  totalActivities:    number;
-  completionPercent:  number;
-  totalXP:            number;
-  perfectScores:      number;
+  totalActivities: number;
+  completionPercent: number;
+  totalXP: number;
+  perfectScores: number;
   breakdown: Record<string, { completed: number; total: number }>;
 }
 
@@ -23,12 +24,28 @@ export interface CourseInput {
 }
 
 const EXCLUDED_MODNAMES = new Set(['label']);
-const XP_PER_ACTIVITY = 20;
 
-function calculateXP(score: number, maxScore: number, baseXP: number = XP_PER_ACTIVITY): number {
-  if (!maxScore || maxScore === 0) return score > 0 ? baseXP : 0;
-  const ratio = score / maxScore;
-  return Number.isFinite(ratio) ? Math.round(ratio * baseXP) : 0;
+/**
+ * Map les noms de modules Moodle aux types d'activités IPELAN
+ * Utilisé pour le calcul cohérent des XP via xpCalculator
+ */
+function mapModNameToActivityType(modname: string): ActivityType {
+  const mapping: Record<string, ActivityType> = {
+    'quiz': 'quiz',
+    'assign': 'lesson',
+    'forum': 'lesson',
+    'page': 'html',
+    'resource': 'resource',
+    'folder': 'folder',
+    'book': 'book',
+    'label': 'label',
+    'url': 'resource',
+    'imscp': 'resource',
+    'scorm': 'lesson',
+    'h5pactivity': 'quiz',
+    'lesson': 'lesson',
+  };
+  return mapping[modname] || 'lesson';
 }
 
 function getCompletableModules(sections: any[]): any[] {
@@ -75,7 +92,7 @@ async function fetchCourseProgress(token: string, course: CourseInput): Promise<
           completionMap[stat.cmid] = stat.state >= 1;
         }
       }
-    } catch {}
+    } catch { }
 
     const localRows = await getLocalCompletions(course.id);
     const localMap = new Map(localRows.map(r => [r.cmid, r]));
@@ -95,11 +112,16 @@ async function fetchCourseProgress(token: string, course: CourseInput): Promise<
         breakdown[type].completed++;
         completedActivities++;
         const localRow = localMap.get(mod.id);
-        if (localRow) {
-          totalXP += calculateXP(localRow.score ?? 0, localRow.max_score ?? 0);
+        // ✅ Utilise XP_CONFIG centralisé pour un calcul cohérent avec xpCalculator.ts
+        const activityType = mapModNameToActivityType(type);
+        const xpConfig = XP_CONFIG[activityType];
+        if (localRow && localRow.max_score > 0) {
+          const ratio = (localRow.score ?? 0) / localRow.max_score;
+          totalXP += Math.round(xpConfig.baseXP * ratio);
           if (localRow.score > 0 && localRow.score === localRow.max_score) perfectScores++;
         } else {
-          totalXP += XP_PER_ACTIVITY;
+          // Pas de score enregistré → XP de base selon le type d'activité
+          totalXP += xpConfig.baseXP;
         }
       }
     }

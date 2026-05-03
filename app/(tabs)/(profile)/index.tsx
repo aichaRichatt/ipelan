@@ -1,25 +1,18 @@
-import { View, Text, Pressable, ScrollView, Alert } from "react-native";
-import React, { useState, useEffect } from "react";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useLogin } from "../../../hooks/useLogin";
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
+import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useLogin } from "../../../hooks/useLogin";
 import { getUserBadges } from "../../../services/api/badgeService";
+import { getLevelNumber } from "../../../utils/levelCalculator";
 
 export default function ProfileScreen() {
   const { user, logoutUser, token } = useLogin();
   const router = useRouter();
   const [badgesCount, setBadgesCount] = useState(0);
 
-  const getLevelFromXP = (xp: number): number => {
-    if (xp < 100) return 1;
-    if (xp < 300) return 2;
-    if (xp < 600) return 3;
-    if (xp < 1000) return 4;
-    return 5;
-  };
-
-  const userLevel = getLevelFromXP(user?.ipelan_xp || 0);
+  const userLevel = getLevelNumber(user?.ipelan_xp || 0);
 
   useEffect(() => {
     if (!user?.id || !token) return;

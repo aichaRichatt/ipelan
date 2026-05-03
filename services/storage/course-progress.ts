@@ -125,7 +125,8 @@ export const getCourseProgressForCompletion = async (
 
     const completed = result.completed_activities || 0;
     const total = result.total_activities || 0;
-    const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+    // ✅ Progression capée à 100% maximum
+    const progress = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
 
     return { progress, completed, total };
   } catch (error) {
@@ -184,7 +185,8 @@ export const updateCourseProgressFromActivities = async (
     const completed = result?.completed || 0;
     const totalXP = result?.total_xp || 0;
     const bestScore = result?.best_score || 0;
-    const progressPercent = totalActivities > 0 ? Math.round((completed / totalActivities) * 100) : 0;
+    // ✅ Progression capée à 100% maximum
+    const progressPercent = totalActivities > 0 ? Math.min(100, Math.round((completed / totalActivities) * 100)) : 0;
 
     await saveCourseProgress(courseId, completed, totalActivities, totalXP, bestScore);
 

@@ -6,6 +6,7 @@ AUDIT_IPELAN.epub
 # Expo
 .expo/
 dist/
+.claude/
 web-build/
 expo-env.d.ts
 AUDIT_IPELAN.md
@@ -25,7 +26,8 @@ Application Mobile - IPELAN.docx
 .vscode/
 .expo/
 .zed/
-
+/.idea
+.idea/
 AUDIT_IPELAN.epub
 AUDIT_IPELAN.pdf
 AUDIT_IPELAN.md
@@ -52,7 +54,8 @@ CLAUDE.md
 *.tsbuildinfo
 
 app-example
-
+.claude/*
+/.claude
 # generated native folders
 /ios
 /android

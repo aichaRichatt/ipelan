@@ -1,12 +1,10 @@
 import { getCourseContents } from "@/services/api/courseService";
-import { getAuthToken } from "@/services/contentLoader";
-import { processActivityResults, triggerGamificationSync } from "@/services/gamification/gamificationService";
+import { processActivityResults } from "@/services/gamification/gamificationService";
 import { updateUser } from "@/services/redux/slices/authSlice";
 import { RootState } from "@/services/redux/store";
 import { getBestScore, saveActivityScore } from "@/services/storage/activity-progress";
 import { updateCourseProgressFromActivities } from "@/services/storage/course-progress";
 import { syncAfterActivityWithRetry } from "@/services/sync/progressSync";
-import { syncQueue } from "@/services/sync/syncQueue";
 import { ActivityType } from "@/utils/xpCalculator";
 import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -111,8 +109,9 @@ export default function ResultScreen() {
 
           if (user) {
              dispatch(updateUser({
-               coins: (user.coins || 0) + coinsEarned,
-               lives: Math.max(0, (user.lives ?? 6) - livesLost)
+               // ✅ Validation: pièces max 1000, vies entre 0-6
+               coins: Math.min(1000, (user.coins || 0) + coinsEarned),
+               lives: Math.max(0, Math.min(6, (user.lives ?? 6) - livesLost))
              }));
           }
         }

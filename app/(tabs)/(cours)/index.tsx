@@ -68,7 +68,7 @@ export default function CoursScreen() {
     if (!canPlay) {
       Alert.alert(
         "Plus de vies",
-        "Tu n'as plus de vies. Achète-en une avec tes pièces ou attends 12 h.",
+        "Tu n'as plus de vies. Achète-en une avec tes pièces ou attends 6 h.",
         [{ text: "OK" }]
       );
       return;

@@ -13,6 +13,7 @@ export const evaluateLatestBadge = (stats: BadgeProgressData): string | null => 
 };
 
 export const MAX_LIVES = 6;
+export const MAX_COINS = 1000; // Limite maximale de pièces
 export const REGEN_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 h
 
 /**
@@ -193,8 +194,7 @@ export const syncUserGamificationToMoodle = async (
           errorMsg.toLowerCase().includes('requis');
 
         if (isPermError) {
-          // Permission errors are expected for non-admin users - log as warning
-          if (IS_DEV) console.warn("[Gamification] Permission denied (expected for user token):", errorMsg);
+           if (IS_DEV) console.warn("[Gamification] Permission denied (expected for user token):", errorMsg);
         } else {
           console.error("[Gamification] Moodle error:", errorMsg);
         }
@@ -275,12 +275,11 @@ export const processActivityResults = async (
   }
 
   if (coinsEarned > 0 || livesLost > 0) {
-    // Démarre le timer de régénération uniquement si on quitte MAX_LIVES
-    // (on n'écrase pas un timer en cours quand on perd une N-ième vie)
+    // ✅ Validation: s'assurer que les vies restent entre 0 et MAX_LIVES
     await db.runAsync(
       `UPDATE users SET
-        coins = coins + ?,
-        lives = MAX(0, lives - ?),
+        coins = MIN(${MAX_COINS}, coins + ?),
+        lives = MAX(0, MIN(${MAX_LIVES}, lives - ?)),
         last_lives_update = CASE
           WHEN lives = ${MAX_LIVES} AND ? > 0 THEN datetime('now')
           ELSE last_lives_update

@@ -1,22 +1,15 @@
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
-import { useLogin } from "../../../hooks/useLogin";
-import { useMoodleCourses, CourseInput } from "../../../hooks/useMoodleCourses";
 import { useLives } from "../../../hooks/useLives";
+import { useLogin } from "../../../hooks/useLogin";
+import { CourseInput, useMoodleCourses } from "../../../hooks/useMoodleCourses";
 import { getEnrolledCoursesByTimeline } from "../../../services/api/courseService";
 import { RootState } from "../../../services/redux/store";
-
-const getLevelFromXP = (xp: number): { level: number; title: string } => {
-  if (xp < 100) return { level: 1, title: "Débutant" };
-  if (xp < 300) return { level: 2, title: "Apprenant" };
-  if (xp < 600) return { level: 3, title: "Intermédiaire" };
-  if (xp < 1000) return { level: 4, title: "Avancé" };
-  return { level: 5, title: "Expert" };
-};
+import { getLevelFromXP } from "../../../utils/levelCalculator";
 
 export default function ProgressScreen() {
   const router = useRouter();
