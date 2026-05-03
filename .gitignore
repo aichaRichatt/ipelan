@@ -52,7 +52,7 @@ CLAUDE.md
 
 # typescript
 *.tsbuildinfo
-
+GAMIFICATION_VALIDATION.md
 app-example
 .claude/*
 /.claude
@@ -70,12 +70,12 @@ rules.md
 rules.md
 dev.txt
 extracted_epub
-
+GAMIFICATION_AUDIT.md
 .vscode 
 .idea
 android/
 assets/storage/
-
+DEEP_CHECK_GAMIFICATION.md
 scripts/
 AUDIT_IPELAN.pdf
 test/
