@@ -12,7 +12,7 @@
  * après chaque save.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   extractFinalScore,
   fetchAllQuizQuestions,
@@ -77,6 +77,8 @@ export function useQuiz(
   const [quizName, setQuizName] = useState<string>('Quiz');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  // Ref pour éviter la closure périmée dans finishQuiz (setAnswers est async)
+  const answersRef = useRef<Record<string, string>>({});
   const [selectedValue, setSelectedValue] = useState<string | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
@@ -164,21 +166,31 @@ export function useQuiz(
    */
   const submitAnswer = useCallback(async (): Promise<boolean> => {
     if (!attemptId || !currentQuestion || selectedValue === null) return false;
-    if (!currentQuestion.answerInputName) return false;
+    if (!currentQuestion.answerInputName) {
+      if (IS_DEV) console.warn('[useQuiz] submitAnswer: answerInputName is empty for slot', currentQuestion.slot);
+      return false;
+    }
+
+    if (IS_DEV) console.log('[useQuiz] submitAnswer slot', currentQuestion.slot,
+      '| inputName:', currentQuestion.answerInputName,
+      '| value:', selectedValue,
+      '| seqcheck:', currentQuestion.sequencecheckName, '=', currentQuestion.sequencecheck);
 
     setIsSaving(true);
     try {
+      // Mettre à jour le ref IMMÉDIATEMENT (synchrone) avant tout await
       const newAnswers = {
-        ...answers,
+        ...answersRef.current,
         [currentQuestion.answerInputName]: selectedValue,
       };
+      answersRef.current = newAnswers;
       setAnswers(newAnswers);
 
       const ok = await saveQuizAnswers(
         token,
         attemptId,
         { [currentQuestion.answerInputName]: selectedValue },
-        { [currentQuestion.slot]: currentQuestion.sequencecheck }
+        { [currentQuestion.sequencecheckName]: String(currentQuestion.sequencecheck) }
       );
 
       if (!ok) {
@@ -198,7 +210,7 @@ export function useQuiz(
     } finally {
       setIsSaving(false);
     }
-  }, [token, attemptId, currentQuestion, selectedValue, answers]);
+  }, [token, attemptId, currentQuestion, selectedValue]);
 
   const nextQuestion = useCallback(() => {
     if (currentIndex < questions.length - 1) {
@@ -216,18 +228,20 @@ export function useQuiz(
 
   /**
    * Termine la tentative et récupère le score final via la review Moodle.
+   *
+   * N'utilise PAS le state `answers` (closure périmée) — utilise answersRef.current
+   * qui est toujours à jour même dans la même chaîne de callbacks async.
    */
   const finishQuiz = useCallback(async (): Promise<QuizScore | null> => {
     if (!attemptId) return null;
 
     setIsSaving(true);
     try {
-      const sequencechecks: Record<number, number> = {};
-      for (const q of questions) {
-        sequencechecks[q.slot] = q.sequencecheck;
-      }
-
-      const ok = await finishQuizAttempt(token, attemptId, answers, sequencechecks);
+      // NE PAS re-sauvegarder les réponses ici — chaque réponse est déjà
+      // sauvegardée individuellement par submitAnswer. Re-sauvegarder avec
+      // un état périmé écraserait les réponses correctes → score = 0.
+      // NE PAS envoyer de sequencechecks lors du finish (causerait submissionoutofsequence)
+      const ok = await finishQuizAttempt(token, attemptId);
       if (!ok) {
         if (IS_DEV) console.warn('[useQuiz] finish failed');
         return null;
@@ -238,17 +252,19 @@ export function useQuiz(
 
       if (review) {
         const { sumgrades, maxgrade, percentage } = extractFinalScore(review);
+    
+        const actualCorrect = Math.round((percentage / 100) * (questions.length || maxgrade || 1));
         finalScore = {
-          correct: Math.round(sumgrades),
-          total: Math.round(maxgrade) || questions.length,
+          correct: actualCorrect,
+          total: questions.length || Math.round(maxgrade) || 1,
           percentage,
           timeSpent: Math.floor((Date.now() - startTime) / 1000),
         };
       } else {
-        // Fallback : score local basé sur les réponses saisies
-        const answered = Object.keys(answers).length;
+        // Fallback : compter les réponses données (ref toujours à jour)
+        const answered = Object.keys(answersRef.current).length;
         finalScore = {
-          correct: 0,
+          correct: answered,
           total: questions.length,
           percentage: questions.length > 0
             ? Math.round((answered / questions.length) * 100)
@@ -266,12 +282,13 @@ export function useQuiz(
     } finally {
       setIsSaving(false);
     }
-  }, [token, attemptId, questions, answers, startTime]);
+  }, [token, attemptId, questions, startTime]);
 
   const reset = useCallback(() => {
     setQuestions([]);
     setAttemptId(null);
     setCurrentIndex(0);
+    answersRef.current = {};
     setAnswers({});
     setSelectedValue(null);
     setIsComplete(false);

@@ -1,6 +1,7 @@
 import { useActivityContent } from "@/hooks/useActivityContent";
 import { RootState } from "@/services/redux/store";
 import { shuffle } from "@/utils/shuffle";
+import { calculateXP } from "@/utils/xpCalculator";
 import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -42,7 +43,8 @@ export default function GameScreen() {
 
   const handleContinue = () => {
     const instanceId = params.instanceId || params.moduleId || '0';
-    const resultParams = `?activity=Ordre+des+mots&score=${score}&total=${sentences.length}&xp=${score * 25}&moduleId=${params.moduleId || ''}&instanceId=${instanceId}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Exercice')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
+    const earnedXp = calculateXP('wordOrder', score, sentences.length).totalXP;
+    const resultParams = `?activity=Ordre+des+mots&score=${score}&total=${sentences.length}&xp=${earnedXp}&moduleId=${params.moduleId || ''}&instanceId=${instanceId}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Exercice')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
     router.push(`/(stacks)/(cours)/result${resultParams}` as any);
   };
 
@@ -70,8 +72,10 @@ export default function GameScreen() {
     setAvailableWords([...availableWords, word]);
   };
 
+  const normalizePhrase = (words: string[]) => words.join(' ').trim().replace(/\s+/g, ' ');
+
   const checkOrder = () => {
-    const correct = placedWords.join(' ') === sentence.words.join(' ');
+    const correct = normalizePhrase(placedWords) === normalizePhrase(sentence.words);
     
     if (correct) {
       setScore(score + 1);
@@ -132,7 +136,7 @@ export default function GameScreen() {
 
               <View className="bg-yellow-50 rounded-xl px-6 py-3 mb-6 flex-row items-center">
                 <Text className="text-xl mr-2">⭐</Text>
-                <Text className="text-yellow-700 font-bold text-lg">+{score * 25} XP gagnés</Text>
+                <Text className="text-yellow-700 font-bold text-lg">+{calculateXP('wordOrder', score, sentences.length).totalXP} XP gagnés</Text>
               </View>
 
               <View className="flex-row w-full">

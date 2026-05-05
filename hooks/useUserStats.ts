@@ -11,7 +11,7 @@ import { getUserGamificationFromMoodle } from '@/services/api/xpService';
 import { getGlobalGamificationStats } from '@/services/gamification/gamificationService';
 import { updateUser } from '@/services/redux/slices/authSlice';
 import { RootState } from '@/services/redux/store';
-import { countUserBadges, getUserBadges, initBadgeTable } from '@/services/storage/badge-storage';
+import { countUserBadges, initBadgeTable } from '@/services/storage/badge-storage';
 import { getAllCourseProgress } from '@/services/storage/course-progress';
 import { syncQueue } from '@/services/sync/syncQueue';
 import { verifyUserIdentityBeforeSync } from '@/services/utils/userIdentity';
@@ -89,7 +89,6 @@ export function useUserStats(): UseUserStatsReturn {
     try {
       const localProgress = await getUserProgress(userId);
       const courseProgress = await getAllCourseProgress();
-      const localBadges = await getUserBadges(userId);
       const badgeCount = await countUserBadges(userId);
 
       const completedCourses = courseProgress.filter(c => {
@@ -107,8 +106,8 @@ export function useUserStats(): UseUserStatsReturn {
         xp: globalStats.totalXp,
         coins: globalStats.coins,
         lives: globalStats.lives,
-        streak: globalStats.streak,
-        streakBest: globalStats.streak,
+        streak: localProgress?.streak_current ?? globalStats.streak,
+        streakBest: localProgress?.streak_best ?? globalStats.streak,
         badges: badgeCount,
         coursesInProgress: inProgressCourses,
         coursesCompleted: completedCourses,
@@ -130,8 +129,13 @@ export function useUserStats(): UseUserStatsReturn {
 
           if (!identityCheck.isValid) {
             console.error('[useUserStats] Identity verification failed:', identityCheck.error);
-            // Ne pas synchroniser - utiliser uniquement les données locales
             setStats(localStats);
+            dispatch(updateUser({
+              xp: localStats.xp,
+              coins: localStats.coins,
+              lives: localStats.lives,
+              streak: localStats.streak,
+            }));
             setIsLoading(false);
             return;
           }
@@ -152,7 +156,7 @@ export function useUserStats(): UseUserStatsReturn {
           const mergedCoins = Math.max(localStats.coins, moodleProfile.coins);
           const mergedLives = Math.max(localStats.lives, moodleProfile.lives);
           const mergedStreak = Math.max(localStats.streak, moodleProfile.streak);
-          const mergedStreakBest = Math.max(localStats.streakBest, moodleProfile.streak, moodleProfile.streak);
+          const mergedStreakBest = Math.max(localStats.streakBest, moodleProfile.streak);
           const mergedBadges = Math.max(localStats.badges, moodleProfile.badgeCount);
 
           // If Moodle has higher values, write them back to local SQLite
@@ -218,10 +222,22 @@ export function useUserStats(): UseUserStatsReturn {
         } catch (syncErr) {
           console.warn('[useUserStats] Moodle sync failed, using local:', syncErr);
           setStats(localStats);
+          dispatch(updateUser({
+            xp: localStats.xp,
+            coins: localStats.coins,
+            lives: localStats.lives,
+            streak: localStats.streak,
+          }));
         }
       } else {
         // Offline mode - use local data only
         setStats(localStats);
+        dispatch(updateUser({
+          xp: localStats.xp,
+          coins: localStats.coins,
+          lives: localStats.lives,
+          streak: localStats.streak,
+        }));
         if (IS_DEV) {
           console.log('[useUserStats] Offline mode - using local data');
         }
@@ -257,7 +273,7 @@ export function useUserStats(): UseUserStatsReturn {
         console.log('[useUserStats] Identity verified, proceeding with manual sync');
       }
 
-      await syncQueue.syncGamification(userId, token);
+      syncQueue.syncGamification(userId, token);
       return true;
     } catch (err) {
       console.warn('[useUserStats] Sync to Moodle failed:', err);
@@ -326,6 +342,17 @@ export function useUserStats(): UseUserStatsReturn {
   useEffect(() => {
     loadStats();
   }, [loadStats]);
+
+  // ✅ Recharger automatiquement quand le profil Redux est modifie (apres une activite)
+  useEffect(() => {
+    if (user?.id && (user.xp !== undefined || user.coins !== undefined || user.lives !== undefined)) {
+      // Petit delai pour laisser SQLite se mettre a jour d'abord
+      const timer = setTimeout(() => {
+        loadStats();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [user?.xp, user?.coins, user?.lives, user?.id, loadStats]);
 
   return {
     stats,

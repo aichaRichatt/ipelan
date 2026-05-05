@@ -1,7 +1,9 @@
+import { BuyHeartsModal } from "@/components/BuyHeartsModal";
+import { useLives } from "@/hooks/useLives";
 import { AntDesign, Feather, FontAwesome5, Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from "react-native";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, Image, Pressable, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
 import { useSyncStatus } from "../../../hooks/useSyncStatus";
@@ -49,6 +51,16 @@ const getIconComponent = (iconName: string, size: number, color: string) => {
   }
 };
 const DefaultProfileImage = require('../../../assets/images/defaultprofile.png');
+
+function formatHeartCountdown(nextHeartTime: string | null): string | null {
+  if (!nextHeartTime) return null;
+  const diffMs = new Date(nextHeartTime).getTime() - Date.now();
+  if (diffMs <= 0) return null;
+  const h = Math.floor(diffMs / 3600000);
+  const m = Math.floor((diffMs % 3600000) / 60000);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
 
 function useActiveCourse(activeToken: string) {
   const [courses, setCourses] = useState<any[]>([]);
@@ -105,11 +117,28 @@ export default function HomeScreen() {
   const activeToken = reduxToken || "";
   
   const { course, allCourses, isLoading, error } = useActiveCourse(activeToken);
-  const { stats, isLoading: statsLoading, isSyncing } = useUserStats();
+  const { stats, isLoading: statsLoading, isSyncing, refetch: refetchUserStats } = useUserStats();
   const { icon, color, opacity, isSyncing: isAutoSyncing } = useSyncStatus();
+  const { lives, maxLives, canBuyLife, isBuying, lifeCost, buyLife } = useLives(refetchUserStats);
   
   const [courseProgressMap, setCourseProgressMap] = useState<any>({});
   const [courseScoreMap, setCourseScoreMap] = useState<any>({});
+  const [showBuyModal, setShowBuyModal] = useState(false);
+  
+  // Refresh countdown every minute when lives < max
+  const [, forceRender] = useState(0);
+  useEffect(() => {
+    if ((stats.lives ?? lives) >= maxLives) return;
+    const id = setInterval(() => forceRender(n => n + 1), 60000);
+    return () => clearInterval(id);
+  }, [stats.lives, lives, maxLives]);
+  
+  // ✅ #2 useFocusEffect - Refresh auto quand on revient sur l'app
+  useFocusEffect(
+    useCallback(() => {
+      refetchUserStats();
+    }, [refetchUserStats])
+  );
 
   useEffect(() => {
     const loadProgress = async () => {
@@ -145,7 +174,7 @@ export default function HomeScreen() {
       }
     };
     loadProgress();
-  }, [course, activeToken]);
+  }, [course, activeToken, stats.xp]); // ✅ Recharger quand XP change (après activité)
 
   const handleSettingsPress = () => {
     router.push("/(settings)/index" as any);
@@ -156,15 +185,12 @@ export default function HomeScreen() {
   };
 
   const getCourseProgress = (course: any) => {
-    // First use the progress from useActiveCourse (which has correct DB progress)
-    if (course && typeof course.progress === 'number' && course.progress > 0) {
-      return course.progress;
-    }
-    // Fallback to courseProgressMap
+    // SQLite est la source de vérité — prioritaire sur course.progress de l'API Moodle
     const dbProgress = courseProgressMap[course?.id];
     if (dbProgress && dbProgress.total > 0) {
       return Math.round((dbProgress.completed / dbProgress.total) * 100);
     }
+    // Fallback : valeur Moodle (0 si jamais aucune activité complétée localement)
     return course?.progress || 0;
   };
   
@@ -199,12 +225,10 @@ export default function HomeScreen() {
   // Nombre de leçons complétées (depuis la DB)
   const getCompletedLessons = (course: any): number => {
     const dbProgress = courseProgressMap[course?.id];
-    if (dbProgress && dbProgress.completed > 0) {
-      return dbProgress.completed;
+    if (dbProgress && dbProgress.total > 0) {
+      return dbProgress.completed; // peut être 0 — c'est correct si rien fait
     }
-    const progress = getCourseProgress(course);
-    const total = getCourseLessonsCount(course);
-    return Math.floor((progress / 100) * total);
+    return 0;
   };
 
   // XP total gagné dans ce cours (depuis la DB)
@@ -253,9 +277,23 @@ export default function HomeScreen() {
             </View>
 
             <View className="flex-row items-center space-x-2">
-              <View className="flex-row items-center bg-white px-2 py-1 rounded-full border border-gray-100 shadow-sm">
-                <Text className="text-sm mr-1">❤️</Text>
-                <Text className="font-bold text-xs text-[#EF4444]">{stats.lives}</Text>
+              <View>
+                <TouchableOpacity 
+                  onPress={() => stats.lives < maxLives && setShowBuyModal(true)}
+                  className="flex-row items-center bg-white px-2 py-1 rounded-full border border-gray-100 shadow-sm"
+                >
+                  <Text className="text-sm mr-1">❤️</Text>
+                  <Text className="font-bold text-xs text-[#EF4444]">{stats.lives}/{maxLives}</Text>
+                </TouchableOpacity>
+                {/* ✅ Timer pour prochaine vie */}
+                {stats.lives < maxLives && (
+                  <View className="flex-row items-center justify-center mt-1">
+                    <Feather name="clock" size={9} color="#EF4444" />
+                    <Text className="text-red-400 text-[10px] ml-1">
+                      {formatHeartCountdown(stats.nextHeartTime)}
+                    </Text>
+                  </View>
+                )}
               </View>
               <View className="flex-row items-center bg-white px-2 py-1 rounded-full border border-gray-100 shadow-sm">
                 <Text className="text-sm mr-1">🪙</Text>
@@ -321,22 +359,37 @@ export default function HomeScreen() {
                 }}
               >
                 <View className="flex-row justify-between items-start mb-4">
-                  <View>
+                  <View className="flex-1 mr-3">
                     <Text className="text-white/70 text-xs font-semibold uppercase tracking-wider mb-1">
                       Reprendre l&apos;activité
                     </Text>
-                    <Text className="text-white text-xl font-bold">
+                    <Text className="text-white text-xl font-bold mb-1">
                       {currentCourse.fullname}
                     </Text>
+                    <View className="flex-row items-center flex-wrap">
+                      <View className="flex-row items-center bg-white/10 rounded-full px-2 py-0.5 mr-2 mb-1">
+                        <Ionicons name="book-outline" size={11} color="rgba(255,255,255,0.8)" />
+                        <Text className="text-white/80 text-xs ml-1">
+                          {getCompletedLessons(currentCourse)}/{getCourseLessonsCount(currentCourse)} leçons
+                        </Text>
+                      </View>
+                      {getXpAllFromCourse(currentCourse.id) > 0 && (
+                        <View className="flex-row items-center bg-orange-400/30 rounded-full px-2 py-0.5 mb-1">
+                          <Text className="text-orange-300 text-xs font-bold">
+                            ⭐ {getXpAllFromCourse(currentCourse.id)} XP
+                          </Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
                   <View className="bg-white/20 p-2 rounded-xl">
                     <Ionicons name="play" size={24} color="white" />
                   </View>
                 </View>
-                
+
                 <View className="mb-4">
                   <View className="flex-row justify-between items-center mb-1.5">
-                    <Text className="text-white/80 text-xs">Progression</Text>
+                    <Text className="text-white/80 text-xs">Progression globale</Text>
                     <Text className="text-white text-xs font-bold">{getCourseProgress(currentCourse)}%</Text>
                   </View>
                   <View className="h-2 bg-white/20 rounded-full overflow-hidden">
@@ -378,25 +431,27 @@ export default function HomeScreen() {
                 <View className="bg-red-50 p-4 rounded-2xl">
                   <Text className="text-red-600 text-center">{error}</Text>
                 </View>
-              ) : course ? (
-                <HomeModuleCard 
-                  key={course.id}
-                  module={{
-                    id: String(course.id),
-                    title: course.fullname,
-                    description: course.coursecategory || "",
-                    xp: getXpAllFromCourse(course.id),
-                    isLocked: false,
-                    lessonsCount: getCourseLessonsCount(course),
-                    completedLessons: getCompletedLessons(course),
-                    icon: "book",
-                    iconColor: "#002366",
-                    iconBg: "bg-blue-100",
-                    levelId: getCourseLevel(course.fullname),
-                    progress: getCourseProgress(course)
-                  }}
-                  onPress={() => handleCoursePress(course.id)}
-                />
+              ) : allCourses.length > 0 ? (
+                allCourses.map(c => (
+                  <HomeModuleCard
+                    key={c.id}
+                    module={{
+                      id: String(c.id),
+                      title: c.fullname,
+                      description: c.coursecategory || "",
+                      xp: getXpAllFromCourse(c.id),
+                      isLocked: false,
+                      lessonsCount: getCourseLessonsCount(c),
+                      completedLessons: getCompletedLessons(c),
+                      icon: "book",
+                      iconColor: "#002366",
+                      iconBg: "bg-blue-100",
+                      levelId: getCourseLevel(c.fullname),
+                      progress: getCourseProgress(c)
+                    }}
+                    onPress={() => handleCoursePress(c.id)}
+                  />
+                ))
               ) : (
                 <View className="bg-white p-8 rounded-3xl border border-dashed border-gray-200 items-center">
                   <Feather name="book-open" size={32} color="#D1D5DB" />
@@ -408,6 +463,23 @@ export default function HomeScreen() {
 
         </View>
       </ScrollView>
+      
+      {/* ✅ #5 Modal d'achat de vies */}
+      <BuyHeartsModal
+        isVisible={showBuyModal}
+        onClose={() => setShowBuyModal(false)}
+        lives={lives}
+        coins={stats.coins}
+        nextHeartTime={stats.nextHeartTime}
+        cost={lifeCost}
+        onBuy={async () => {
+          const result = await buyLife();
+          if (result.success) {
+            setShowBuyModal(false);
+          }
+          return result;
+        }}
+      />
     </SafeAreaView>
   );
 }

@@ -1,22 +1,22 @@
- 
+
 import { getDBConnection } from './db-service';
 
 export interface SyncQueueItem {
-  id:         number;
-  type:       'grade' | 'completion' | 'xp' | 'streak';
+  id: number;
+  type: 'grade' | 'completion' | 'xp' | 'streak' | 'course_progress';
   wsfunction: string;
-  payload:    string; // JSON stringifié
-  createdAt:  string;
-  retries:    number;
+  payload: string; // JSON stringifié
+  createdAt: string;
+  retries: number;
   lastError?: string;
 }
 
 // ─── Ajouter un item à la queue ───────────────────────────────────────────────
 
 export async function addToSyncQueue(
-  type:       SyncQueueItem['type'],
+  type: SyncQueueItem['type'],
   wsfunction: string,
-  payload:    Record<string, unknown>
+  payload: Record<string, unknown>
 ): Promise<void> {
   try {
     const db = await getDBConnection();

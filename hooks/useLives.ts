@@ -1,17 +1,32 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useSelector, useDispatch } from 'react-redux';
-import { RootState } from '../services/redux/store';
+import { useCallback, useEffect, useState } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import { buyLife as buyLifeService, getGlobalGamificationStats, LIFE_COST, MAX_LIVES } from '../services/gamification/gamificationService';
 import { updateUser } from '../services/redux/slices/authSlice';
-import { buyLife as buyLifeService, LIFE_COST, MAX_LIVES } from '../services/gamification/gamificationService';
+import { RootState } from '../services/redux/store';
 import { syncQueue } from '../services/sync/syncQueue';
 
-export const useLives = () => {
+export const useLives = (onPurchaseSuccess?: () => void) => {
   const dispatch = useDispatch();
   const user = useSelector((state: RootState) => state.auth.user);
   const token = useSelector((state: RootState) => state.auth.token);
 
   const [isBuying, setIsBuying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ✅ Recharger automatiquement quand le profil Redux est modifie (apres une activite)
+  useEffect(() => {
+    if (!user?.id) return;
+    // Petit delai pour laisser SQLite se mettre a jour d'abord
+    const timer = setTimeout(() => {
+      getGlobalGamificationStats(user.id).then(stats => {
+        dispatch(updateUser({
+          lives: stats.lives,
+          coins: stats.coins,
+        }));
+      }).catch(() => { });
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [user?.lives, user?.coins, user?.id, dispatch]);
 
   const lives = user?.lives ?? MAX_LIVES;
   const coins = user?.coins ?? 0;
@@ -30,12 +45,17 @@ export const useLives = () => {
 
     try {
       const result = await buyLifeService(user.id);
-      
+
       if (result.success) {
-         dispatch(updateUser({ 
+        dispatch(updateUser({
           lives: result.newLives,
           coins: result.newCoins
         }));
+
+        // ✅ Recharger les stats pour mettre a jour toutes les pages
+        if (onPurchaseSuccess) {
+          onPurchaseSuccess();
+        }
 
         // Déclencher la synchro Moodle
         if (token) {
@@ -51,7 +71,7 @@ export const useLives = () => {
     } finally {
       setIsBuying(false);
     }
-  }, [user?.id, canBuyLife, dispatch]);
+  }, [user?.id, canBuyLife, dispatch, token]);
 
   return {
     lives,

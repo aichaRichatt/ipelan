@@ -39,6 +39,23 @@ interface Lesson {
   instanceId?: number;
 }
 
+// Interface pour les modules de section
+interface ModuleData {
+  id: number;
+  name: string;
+  modname?: string;
+  url?: string;
+  contents?: Array<{
+    type: string;
+    filename?: string;
+    fileurl?: string;
+    mimetype?: string;
+  }>;
+  completiondata?: {
+    completionstate: number;
+  };
+}
+
 export default function ModuleDetailScreen() {
   const router = useRouter();
   const { courseId: id, title } = useLocalSearchParams<{ courseId: string; title?: string }>();
@@ -720,7 +737,7 @@ export default function ModuleDetailScreen() {
               )}
             </View>
 
-            {section.modules.map((mod, idx) => {
+            {section.modules.map((mod: ModuleData, idx: number) => {
               const content = getModuleContent(mod.id);
               const type = content?.type || (mod.modname === 'quiz' ? 'quiz' : mod.modname === 'resource' ? 'resource' : 'html');
               const { icon, color } = getLessonIcon(type);
@@ -746,7 +763,7 @@ export default function ModuleDetailScreen() {
                         epubUrl: content?.epubUrl,
                         pdfUrl: content?.pdfUrl,
                         audioUrl: content?.audioUrl,
-                        instanceId: mod.instance,
+                        instanceId: mod.id,
                       };
                       handleLessonPress(lesson);
                     }

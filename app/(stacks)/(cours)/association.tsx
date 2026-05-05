@@ -1,5 +1,6 @@
 import { AssociationPair, useActivityContent } from "@/hooks/useActivityContent";
 import { RootState } from "@/services/redux/store";
+import { calculateXP } from "@/utils/xpCalculator";
 import { AntDesign, Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -61,7 +62,8 @@ export default function AssociationScreen() {
 
   const handleContinue = () => {
     const instanceId = params.instanceId || params.moduleId || '0';
-    const resultParams = `?activity=Association&score=${score}&total=${totalPairs}&xp=${score * 20}&moduleId=${params.moduleId || ''}&instanceId=${instanceId}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Exercice')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
+    const earnedXp = calculateXP('association', score, totalPairs).totalXP;
+    const resultParams = `?activity=Association&score=${score}&total=${totalPairs}&xp=${earnedXp}&moduleId=${params.moduleId || ''}&instanceId=${instanceId}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Exercice')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
     router.push(`/(stacks)/(cours)/result${resultParams}` as any);
   };
 
@@ -208,7 +210,7 @@ export default function AssociationScreen() {
 
               <View className="bg-yellow-50 rounded-xl px-6 py-3 mb-6 flex-row items-center">
                 <Text className="text-xl mr-2">⭐</Text>
-                <Text className="text-yellow-700 font-bold text-lg">+{score * 20} XP gagnés</Text>
+                <Text className="text-yellow-700 font-bold text-lg">+{calculateXP('association', score, totalPairs).totalXP} XP gagnés</Text>
               </View>
 
               <View className="flex-row w-full">

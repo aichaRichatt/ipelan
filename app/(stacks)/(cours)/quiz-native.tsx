@@ -12,11 +12,12 @@
 import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import { useQuiz } from '@/hooks/useQuiz';
 import { RootState } from '@/services/redux/store';
+import { calculateXP } from '@/utils/xpCalculator';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
 
@@ -58,7 +59,14 @@ export default function QuizNativePage() {
     reload,
   } = useQuiz(token, cmid, courseId, instanceId);
 
+  const [textAnswer, setTextAnswer] = React.useState('');
+
   const currentQuestion = questions[currentIndex];
+
+  // Clear text answer when moving to a new question
+  React.useEffect(() => {
+    setTextAnswer('');
+  }, [currentIndex]);
 
   // ─── États de chargement/erreur ─────────────────────────────────────────
 
@@ -160,7 +168,7 @@ export default function QuizNativePage() {
       console.log('[QuizNative] Final score:', finalScore);
     }
 
-    const xp = Math.max(0, Math.round(finalScore.percentage * 0.5));
+    const xp = calculateXP('quiz', finalScore.correct, finalScore.total).totalXP;
     const resultParams = new URLSearchParams({
       activity: 'Quiz',
       score: String(finalScore.correct),
@@ -256,9 +264,42 @@ export default function QuizNativePage() {
               <View>{currentQuestion.options.map(renderOption)}</View>
             )}
 
+          {/* Réponse courte (shortanswer) */}
+          {currentQuestion.type === 'shortanswer' && (
+            <TextInput
+              value={textAnswer}
+              onChangeText={(text) => {
+                setTextAnswer(text);
+                selectAnswer(text);
+              }}
+              placeholder="Écris ta réponse..."
+              placeholderTextColor="#9CA3AF"
+              className="border-2 border-gray-200 rounded-xl p-4 text-gray-900 text-base bg-white"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          )}
+
+          {/* Réponse numérique (numerical) */}
+          {currentQuestion.type === 'numerical' && (
+            <TextInput
+              value={textAnswer}
+              onChangeText={(text) => {
+                setTextAnswer(text);
+                selectAnswer(text);
+              }}
+              placeholder="Écris un nombre..."
+              placeholderTextColor="#9CA3AF"
+              className="border-2 border-gray-200 rounded-xl p-4 text-gray-900 text-base bg-white"
+              keyboardType="numeric"
+            />
+          )}
+
           {/* Type non géré côté UI native */}
           {currentQuestion.type !== 'multichoice' &&
-            currentQuestion.type !== 'truefalse' && (
+            currentQuestion.type !== 'truefalse' &&
+            currentQuestion.type !== 'shortanswer' &&
+            currentQuestion.type !== 'numerical' && (
               <View className="bg-amber-50 p-4 rounded-xl border border-amber-200">
                 <View className="flex-row items-start">
                   <Feather name="info" size={20} color="#F59E0B" />

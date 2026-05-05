@@ -51,6 +51,8 @@ export interface ParsedQuestion {
   answerInputName: string;
   /** valeur courante du sequencecheck — DOIT être rechargée après chaque save */
   sequencecheck: number;
+  /** nom COMPLET du champ sequencecheck tel qu'attendu par Moodle (ex. q296:1_:sequencecheck) */
+  sequencecheckName: string;
   /** HTML brut (debug) */
   rawHtml: string;
   /** points max (mod_quiz.maxmark) */
@@ -240,11 +242,12 @@ function parseQuestionHtml(
   const qtextRaw = extractQtext(html);
   const text = qtextRaw ? stripHtml(qtextRaw) : '';
 
-  // sequencecheck (formats acceptés : q\d+:\d+_:sequencecheck ou q\d+:_sequencecheck)
+  // sequencecheck — capturer le NOM COMPLET (ex. "q296:1_:sequencecheck") ET la valeur
   const scMatch = html.match(
-    /name="q\d+:\d*_?:?sequencecheck"\s+value="(\d+)"/i
+    /name="(q\d+:\d*_?:?sequencecheck)"\s+value="(\d+)"/i
   );
-  const sequencecheck = scMatch ? parseInt(scMatch[1], 10) : fallbackSequencecheck;
+  const sequencecheckName = scMatch ? scMatch[1] : `q0:${slot}_:sequencecheck`;
+  const sequencecheck = scMatch ? parseInt(scMatch[2], 10) : fallbackSequencecheck;
 
   let options: QuizOption[] = [];
   let answerInputName = '';
@@ -274,6 +277,7 @@ function parseQuestionHtml(
     options,
     answerInputName,
     sequencecheck,
+    sequencecheckName,
     rawHtml: html,
     maxmark,
   };
@@ -299,6 +303,10 @@ export async function getUserAttempts(
     if (IS_DEV) console.warn('[quizService] get_attempts:', result.message);
     return [];
   }
+  // Debug: voir la structure brute de la reponse
+  if (IS_DEV) {
+    console.log('[quizService] getUserAttempts raw result:', JSON.stringify(result, null, 2).slice(0, 500));
+  }
   return result?.attempts || [];
 }
 
@@ -306,10 +314,9 @@ export async function getUserAttempts(
  * Démarre une nouvelle tentative ou réutilise une tentative en cours.
  *
  * Stratégie :
- *  1. List attempts → tentative `inprogress` valide (sumgrades non null) ?
- *     → on la reprend.
- *  2. Tentatives bloquées (`inprogress` + `sumgrades=null`) → on les abandonne.
- *  3. Sinon `mod_quiz_start_attempt(forcenew=1)`.
+ *  1. List attempts → tentative `inprogress` ? → on la reprend (sumgrades
+ *     peut être null pour une tentative fraîchement créée, c'est normal).
+ *  2. Sinon → `mod_quiz_start_attempt` (sans forcenew pour éviter les doublons).
  */
 export async function getOrCreateAttempt(
   authToken: string,
@@ -318,47 +325,54 @@ export async function getOrCreateAttempt(
   try {
     const attempts = await getUserAttempts(authToken, quizInstanceId);
 
-    if (attempts.length > 0) {
-      const inProgress = attempts.find(
-        a => a.state === 'inprogress' && a.sumgrades != null
-      );
-      if (inProgress?.id) {
-        if (IS_DEV) console.log('[quizService] Resuming attempt:', inProgress.id);
-        return inProgress.id;
-      }
-
-      // Abandon des tentatives bloquées
-      const blocked = attempts.filter(
-        a => a.state === 'inprogress' && a.sumgrades == null
-      );
-      for (const b of blocked) {
-        if (IS_DEV) console.log('[quizService] Abandoning blocked attempt:', b.id);
-        await moodleFetch('/webservice/rest/server.php', {
-          wstoken: authToken,
-          wsfunction: 'mod_quiz_process_attempt',
-          moodlewsrestformat: 'json',
-          attemptid: b.id,
-          finishattempt: '0',
-          timeup: '0',
-        }).catch(() => undefined);
-      }
+    // Debug: voir toutes les tentatives retournées
+    if (IS_DEV) {
+      console.log('[quizService] getUserAttempts returned:', attempts.length, 'attempts');
+      attempts.forEach((a, i) => {
+        console.log(`  [${i}] id=${a.id}, state=${a.state}`);
+      });
     }
 
-    const startResult = await moodleFetch('/webservice/rest/server.php', {
+    // Reprendre toute tentative en cours (inprogress, overdue, abandoned)
+    const activeStates = ['inprogress', 'overdue', 'abandoned'];
+    const existingAttempt = attempts.find(a => activeStates.includes(a.state));
+    if (existingAttempt?.id) {
+      if (IS_DEV) console.log('[quizService] Resuming attempt:', existingAttempt.id, 'state:', existingAttempt.state);
+      return existingAttempt.id;
+    }
+
+    if (IS_DEV) console.log('[quizService] No inProgress attempt found, creating new one');
+
+    // Essayer de creer une nouvelle tentative normalement
+    let startResult = await moodleFetch('/webservice/rest/server.php', {
       wstoken: authToken,
       wsfunction: 'mod_quiz_start_attempt',
       moodlewsrestformat: 'json',
       quizid: quizInstanceId,
-      forcenew: '1',
       'preflightdata[0][name]': 'confirmdatasaved',
       'preflightdata[0][value]': '1',
     });
+
+    // Si erreur "Tentative encore en cours" et on n'a pas trouve de tentative, forcer la creation
+    if (startResult?.exception && startResult?.message?.includes('Tentative encore en cours')) {
+      if (IS_DEV) console.log('[quizService] Attempt in progress blocking, forcing new attempt with forcenew=1');
+      startResult = await moodleFetch('/webservice/rest/server.php', {
+        wstoken: authToken,
+        wsfunction: 'mod_quiz_start_attempt',
+        moodlewsrestformat: 'json',
+        quizid: quizInstanceId,
+        forcenew: '1',
+        'preflightdata[0][name]': 'confirmdatasaved',
+        'preflightdata[0][value]': '1',
+      });
+    }
 
     if (startResult?.exception) {
       if (IS_DEV) console.warn('[quizService] start_attempt:', startResult.message);
       return null;
     }
 
+    if (IS_DEV) console.log('[quizService] New attempt created:', startResult?.attempt?.id);
     return startResult?.attempt?.id ?? null;
   } catch (err: any) {
     if (IS_DEV) console.warn('[quizService] getOrCreateAttempt:', err?.message);
@@ -395,10 +409,16 @@ export async function getAttemptPage(
     parseQuestionHtml(q.slot, q.sequencecheck ?? 1, q.html || '', q.maxmark)
   );
 
+  // Calculer totalPages approximatif : si nextpage >= 0, il y a au moins nextpage+1 pages
+  // sinon c'est la derniere page
+  const currentPageCount = Array.isArray(data?.questions) ? data.questions.length : 0;
+  const nextPg = data?.nextpage ?? -1;
+  const totalPages = nextPg >= 0 ? Math.max(nextPg + 1, currentPageCount) : currentPageCount;
+
   return {
     questions,
-    nextPage: data?.nextpage ?? -1,
-    totalPages: Array.isArray(data?.questions) ? data.questions.length : 0,
+    nextPage: nextPg,
+    totalPages,
   };
 }
 
@@ -427,22 +447,27 @@ export async function fetchAllQuizQuestions(
 /**
  * Sauvegarde des réponses sans terminer la tentative.
  *
- * @param answers       Map { inputName → valeur }
- * @param sequencechecks Map { slot → sequencecheck }
+ * IMPORTANT : utilise `mod_quiz_process_attempt` avec `finishattempt=0`.
+ * Ne PAS utiliser `mod_quiz_save_attempt` qui est un endpoint d'autosave
+ * (brouillon) — Moodle ne grade PAS à partir de l'autosave quand on
+ * termine la tentative, d'où un score toujours à 0.
  *
- * Utilise `mod_quiz_save_attempt` (équivalent process_attempt avec finishattempt=0).
+ * @param answers        Map { inputName → valeur }
+ * @param sequencechecks Map { sequencecheckName → valeur }
  */
 export async function saveQuizAnswers(
   authToken: string,
   attemptId: number,
   answers: Record<string, string>,
-  sequencechecks: Record<number, number>
+  sequencechecks: Record<string, string>
 ): Promise<boolean> {
   const params: Record<string, any> = {
     wstoken: authToken,
-    wsfunction: 'mod_quiz_save_attempt',
+    wsfunction: 'mod_quiz_process_attempt',
     moodlewsrestformat: 'json',
     attemptid: attemptId,
+    finishattempt: '0',
+    timeup: '0',
     'preflightdata[0][name]': 'confirmdatasaved',
     'preflightdata[0][value]': '1',
   };
@@ -453,34 +478,43 @@ export async function saveQuizAnswers(
     params[`data[${idx}][value]`] = value;
     idx++;
   }
-  for (const [slot, sc] of Object.entries(sequencechecks)) {
-    params[`data[${idx}][name]`] = `q${slot}:_sequencecheck`;
-    params[`data[${idx}][value]`] = String(sc);
+  for (const [scName, scValue] of Object.entries(sequencechecks)) {
+    params[`data[${idx}][name]`] = scName;
+    params[`data[${idx}][value]`] = scValue;
     idx++;
+  }
+
+  if (IS_DEV) {
+    const preview: Record<string, string> = {};
+    for (let i = 0; i < idx; i++) {
+      preview[params[`data[${i}][name]`]] = params[`data[${i}][value]`];
+    }
+    console.log('[quizService] saveQuizAnswers data:', JSON.stringify(preview));
   }
 
   const result = await moodleFetch('/webservice/rest/server.php', params);
   if (result?.exception) {
-    if (IS_DEV) console.warn('[quizService] save_attempt:', result.message);
+    if (IS_DEV) console.warn('[quizService] saveQuizAnswers failed:', result.errorcode, result.message);
     return false;
   }
+  if (IS_DEV) console.log('[quizService] saveQuizAnswers ✅ attemptId:', attemptId);
   return true;
 }
 
 /**
- * Termine la tentative (envoie les réponses puis finishattempt=1).
+ * Termine la tentative.
+ *
+ * N'envoie AUCUNE donnée (ni réponses, ni sequencechecks) dans data[].
+ * Les réponses ont déjà été soumises question par question via saveQuizAnswers
+ * (process_attempt finishattempt=0). Moodle grade à partir de ces réponses
+ * stockées — envoyer des sequencechecks périmés ici provoquerait
+ * `submissionoutofsequence` car le compteur interne de Moodle a été incrémenté
+ * après chaque saveQuizAnswers.
  */
 export async function finishQuizAttempt(
   authToken: string,
-  attemptId: number,
-  answers: Record<string, string>,
-  sequencechecks: Record<number, number>
+  attemptId: number
 ): Promise<boolean> {
-  // 1. Sauvegarde finale
-  const saved = await saveQuizAnswers(authToken, attemptId, answers, sequencechecks);
-  if (!saved) return false;
-
-  // 2. Finish via process_attempt (recharger sequencechecks à jour)
   const params: Record<string, any> = {
     wstoken: authToken,
     wsfunction: 'mod_quiz_process_attempt',
@@ -492,17 +526,11 @@ export async function finishQuizAttempt(
     'preflightdata[0][value]': '1',
   };
 
-  // Renvoyer aussi les sequencechecks pour éviter out-of-sequence au finish
-  let idx = 0;
-  for (const [slot, sc] of Object.entries(sequencechecks)) {
-    params[`data[${idx}][name]`] = `q${slot}:_sequencecheck`;
-    params[`data[${idx}][value]`] = String(sc);
-    idx++;
-  }
+  if (IS_DEV) console.log('[quizService] finishAttempt → attemptId:', attemptId, '(no data entries)');
 
   const result = await moodleFetch('/webservice/rest/server.php', params);
   if (result?.exception) {
-    if (IS_DEV) console.warn('[quizService] finish:', result.message);
+    if (IS_DEV) console.warn('[quizService] finish failed:', result.errorcode, result.message);
     return false;
   }
   if (IS_DEV) console.log('[quizService] Attempt finished:', attemptId);
@@ -529,7 +557,7 @@ export async function submitSingleAnswer(
     authToken,
     attemptId,
     { [inputName]: value },
-    { [slot]: sequencecheck }
+    { [String(slot)]: String(sequencecheck) }
   );
   if (!ok) return null;
 
@@ -552,17 +580,27 @@ export async function getAttemptReview(
     attemptid: attemptId,
   });
   if (result?.exception) {
-    if (IS_DEV) console.warn('[quizService] review:', result.message);
+    if (IS_DEV) console.warn('[quizService] review failed:', result.message);
     return null;
+  }
+  if (IS_DEV) {
+    console.log('[quizService] review grade:', result?.grade,
+      '| sumgrades:', result?.attempt?.sumgrades,
+      '| questions:', result?.questions?.length);
   }
   return result;
 }
 
 /**
- * Extrait le score final d'une review : { sumgrades, maxgrade, percentage }.
+ * Extrait le score final d'une review Moodle.
  *
- * `mod_quiz_get_attempt_review` retourne `attempt.sumgrades` et `grade`
- * (note normalisée). On essaie d'utiliser `grade` en priorité.
+ * Structure réelle de mod_quiz_get_attempt_review :
+ *   attempt.sumgrades → score brut (ex. 2.0 sur 3 questions)
+ *   grade             → STRING POURCENTAGE (ex. "66.67"), PAS la note max
+ *   questions         → tableau des questions (pour compter le total)
+ *
+ * IMPORTANT : review.grade est un pourcentage, pas une note absolue.
+ * Utiliser review.grade comme dénominateur donne un résultat complètement faux.
  */
 export function extractFinalScore(review: any): {
   sumgrades: number;
@@ -570,11 +608,40 @@ export function extractFinalScore(review: any): {
   percentage: number;
 } {
   const attempt = review?.attempt || {};
-  const sumgrades = Number(attempt.sumgrades || 0);
-  const maxgrade = Number(review?.grade ? review.grade : (review?.attempt?.grade ?? 0));
-  const percentage = maxgrade > 0
-    ? Math.round((sumgrades / Math.max(maxgrade, 1)) * 100)
-    : 0;
+  const sumgrades = Number(attempt.sumgrades ?? 0);
+
+  // review.grade est un pourcentage string comme "66.67" — pas la note max
+  const gradePercent = review?.grade != null ? Number(review.grade) : NaN;
+  const questionsCount = Array.isArray(review?.questions) ? review.questions.length : 0;
+
+  let percentage = 0;
+  // Utiliser le nombre de questions comme maxgrade si disponible
+  let maxgrade = questionsCount || 1;
+
+  if (!isNaN(gradePercent) && gradePercent >= 0) {
+    // Si grade > sumgrades et proche, c'est la note max (100%)
+    // Ex: sumgrades=10, grade=10 → 100%, mais sumgrades=1, grade=1 sur 3 questions → 33%
+    // ✅ CORRECTION: grade doit etre >= questionsCount pour etre la note max possible
+    if (gradePercent >= sumgrades && gradePercent > 0 && sumgrades > 0 &&
+      Math.abs(gradePercent - sumgrades) < 0.01 &&
+      (questionsCount === 0 || gradePercent >= questionsCount)) {
+      // grade est la note max (toutes les reponses correctes) → 100%
+      maxgrade = Math.max(gradePercent, sumgrades, questionsCount || 1);
+      percentage = 100;
+    } else if (gradePercent <= 100 && Math.abs(gradePercent - sumgrades) >= 0.01) {
+      // grade est un vrai pourcentage (ex: 66.67)
+      percentage = Math.round(gradePercent);
+      if (sumgrades > 0 && gradePercent > 0 && questionsCount === 0) {
+        maxgrade = Math.round(sumgrades / (gradePercent / 100));
+      }
+    } else {
+      // grade est une note brute supérieure à 100 ou égale à sumgrades avec sumgrades=0
+      percentage = maxgrade > 0 ? Math.round((sumgrades / maxgrade) * 100) : 0;
+    }
+  } else if (maxgrade > 0 && sumgrades > 0) {
+    percentage = Math.round((sumgrades / maxgrade) * 100);
+  }
+
   return { sumgrades, maxgrade, percentage };
 }
 

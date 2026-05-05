@@ -198,19 +198,13 @@ export async function getCoursesForLanguageAndGrade(token: string, language: str
     }
 
     if (gradeCategories.length === 0) {
-      if (IS_DEV) console.log("[courseService] No grade-specific category, getting all courses from language category");
-      const allChildCategories = categories.filter(c => c.parent === langCategory.id);
-
-      if (IS_DEV) console.log("[courseService] Child categories:", allChildCategories.map(c => ({ id: c.id, name: c.name })));
-
-      const courses: any[] = [];
-      for (const cat of allChildCategories) {
-        const gradeCourses = await getCoursesByCategory(token, cat.id);
-        if (IS_DEV && gradeCourses.length > 0) console.log("[courseService] Courses in", cat.name, ":", gradeCourses.length, gradeCourses);
-        courses.push(...gradeCourses);
+      if (IS_DEV) {
+        console.warn("[courseService] Grade category not found for grade", grade, "in", langCategory.name);
+        const childNames = categories.filter(c => c.parent === langCategory.id).map(c => c.name);
+        console.log("[courseService] Available subcategories:", childNames);
       }
-
-      return courses;
+      // Retourner [] — l'appelant dispose d'un fallback vers getAllCoursesFromLanguageCategory
+      return [];
     }
 
     if (IS_DEV) console.log("[courseService] Found grade categories:", gradeCategories.map(c => c.name));

@@ -58,6 +58,15 @@ async function updateActivityGrade(
 
   const { instanceId, modname } = resolved;
 
+  // ✅ Quiz : la note est déjà calculée par mod_quiz_process_attempt avec le token
+  // user. Appeler core_grades_update_grades après (même avec token admin) écrase
+  // la note correcte à 0 car le format des paramètres diffère.
+  if (modname === 'quiz') {
+    if (IS_DEV) console.log(`[ProgressSync] Quiz cmid=${cmid} — note gérée par Moodle, marquage complétion uniquement`);
+    await markManualCompletion(token, cmid);
+    return;
+  }
+
   // Vérifier que l'instanceId est valide
   if (!instanceId || instanceId <= 0) {
     if (IS_DEV) console.warn('[ProgressSync] Instance ID invalide:', { instanceId, modname, courseId, cmid });
@@ -71,8 +80,11 @@ async function updateActivityGrade(
 
   if (IS_DEV) console.log(`[ProgressSync] Envoi note: modname=${modname}, instanceId=${instanceId}, normalizedGrade=${normalizedGrade}`);
 
+  // core_grades_update_grades requiert un token ADMIN (token étudiant = permission refusée)
+  const gradeToken = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN || token;
+
   const gradeParams: any = {
-    wstoken: token,
+    wstoken: gradeToken,
     wsfunction: 'core_grades_update_grades',
     source: 'ipelan_app',
     component: `mod_${modname}`,
@@ -226,10 +238,57 @@ export async function syncCourseProgress(
   totalActivities: number,
   userId?: number
 ): Promise<{ success: boolean }> {
-  // Cette fonction est un placeholder pour la compatibilité
-  // La logique de sync est gérée par les autres fonctions
-  if (IS_DEV) console.log('[ProgressSync] syncCourseProgress called:', { courseId, totalActivities, userId });
-  return { success: true };
+  if (!token || !courseId) return { success: false };
+
+  if (IS_DEV) console.log('[ProgressSync] syncCourseProgress start:', { courseId, totalActivities, userId });
+
+  try {
+    const { moodleCall } = await import('../api/moodleClient');
+    const sections = await moodleCall('core_course_get_contents', { courseid: courseId }, token);
+
+    if (!Array.isArray(sections)) {
+      if (IS_DEV) console.warn('[ProgressSync] syncCourseProgress: invalid sections response');
+      return { success: false };
+    }
+
+    const cmids: number[] = [];
+    for (const section of sections) {
+      if (Array.isArray(section.modules)) {
+        for (const mod of section.modules) {
+          if (mod.id && mod.completiondata?.state === 1) {
+            // Only sync modules already marked complete locally
+            cmids.push(mod.id);
+          }
+        }
+      }
+    }
+
+    if (cmids.length === 0) {
+      if (IS_DEV) console.log('[ProgressSync] syncCourseProgress: no completed modules to sync');
+      return { success: true };
+    }
+
+    const results = await Promise.allSettled(
+      cmids.map(cmid => markManualCompletion(token, cmid))
+    );
+
+    const failed = results.filter(r => r.status === 'rejected').length;
+    if (IS_DEV) console.log(`[ProgressSync] syncCourseProgress: ${cmids.length - failed}/${cmids.length} modules synced`);
+
+    return { success: failed === 0 };
+  } catch (e: any) {
+    if (IS_DEV) console.error('[ProgressSync] syncCourseProgress error:', e.message);
+
+    if (!await isOnline()) {
+      await addToSyncQueue('course_progress', 'core_course_get_contents', {
+        wstoken: token,
+        courseid: courseId,
+        moodlewsrestformat: 'json',
+      });
+    }
+
+    return { success: false };
+  }
 }
 
 // Mantain compatibility with some old calls if any

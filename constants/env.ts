@@ -6,6 +6,7 @@ export const ENV = {
 
   API: {
     MOODLE_URL: process.env.EXPO_PUBLIC_MOODLE_API_URL || 'https://moodle.richatt.com',
+    LANGUAGE_CATEGORY_ID: parseInt(process.env.EXPO_PUBLIC_MOODLE_LANGUAGE_CATEGORY_ID || '18', 10),
     API_TIMEOUT: 30000,
   },
 

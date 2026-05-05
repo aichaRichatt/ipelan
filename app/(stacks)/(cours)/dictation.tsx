@@ -7,6 +7,7 @@ import { useSelector } from "react-redux";
 import { DictationData, useActivityContent } from "../../../hooks/useActivityContent";
 import { audioService } from "../../../services/audio/audioService";
 import { RootState } from "../../../services/redux/store";
+import { calculateXP } from "../../../utils/xpCalculator";
 
 const EMPTY_DICTATION: DictationData = {
   id: 0,
@@ -80,12 +81,17 @@ export default function DictationScreen() {
     }
   };
 
+  const normalizeText = (text: string) =>
+    text.toLowerCase().trim().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
   const checkAnswer = () => {
-    const isCorrect = userInput.toLowerCase().trim() === currentWord.word.toLowerCase();
+    const isCorrect = normalizeText(userInput) === normalizeText(currentWord.word);
     setCurrentAnswer(isCorrect);
-    
+
+    // Compute finalScore locally — setScore is async so `score` in a closure captures the old value
+    const finalScore = isCorrect ? score + 1 : score;
     if (isCorrect) {
-      setScore(prev => prev + 1);
+      setScore(finalScore);
     }
 
     setAnswers(prev => [...prev, { word: currentWord.word, correct: isCorrect }]);
@@ -96,22 +102,22 @@ export default function DictationScreen() {
         setUserInput("");
         setCurrentAnswer(null);
       } else {
-        navigateToResult();
+        navigateToResult(finalScore);
       }
     }, 1500);
   };
 
-  const navigateToResult = () => {
+  const navigateToResult = (finalScore: number) => {
     const totalQuestions = totalWords;
-    const earnedXp = score * 20;
+    const earnedXp = calculateXP('dictation', finalScore, totalQuestions).totalXP;
     const returnRoute = params.returnRoute || `/(stacks)/(cours)/${params.courseId}`;
     const instanceId = params.instanceId || params.moduleId || '0';
-    
+
     router.push({
       pathname: "/(stacks)/(cours)/result",
       params: {
         activity: "Dictée audio",
-        score: score.toString(),
+        score: finalScore.toString(),
         total: totalQuestions.toString(),
         xp: earnedXp.toString(),
         courseId: params.courseId || '',

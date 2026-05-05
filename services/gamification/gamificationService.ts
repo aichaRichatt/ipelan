@@ -114,10 +114,16 @@ export const getGlobalGamificationStats = async (userId: number): Promise<{
     [userId]
   );
 
+  // ✅ Source de vérité pour XP: activity_progress (calculé dynamiquement)
+  // ipelan_xp n'est utilisé que pour la synchro Moodle
+  const calculatedXP = activityStats?.total_xp || 0;
+  const moodleXP = userInfo?.ipelan_xp || 0;
+
   const stats = {
     completedLessons: activityStats?.completed_activities || 0,
     currentStreak: userInfo?.streak || 0,
-    totalXP: Math.max(userInfo?.ipelan_xp || 0, activityStats?.total_xp || 0),
+    // ✅ Utiliser le max des deux pour ne pas perdre de données, mais privilégier le calculé
+    totalXP: Math.max(calculatedXP, moodleXP),
     quizPassed: 0,
     perfectScores: activityStats?.perfect_scores || 0,
     daysActive: userInfo?.streak || 0,
@@ -194,7 +200,7 @@ export const syncUserGamificationToMoodle = async (
           errorMsg.toLowerCase().includes('requis');
 
         if (isPermError) {
-           if (IS_DEV) console.warn("[Gamification] Permission denied (expected for user token):", errorMsg);
+          if (IS_DEV) console.warn("[Gamification] Permission denied (expected for user token):", errorMsg);
         } else {
           console.error("[Gamification] Moodle error:", errorMsg);
         }
@@ -253,7 +259,7 @@ export const LIFE_COST = 20;
  * Met à jour les vies et les pièces après une activité.
  *
  * Règles :
- *  - score ≥ 50% → coins gagnés = floor((percentage/100) * 10), max 10
+ *  - score >= 50% → coins gagnés = floor((percentage/100) * 10), max 10
  *  - score < 50% → 1 vie perdue (plancher à 0)
  *  - Si on passe de MAX_LIVES à MAX_LIVES-1 → on (re)démarre le timer 6h
  */

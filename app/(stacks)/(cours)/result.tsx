@@ -106,32 +106,29 @@ export default function ResultScreen() {
           lLost = livesLost;
           setEarnedCoins(coinsEarned);
           setLostLives(livesLost);
-
-          if (user) {
-             dispatch(updateUser({
-               // ✅ Validation: pièces max 1000, vies entre 0-6
-               coins: Math.min(1000, (user.coins || 0) + coinsEarned),
-               lives: Math.max(0, Math.min(6, (user.lives ?? 6) - livesLost))
-             }));
-          }
         }
-
-        // ✅ Étape 1 : Sauvegarder localement en SQLite
-        setSyncStatus('pending');
-        setSyncMessage('Sauvegarde en cours...');
 
         await saveActivityScore(moduleId, courseId, activityType, score, total, xp, userId || undefined, cEarned, token || undefined);
         await updateCourseProgressFromActivities(courseId, activityCount);
 
-        // ✅ Étape 1.5 : Calculer les nouveaux badges (APRES avoir mis à jour les stats globales)
         if (userId) {
           const { getGlobalGamificationStats } = await import('@/services/gamification/gamificationService');
           const { calculateNewBadges, saveBadge, getUserBadges } = await import('@/services/storage/badge-storage');
-          
+
+          // Lire les valeurs absolues depuis SQLite après toutes les écritures
           const currentStats = await getGlobalGamificationStats(userId);
+
+          // Dispatch absolu — pas d'arithmétique sur un Redux potentiellement périmé
+          dispatch(updateUser({
+            coins: currentStats.coins,
+            lives: currentStats.lives,
+            xp: currentStats.totalXp,
+            streak: currentStats.streak,
+          }));
+
           const existingBadges = await getUserBadges(userId);
           const existingIds = existingBadges.map(b => b.badgeId);
-          
+
           const newEarned = calculateNewBadges({
             completedLessons: currentStats.totalCompletedActivities,
             currentStreak: currentStats.streak,
@@ -145,11 +142,9 @@ export default function ResultScreen() {
             for (const b of newEarned) {
               await saveBadge(userId, b.id);
             }
-            // Mettre à jour l'UI avec le dernier badge gagné
             setNewBadge(newEarned[newEarned.length - 1]);
           }
 
-          // ✅ Étape 2 : Déclencher la synchronisation globale (XP, Coins, Lives, Streak, Badges)
           const { triggerGamificationSync } = await import('@/services/gamification/gamificationService');
           await triggerGamificationSync(userId, token || undefined);
         }
@@ -375,15 +370,21 @@ export default function ResultScreen() {
             <View className="flex-row w-full">
               <Pressable
                 onPress={() => router.back()}
-                className="flex-1 bg-gray-200 py-4 rounded-xl mr-2"
+                disabled={syncStatus === 'syncing'}
+                className={`flex-1 py-4 rounded-xl mr-2 ${syncStatus === 'syncing' ? 'bg-gray-100' : 'bg-gray-200'}`}
               >
-                <Text className="text-gray-700 font-bold text-center">Rejouer</Text>
+                <Text className={`font-bold text-center ${syncStatus === 'syncing' ? 'text-gray-400' : 'text-gray-700'}`}>Rejouer</Text>
               </Pressable>
               <Pressable
                 onPress={handleContinue}
-                className="flex-1 bg-[#002366] py-4 rounded-xl ml-2"
+                disabled={syncStatus === 'syncing'}
+                className={`flex-1 py-4 rounded-xl ml-2 ${syncStatus === 'syncing' ? 'bg-[#002366]/50' : 'bg-[#002366]'}`}
               >
-                <Text className="text-white font-bold text-center">Continuer</Text>
+                {syncStatus === 'syncing' ? (
+                  <ActivityIndicator size="small" color="white" />
+                ) : (
+                  <Text className="text-white font-bold text-center">Continuer</Text>
+                )}
               </Pressable>
             </View>
             

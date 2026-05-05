@@ -83,7 +83,10 @@ class SyncQueue {
       // Vérifier connexion
       const isOnline = await this.checkOnline();
       if (!isOnline) {
-        if (IS_DEV) console.log('[SyncQueue] Offline, waiting...');
+        // ✅ Logger seulement si on vient de passer offline (premier job)
+        if (IS_DEV && this.jobs[0]?.attempts === 0) {
+          console.log('[SyncQueue] Offline, waiting... (jobs pending:', this.jobs.length, ')');
+        }
         break;
       }
 

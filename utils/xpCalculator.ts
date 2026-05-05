@@ -109,10 +109,11 @@ export function calculateXP(
     perfectScore?: boolean;
     streak?: number;
     attempts?: number;
+    cumulativeXP?: number;
   } = {}
 ): XPScore {
   const config = XP_CONFIG[activityType];
-  const { perfectScore = false, streak = 0, attempts = 1 } = options;
+  const { perfectScore = false, streak = 0, attempts = 1, cumulativeXP = 0 } = options;
 
   const percentage = totalQuestions > 0 ? correctAnswers / totalQuestions : 0;
   const baseXP = Math.round(config.baseXP * percentage);
@@ -136,10 +137,12 @@ export function calculateXP(
 
   const totalXP = Math.max(0, baseXP + perfectBonus + timeBonus + streakBonus - attemptPenalty);
 
-  const currentXP = totalXP;
-  const levelXP = 100;
-  const level = Math.floor(currentXP / levelXP) + 1;
-  const nextLevelXP = levelXP - (currentXP % levelXP);
+  // Use cumulative total XP (not just this activity) for correct level calculation
+  const cumulativeTotal = cumulativeXP + totalXP;
+  const { level } = getGradeFromXP(cumulativeTotal);
+  const xpThresholds = [0, 100, 300, 600, 1000, 1500];
+  const nextThreshold = xpThresholds.find(t => t > cumulativeTotal) ?? Infinity;
+  const nextLevelXP = nextThreshold === Infinity ? 0 : nextThreshold - cumulativeTotal;
 
   return {
     totalXP,

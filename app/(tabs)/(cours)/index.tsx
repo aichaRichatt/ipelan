@@ -1,10 +1,12 @@
+import { useUserStats } from "@/hooks/useUserStats";
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
+import ENV from "../../../constants/env";
 import { useLives } from "../../../hooks/useLives";
 import { getAllCoursesFromLanguageCategory, getCourseContents, getCoursesForLanguageAndGrade, getEnrolledCoursesByTimeline } from "../../../services/api/courseService";
 import { RootState } from "../../../services/redux/store";
@@ -58,13 +60,22 @@ export default function CoursScreen() {
   const router = useRouter();
   const token = useSelector((state: RootState) => state.auth.token);
   const { canPlay } = useLives();
+  const { stats, refetch: refetchUserStats } = useUserStats(); // ✅ Pour détecter les changements après activité
   const [courses, setCourses] = useState<CourseData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
+  const [courseProgressMap, setCourseProgressMap] = useState<Record<number, CourseProgressData>>({});
+
+  // ✅ #2 useFocusEffect - Refresh auto quand on revient sur l'app
+  useFocusEffect(
+    useCallback(() => {
+      refetchUserStats();
+    }, [refetchUserStats])
+  );
 
   // Garde commun pour les raccourcis d'activité (sans cmid spécifique)
-  const guardActivity = (path: string) => {
+  const guardActivity = (_path: string) => {
     if (!canPlay) {
       Alert.alert(
         "Plus de vies",
@@ -73,7 +84,11 @@ export default function CoursScreen() {
       );
       return;
     }
-    router.push(path as any);
+    Alert.alert(
+      "Sélectionne un cours",
+      "Ouvre un cours depuis la liste ci-dessous pour accéder à cette activité.",
+      [{ text: "OK" }]
+    );
   };
 
   useEffect(() => {
@@ -113,7 +128,7 @@ export default function CoursScreen() {
         // 2. Fallback: get all courses from Langues Nationales iplan
         if (fetchedCourses.length === 0) {
           console.log("[Cours] No grade-specific courses, fetching all from Langues Nationales iplan...");
-          const allLangCourses = await getAllCoursesFromLanguageCategory(token, 18);
+          const allLangCourses = await getAllCoursesFromLanguageCategory(token, ENV.API.LANGUAGE_CATEGORY_ID);
           if (allLangCourses.length > 0) {
             if (IS_DEV) console.log("[Cours] Found", allLangCourses.length, "courses in language category");
             fetchedCourses = allLangCourses;
@@ -203,6 +218,34 @@ export default function CoursScreen() {
 
     fetchCourses();
   }, [token, preferences]);
+
+  // ✅ Recharger la progression quand XP change (après une activité)
+  useEffect(() => {
+    const reloadProgress = async () => {
+      if (!token || courses.length === 0) return;
+      
+      try {
+        const progressMap: Record<number, CourseProgressData> = {};
+        for (const course of courses) {
+          const dbProgress = await getCourseProgress(course.id);
+          if (dbProgress) {
+            progressMap[course.id] = dbProgress;
+          }
+        }
+        setCourseProgressMap(progressMap);
+        
+        // Mettre à jour les cours avec la nouvelle progression
+        setCourses(prev => prev.map(c => ({
+          ...c,
+          dbProgress: progressMap[c.id] || c.dbProgress,
+        })));
+      } catch (err) {
+        console.warn('[Cours] Failed to reload progress:', err);
+      }
+    };
+    
+    reloadProgress();
+  }, [stats.xp, token]); // Dépend de XP pour recharger après activité
 
   const groupedCourses = courses.reduce((acc, course) => {
     const level = getLevelFromCourse(course.fullname);

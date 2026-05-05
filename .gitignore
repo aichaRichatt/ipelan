@@ -31,7 +31,8 @@ Application Mobile - IPELAN.docx
 AUDIT_IPELAN.epub
 AUDIT_IPELAN.pdf
 AUDIT_IPELAN.md
-
+graphify-out/
+/graphify-out
 # debug
 npm-debug.*
 yarn-debug.*
@@ -69,6 +70,9 @@ RAPPORT.md
 rules.md
 rules.md
 dev.txt
+
+.graphify*
+
 extracted_epub
 GAMIFICATION_AUDIT.md
 .vscode 

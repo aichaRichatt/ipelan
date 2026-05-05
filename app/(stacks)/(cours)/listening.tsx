@@ -1,6 +1,7 @@
 import { useListeningContent } from "@/hooks/useListening";
 import { audioService } from "@/services/audio/audioService";
 import { RootState } from "@/services/redux/store";
+import { calculateXP } from "@/utils/xpCalculator";
 import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -97,7 +98,8 @@ export default function ListeningScreen() {
 
   const handleFinish = () => {
     const instanceId = params.instanceId || params.moduleId || '0';
-    const resultParams = `?activity=Listening&score=${score}&total=${exercises.length}&xp=${score * 15}&moduleId=${params.moduleId || ''}&instanceId=${instanceId}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Compréhension Orale')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
+    const earnedXp = calculateXP('listening', score, exercises.length).totalXP;
+    const resultParams = `?activity=Listening&score=${score}&total=${exercises.length}&xp=${earnedXp}&moduleId=${params.moduleId || ''}&instanceId=${instanceId}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Compréhension Orale')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
     router.push(`/(stacks)/(cours)/result${resultParams}` as any);
   };
 
@@ -230,7 +232,7 @@ export default function ListeningScreen() {
 
               <View className="bg-yellow-50 rounded-xl px-6 py-3 mb-6 flex-row items-center">
                 <Text className="text-xl mr-2">⭐</Text>
-                <Text className="text-yellow-700 font-bold text-lg">+{score * 15} XP gagnés</Text>
+                <Text className="text-yellow-700 font-bold text-lg">+{calculateXP('listening', score, exercises.length).totalXP} XP gagnés</Text>
               </View>
 
               <View className="flex-row w-full">

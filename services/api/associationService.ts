@@ -1,5 +1,5 @@
-import { moodleFetch } from './moodleClient';
 import { getCourseModules } from './moduleResolver';
+import { moodleFetch } from './moodleClient';
 
 export interface WordPair {
   id: number;
@@ -41,12 +41,26 @@ export async function getAssociationPairs(
     }
 
     const modules = await getCourseModules(courseId, token);
+
+     console.log('[associationService] All modules:', modules.map(m => ({
+      id: m.id,
+      name: m.name,
+      modname: m.modname
+    })));
+
     const glossary = modules.find(m => m.modname === 'glossary');
 
     if (!glossary) {
       console.warn('[associationService] No glossary found in course:', courseId);
+      console.warn('[associationService] Available modnames:', [...new Set(modules.map(m => m.modname))]);
       return [];
     }
+
+    console.log('[associationService] Found glossary:', {
+      id: glossary.id,
+      name: glossary.name,
+      instance: glossary.instance
+    });
 
     const result = await moodleFetch('/webservice/rest/server.php', {
       wstoken: token,
