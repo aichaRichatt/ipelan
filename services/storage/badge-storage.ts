@@ -70,11 +70,23 @@ export async function saveBadge(userId: number, badgeId: string): Promise<void> 
 export async function getUserBadges(userId: number): Promise<UserBadge[]> {
   try {
     const db = await getDBConnection();
-    const rows = await db.getAllAsync<UserBadge>(
+    const rows = await db.getAllAsync<{
+      id: string;
+      user_id: number;
+      badge_id: string;
+      earned_at: string;
+      synced_at: string | null;
+    }>(
       'SELECT * FROM user_badges WHERE user_id = ? ORDER BY earned_at DESC',
       [userId]
     );
-    return rows || [];
+    return (rows || []).map(r => ({
+      id: r.id,
+      userId: r.user_id,
+      badgeId: r.badge_id,
+      earnedAt: r.earned_at,
+      syncedAt: r.synced_at,
+    }));
   } catch (err) {
     console.error('[badgeStorage] Failed to get user badges:', err);
     return [];
@@ -121,11 +133,23 @@ export async function markBadgesAsSynced(userId: number, badgeIds: string[]): Pr
 export async function getUnsyncedBadges(userId: number): Promise<UserBadge[]> {
   try {
     const db = await getDBConnection();
-    const rows = await db.getAllAsync<UserBadge>(
+    const rows = await db.getAllAsync<{
+      id: string;
+      user_id: number;
+      badge_id: string;
+      earned_at: string;
+      synced_at: string | null;
+    }>(
       'SELECT * FROM user_badges WHERE user_id = ? AND synced_at IS NULL',
       [userId]
     );
-    return rows || [];
+    return (rows || []).map(r => ({
+      id: r.id,
+      userId: r.user_id,
+      badgeId: r.badge_id,
+      earnedAt: r.earned_at,
+      syncedAt: r.synced_at,
+    }));
   } catch (err) {
     console.error('[badgeStorage] Failed to get unsynced badges:', err);
     return [];

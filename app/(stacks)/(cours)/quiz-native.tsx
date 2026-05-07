@@ -9,17 +9,213 @@
  *   (rétrocompat : ?quizId=XX est aussi accepté)
  */
 
-import { Feather } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import React from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useSelector } from 'react-redux';
 import { useQuiz } from '@/hooks/useQuiz';
 import { RootState } from '@/services/redux/store';
 import { calculateXP } from '@/utils/xpCalculator';
+import { Feather } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSelector } from 'react-redux';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
+
+const styles = StyleSheet.create({
+  bg4a90e2_px6_py3_roundedxl: {
+    backgroundColor: '#4a90e2',
+    borderRadius: 12,
+    paddingHorizontal: 24,
+    paddingVertical: 12
+  },
+  bgamber50_p4_roundedxl_border_: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 16
+  },
+  bggray200_px6_py3_roundedxl_mr: {
+    backgroundColor: '#E5E7EB',
+    borderRadius: 12,
+    marginRight: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 12
+  },
+  bgwhite_rounded2xl_p6_shadowsm: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#F3F4F6',
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 24
+  },
+  border2_bordergray200_roundedx: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    borderWidth: 2,
+    color: '#111827',
+    fontSize: 16,
+    padding: 16
+  },
+  flex1_bgFAF9F6: {
+    backgroundColor: '#FAF9F6',
+    flex: 1
+  },
+  flex1_itemscenter_justifycente: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center'
+  },
+  flex1_px4_py6: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 24
+  },
+  flexrow_itemscenter: {
+    alignItems: 'center',
+    flexDirection: 'row'
+  },
+  flexrow_itemscenter_justifybet: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderColor: '#F3F4F6',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12
+  },
+  flexrow_itemsstart: {
+    alignItems: 'flex-start',
+    flexDirection: 'row'
+  },
+  flexrow_mt6: {
+    flexDirection: 'row',
+    marginTop: 24
+  },
+  fontbold: {
+    fontWeight: '700'
+  },
+  h2_bggray200: {
+    backgroundColor: '#E5E7EB',
+    height: 8
+  },
+  hfull_bg4a90e2: {
+    backgroundColor: '#4a90e2',
+    height: '100%'
+  },
+  itemscenter: {
+    alignItems: 'center'
+  },
+  ml2_flex1_textsm_textamber800: {
+    flex: 1,
+    fontSize: 14,
+    marginLeft: 8
+  },
+  ml2_textsm_textgray500: {
+    color: '#6B7280',
+    fontSize: 14,
+    marginLeft: 8
+  },
+  mt2_textgray500_textcenter: {
+    color: '#6B7280',
+    marginTop: 8,
+    textAlign: 'center'
+  },
+  mt4_flexrow_itemscenter_justif: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 16
+  },
+  mt4_textgray500: {
+    color: '#6B7280',
+    marginTop: 16
+  },
+  mt4_textxl_fontbold_textgray90: {
+    color: '#111827',
+    fontSize: 20,
+    fontWeight: '700',
+    marginTop: 16,
+    textAlign: 'center'
+  },
+  p2_ml2: {
+    marginLeft: -8,
+    padding: 8
+  },
+  p4_bgwhite_bordert_bordergray1: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#F3F4F6',
+    borderTopWidth: 1,
+    padding: 16
+  },
+  style_1: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    borderWidth: 2,
+    color: '#111827',
+    fontSize: 16,
+    padding: 16
+  },
+  style_2: {
+    backgroundColor: '#FAF9F6',
+    flex: 1
+  },
+  style_3: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 24
+  },
+  style_4: {
+    backgroundColor: '#FAF9F6',
+    flex: 1
+  },
+  style_5: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center'
+  },
+  style_6: {
+    backgroundColor: '#FAF9F6',
+    flex: 1
+  },
+  textbase_fontbold_text002366: {
+    color: '#002366',
+    fontSize: 16,
+    fontWeight: '700'
+  },
+  textgray500: {
+    color: '#6B7280'
+  },
+  textgray700_fontbold: {
+    color: '#374151',
+    fontWeight: '700'
+  },
+  textwhite_fontbold: {
+    color: '#FFFFFF',
+    fontWeight: '700'
+  },
+  textwhite_textcenter_fontbold_: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center'
+  },
+  textxl_fontbold_textgray900_mb: {
+    color: '#111827',
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 24
+  },
+  textxs_textgray500: {
+    color: '#6B7280',
+    fontSize: 12
+  },
+  w10: {
+    width: 40
+  },
+});
 
 export default function QuizNativePage() {
   const router = useRouter();
@@ -72,10 +268,10 @@ export default function QuizNativePage() {
 
   if (isLoading) {
     return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
-        <View className="flex-1 items-center justify-center">
+      <SafeAreaView style={styles.style_6} edges={['top']}>
+        <View style={styles.style_5}>
           <ActivityIndicator size="large" color="#4a90e2" />
-          <Text className="mt-4 text-gray-500">Chargement du quiz…</Text>
+          <Text style={styles.mt4_textgray500}>Chargement du quiz…</Text>
         </View>
       </SafeAreaView>
     );
@@ -83,25 +279,25 @@ export default function QuizNativePage() {
 
   if (error) {
     return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
-        <View className="flex-1 items-center justify-center px-6">
+      <SafeAreaView style={styles.style_4} edges={['top']}>
+        <View style={styles.style_3}>
           <Feather name="alert-circle" size={48} color="#F59E0B" />
-          <Text className="mt-4 text-xl font-bold text-gray-900 text-center">
+          <Text style={styles.mt4_textxl_fontbold_textgray90}>
             Quiz indisponible
           </Text>
-          <Text className="mt-2 text-gray-500 text-center">{error}</Text>
-          <View className="flex-row mt-6">
+          <Text style={styles.mt2_textgray500_textcenter}>{error}</Text>
+          <View style={styles.flexrow_mt6}>
             <Pressable
               onPress={() => router.back()}
-              className="bg-gray-200 px-6 py-3 rounded-xl mr-2"
+              style={styles.bggray200_px6_py3_roundedxl_mr}
             >
-              <Text className="text-gray-700 font-bold">Retour</Text>
+              <Text style={styles.textgray700_fontbold}>Retour</Text>
             </Pressable>
             <Pressable
               onPress={() => reload()}
-              className="bg-[#4a90e2] px-6 py-3 rounded-xl"
+              style={styles.bg4a90e2_px6_py3_roundedxl}
             >
-              <Text className="text-white font-bold">Réessayer</Text>
+              <Text style={styles.textwhite_fontbold}>Réessayer</Text>
             </Pressable>
           </View>
         </View>
@@ -111,9 +307,9 @@ export default function QuizNativePage() {
 
   if (!currentQuestion) {
     return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
-        <View className="flex-1 items-center justify-center">
-          <Text className="text-gray-500">Aucune question disponible.</Text>
+      <SafeAreaView style={styles.style_2} edges={['top']}>
+        <View style={styles.flex1_itemscenter_justifycente}>
+          <Text style={styles.textgray500}>Aucune question disponible.</Text>
         </View>
       </SafeAreaView>
     );
@@ -196,24 +392,37 @@ export default function QuizNativePage() {
         key={`${currentQuestion.slot}-${idx}`}
         onPress={() => selectAnswer(option.value)}
         disabled={isSaving}
-        className={`p-4 rounded-xl border-2 mb-3 ${
-          isSelected
-            ? 'border-[#4a90e2] bg-blue-50'
-            : 'border-gray-200 bg-white'
-        }`}
+        style={{
+          padding: 16,
+          borderRadius: 12,
+          borderWidth: 2,
+          marginBottom: 12,
+          borderColor: isSelected ? '#4a90e2' : '#E5E7EB',
+          backgroundColor: isSelected ? '#EFF6FF' : '#FFFFFF'
+        }}
       >
-        <View className="flex-row items-center">
+        <View style={styles.flexrow_itemscenter}>
           <View
-            className={`w-6 h-6 rounded-full border-2 items-center justify-center mr-3 ${
-              isSelected ? 'border-[#4a90e2] bg-[#4a90e2]' : 'border-gray-300'
-            }`}
+            style={{
+              width: 24,
+              height: 24,
+              borderRadius: 9999,
+              borderWidth: 2,
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginRight: 12,
+              borderColor: isSelected ? '#4a90e2' : '#D1D5DB',
+              backgroundColor: isSelected ? '#4a90e2' : 'transparent'
+            }}
           >
             {isSelected && <Feather name="check" size={14} color="white" />}
           </View>
           <Text
-            className={`flex-1 font-medium ${
-              isSelected ? 'text-[#4a90e2]' : 'text-gray-800'
-            }`}
+            style={{
+              flex: 1,
+              fontWeight: '500',
+              color: isSelected ? '#4a90e2' : '#1F2937'
+            }}
           >
             {option.label}
           </Text>
@@ -225,35 +434,34 @@ export default function QuizNativePage() {
   // ─── Rendu principal ─────────────────────────────────────────────────────
 
   return (
-    <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
+    <SafeAreaView style={styles.flex1_bgFAF9F6} edges={['top']}>
       {/* Header */}
-      <View className="flex-row items-center justify-between px-4 py-3 bg-white border-b border-gray-100">
-        <Pressable onPress={() => router.back()} className="p-2 -ml-2">
+      <View style={styles.flexrow_itemscenter_justifybet}>
+        <Pressable onPress={() => router.back()} style={styles.p2_ml2}>
           <Feather name="x" size={24} color="#374151" />
         </Pressable>
-        <View className="items-center">
-          <Text className="text-base font-bold text-[#002366]" numberOfLines={1}>
+        <View style={styles.itemscenter}>
+          <Text style={styles.textbase_fontbold_text002366} numberOfLines={1}>
             {quizName || title}
           </Text>
-          <Text className="text-xs text-gray-500">
+          <Text style={styles.textxs_textgray500}>
             Question {currentIndex + 1} / {questions.length}
           </Text>
         </View>
-        <View className="w-10" />
+        <View style={styles.w10} />
       </View>
 
       {/* Progress bar */}
-      <View className="h-2 bg-gray-200">
+      <View style={styles.h2_bggray200}>
         <View
-          className="h-full bg-[#4a90e2]"
-          style={{ width: `${progress}%` }}
-        />
+          style={[styles.hfull_bg4a90e2,{ width: `${progress}%` }]}
+         />
       </View>
 
-      <ScrollView className="flex-1 px-4 py-6">
-        <View className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+      <ScrollView style={styles.flex1_px4_py6}>
+        <View style={styles.bgwhite_rounded2xl_p6_shadowsm}>
           {/* Énoncé */}
-          <Text className="text-xl font-bold text-gray-900 mb-6">
+          <Text style={styles.textxl_fontbold_textgray900_mb}>
             {currentQuestion.text || 'Question'}
           </Text>
 
@@ -274,7 +482,7 @@ export default function QuizNativePage() {
               }}
               placeholder="Écris ta réponse..."
               placeholderTextColor="#9CA3AF"
-              className="border-2 border-gray-200 rounded-xl p-4 text-gray-900 text-base bg-white"
+              style={styles.style_1}
               autoCapitalize="none"
               autoCorrect={false}
             />
@@ -290,7 +498,7 @@ export default function QuizNativePage() {
               }}
               placeholder="Écris un nombre..."
               placeholderTextColor="#9CA3AF"
-              className="border-2 border-gray-200 rounded-xl p-4 text-gray-900 text-base bg-white"
+              style={styles.border2_bordergray200_roundedx}
               keyboardType="numeric"
             />
           )}
@@ -300,12 +508,12 @@ export default function QuizNativePage() {
             currentQuestion.type !== 'truefalse' &&
             currentQuestion.type !== 'shortanswer' &&
             currentQuestion.type !== 'numerical' && (
-              <View className="bg-amber-50 p-4 rounded-xl border border-amber-200">
-                <View className="flex-row items-start">
+              <View style={styles.bgamber50_p4_roundedxl_border_}>
+                <View style={styles.flexrow_itemsstart}>
                   <Feather name="info" size={20} color="#F59E0B" />
-                  <Text className="ml-2 flex-1 text-sm text-amber-800">
+                  <Text style={styles.ml2_flex1_textsm_textamber800}>
                     Ce type de question (
-                    <Text className="font-bold">{currentQuestion.type}</Text>
+                    <Text style={styles.fontbold}>{currentQuestion.type}</Text>
                     ) n'est pas encore pris en charge par l'UI native.
                     Tu peux la passer pour continuer le quiz.
                   </Text>
@@ -315,9 +523,9 @@ export default function QuizNativePage() {
 
           {/* Indicateur de sauvegarde */}
           {isSaving && (
-            <View className="mt-4 flex-row items-center justify-center">
+            <View style={styles.mt4_flexrow_itemscenter_justif}>
               <ActivityIndicator size="small" color="#4a90e2" />
-              <Text className="ml-2 text-sm text-gray-500">
+              <Text style={styles.ml2_textsm_textgray500}>
                 Synchronisation…
               </Text>
             </View>
@@ -326,15 +534,17 @@ export default function QuizNativePage() {
       </ScrollView>
 
       {/* Bouton bas */}
-      <View className="p-4 bg-white border-t border-gray-100">
+      <View style={styles.p4_bgwhite_bordert_bordergray1}>
         <Pressable
           onPress={handleNext}
           disabled={isSaving}
-          className={`py-4 rounded-xl ${
-            isSaving ? 'bg-gray-300' : 'bg-[#4a90e2]'
-          }`}
+          style={{
+            paddingVertical: 16,
+            borderRadius: 12,
+            backgroundColor: isSaving ? '#D1D5DB' : '#4a90e2'
+          }}
         >
-          <Text className="text-white text-center font-bold text-lg">
+          <Text style={styles.textwhite_textcenter_fontbold_}>
             {isSaving
               ? 'Envoi…'
               : isLastQuestion

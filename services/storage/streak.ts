@@ -36,7 +36,7 @@ export async function getStreak(userId: number): Promise<StreakData> {
 
 export async function updateStreakAfterActivity(userId: number): Promise<StreakData> {
   const db = await getDBConnection();
-  // ✅ Correction timezone: utiliser la date locale sans dépendance au fuseau horaire
+  //   Correction timezone: utiliser la date locale sans dépendance au fuseau horaire
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const existing = await getStreak(userId);

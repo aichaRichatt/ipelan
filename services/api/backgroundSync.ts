@@ -1,4 +1,3 @@
-import { getAuthToken } from '../contentLoader';
 import { getToken, getUserData } from '../storage/tokenStorage';
 import { syncQueue } from '../sync/syncQueue';
 import { isMoodleOnline } from './moodleClient';
@@ -116,7 +115,7 @@ export async function performBackgroundSync(
   const IS_DEV = process.env.NODE_ENV === 'development';
 
   try {
-    const moodleToken = getAuthToken(token);
+    const moodleToken = token;
     if (!moodleToken) {
       console.log('[BackgroundSync] No token, skipping');
       return false;

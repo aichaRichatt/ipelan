@@ -16,7 +16,8 @@ export const LEVELS = [
   { min: 100, max: 300, name: "Apprenant" },
   { min: 300, max: 600, name: "Intermédiaire" },
   { min: 600, max: 1000, name: "Avancé" },
-  { min: 1000, max: Infinity, name: "Expert" },
+  { min: 1000, max: 1500, name: "Expert" },
+  { min: 1500, max: Infinity, name: "Maître" },
 ] as const;
 
 /**

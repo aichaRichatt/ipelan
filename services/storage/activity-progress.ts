@@ -1,8 +1,8 @@
-import { getDBConnection } from './db-service';
 import { ActivityProgress, ActivityType } from '../../types/activity';
 import { addXP, updateStreak } from '../api/userProgressService';
 import { syncQueue } from '../sync/syncQueue';
-
+import { getDBConnection } from './db-service';
+const IS_DEV = process.env.NODE_ENV === 'development'
 export interface ActivityScoreData {
   moduleId: number;
   courseId: number;
@@ -62,13 +62,16 @@ export const saveActivityScore = async (
 ): Promise<void> => {
   const maxRetries = 3;
   let lastError: any = null;
-  
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const db = await getDBConnection();
       const isCompleted = score >= total * 0.5;
+      if (IS_DEV) {
+        console.log(`[saveActivityScore] moduleId=${moduleId}, courseId=${courseId}, score=${score}/${total}, isCompleted=${isCompleted}`);
+      }
       const now = new Date().toISOString();
-      
+
       await db.runAsync(
         `INSERT INTO activity_progress (user_id, module_id, course_id, type, best_score, total_score, attempts_count, is_completed, last_attempt, xp_earned, coins_earned, synced_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -113,20 +116,20 @@ export const saveActivityScore = async (
       if (userId) {
         await addXP(userId, xpEarned);
         await updateStreak(userId);
-        
+
         // Déclencher la synchro vers Moodle
         if (token) {
           syncQueue.syncGamification(userId, token);
         }
       }
-      
+
       console.log('[ActivityProgress] Saved score:', { moduleId, score, total, bestScore: score, xpEarned });
       return;
     } catch (error: any) {
       lastError = error;
       const isLockError = error?.message?.includes('database is locked') || error?.code === 'database is locked';
       console.warn('[ActivityProgress] Save attempt', attempt, 'failed:', isLockError ? 'database locked' : error.message);
-      
+
       if (isLockError && attempt < maxRetries) {
         await new Promise(r => setTimeout(r, 100 * attempt));
       } else if (!isLockError) {
@@ -134,13 +137,14 @@ export const saveActivityScore = async (
       }
     }
   }
-  
+
   console.error('[ActivityProgress] Failed to save after', maxRetries, 'attempts:', lastError);
 };
 
 export const getBestScore = async (
   moduleId: number,
-  courseId: number
+  courseId: number,
+  userId?: number
 ): Promise<ActivityScoreData | null> => {
   try {
     const db = await getDBConnection();
@@ -156,8 +160,10 @@ export const getBestScore = async (
       xp_earned: number;
       synced_at: string;
     }>(
-      'SELECT * FROM activity_progress WHERE module_id = ? AND course_id = ?',
-      [moduleId, courseId]
+      userId != null
+        ? 'SELECT * FROM activity_progress WHERE module_id = ? AND course_id = ? AND user_id = ?'
+        : 'SELECT * FROM activity_progress WHERE module_id = ? AND course_id = ?',
+      userId != null ? [moduleId, courseId, userId] : [moduleId, courseId]
     );
 
     if (!result) return null;
@@ -181,7 +187,8 @@ export const getBestScore = async (
 };
 
 export const getAllScoresForCourse = async (
-  courseId: number
+  courseId: number,
+  userId?: number
 ): Promise<Map<number, ActivityScoreData>> => {
   try {
     const db = await getDBConnection();
@@ -195,7 +202,12 @@ export const getAllScoresForCourse = async (
       is_completed: number;
       last_attempt: string;
       xp_earned: number;
-    }>('SELECT * FROM activity_progress WHERE course_id = ?', [courseId]);
+    }>(
+      userId != null
+        ? 'SELECT * FROM activity_progress WHERE course_id = ? AND user_id = ?'
+        : 'SELECT * FROM activity_progress WHERE course_id = ?',
+      userId != null ? [courseId, userId] : [courseId]
+    );
 
     const scoreMap = new Map<number, ActivityScoreData>();
     for (const r of results) {
@@ -218,23 +230,28 @@ export const getAllScoresForCourse = async (
   }
 };
 
- 
+
 export const markActivitySynced = async (
   moduleId: number,
-  courseId: number
+  courseId: number,
+  userId?: number
 ): Promise<void> => {
   try {
     const db = await getDBConnection();
     const now = new Date().toISOString();
 
     await db.runAsync(
-      `UPDATE activity_progress 
-       SET synced_at = ?
-       WHERE module_id = ? AND course_id = ?`,
-      [now, moduleId, courseId]
+      userId != null
+        ? `UPDATE activity_progress 
+           SET synced_at = ?
+           WHERE module_id = ? AND course_id = ? AND user_id = ?`
+        : `UPDATE activity_progress 
+           SET synced_at = ?
+           WHERE module_id = ? AND course_id = ?`,
+      userId != null ? [now, moduleId, courseId, userId] : [now, moduleId, courseId]
     );
 
-    console.log('[ActivityProgress] ✅ Marked as synced:', { moduleId, courseId });
+    console.log('[ActivityProgress]   Marked as synced:', { moduleId, courseId });
   } catch (error) {
     console.error('[ActivityProgress] Failed to mark as synced:', error);
     // Don't throw - this is non-critical
@@ -247,14 +264,18 @@ export const markActivitySynced = async (
  */
 export const isActivitySynced = async (
   moduleId: number,
-  courseId: number
+  courseId: number,
+  userId?: number
 ): Promise<boolean> => {
   try {
     const db = await getDBConnection();
     const result = await db.getFirstAsync<{ synced_at: string | null }>(
-      `SELECT synced_at FROM activity_progress 
-       WHERE module_id = ? AND course_id = ?`,
-      [moduleId, courseId]
+      userId != null
+        ? `SELECT synced_at FROM activity_progress 
+           WHERE module_id = ? AND course_id = ? AND user_id = ?`
+        : `SELECT synced_at FROM activity_progress 
+           WHERE module_id = ? AND course_id = ?`,
+      userId != null ? [moduleId, courseId, userId] : [moduleId, courseId]
     );
 
     return !!result?.synced_at;
@@ -266,7 +287,8 @@ export const isActivitySynced = async (
 
 export const getActivityProgress = async (
   moduleId: number,
-  courseId: number
+  courseId: number,
+  userId?: number
 ): Promise<ActivityProgress | null> => {
   try {
     const db = await getDBConnection();
@@ -281,8 +303,10 @@ export const getActivityProgress = async (
       last_attempt: string;
       xp_earned: number;
     }>(
-      'SELECT * FROM activity_progress WHERE module_id = ? AND course_id = ?',
-      [moduleId, courseId]
+      userId != null
+        ? 'SELECT * FROM activity_progress WHERE module_id = ? AND course_id = ? AND user_id = ?'
+        : 'SELECT * FROM activity_progress WHERE module_id = ? AND course_id = ?',
+      userId != null ? [moduleId, courseId, userId] : [moduleId, courseId]
     );
 
     if (!result) return null;
@@ -305,7 +329,8 @@ export const getActivityProgress = async (
 };
 
 export const getAllProgressForCourse = async (
-  courseId: number
+  courseId: number,
+  userId?: number
 ): Promise<ActivityProgress[]> => {
   try {
     const db = await getDBConnection();
@@ -319,7 +344,12 @@ export const getAllProgressForCourse = async (
       is_completed: number;
       last_attempt: string;
       xp_earned: number;
-    }>('SELECT * FROM activity_progress WHERE course_id = ?', [courseId]);
+    }>(
+      userId != null
+        ? 'SELECT * FROM activity_progress WHERE course_id = ? AND user_id = ?'
+        : 'SELECT * FROM activity_progress WHERE course_id = ?',
+      userId != null ? [courseId, userId] : [courseId]
+    );
 
     return results.map((r) => ({
       moduleId: r.module_id,
@@ -340,17 +370,22 @@ export const getAllProgressForCourse = async (
 
 export const incrementActivityAttempts = async (
   moduleId: number,
-  courseId: number
+  courseId: number,
+  userId?: number
 ): Promise<number> => {
   try {
     const db = await getDBConnection();
-    const result = await db.runAsync(
-      'UPDATE activity_progress SET attempts_count = MAX(attempts_count, 1) + 1 WHERE module_id = ? AND course_id = ?',
-      [moduleId, courseId]
+    await db.runAsync(
+      userId != null
+        ? 'UPDATE activity_progress SET attempts_count = MAX(attempts_count, 1) + 1 WHERE module_id = ? AND course_id = ? AND user_id = ?'
+        : 'UPDATE activity_progress SET attempts_count = MAX(attempts_count, 1) + 1 WHERE module_id = ? AND course_id = ?',
+      userId != null ? [moduleId, courseId, userId] : [moduleId, courseId]
     );
     const current = await db.getFirstAsync<{ attempts_count: number }>(
-      'SELECT attempts_count FROM activity_progress WHERE module_id = ? AND course_id = ?',
-      [moduleId, courseId]
+      userId != null
+        ? 'SELECT attempts_count FROM activity_progress WHERE module_id = ? AND course_id = ? AND user_id = ?'
+        : 'SELECT attempts_count FROM activity_progress WHERE module_id = ? AND course_id = ?',
+      userId != null ? [moduleId, courseId, userId] : [moduleId, courseId]
     );
     return current?.attempts_count || 1;
   } catch (error) {

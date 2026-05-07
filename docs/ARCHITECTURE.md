@@ -1,12 +1,6 @@
-# IPELAN — Architecture
+# IPELAN — Architecture Générale
 
-> Diagrammes générés en Mermaid. Rendu natif sur GitHub, VS Code (extension Markdown Preview Mermaid Support), Obsidian, GitLab.
-
-Ce document décrit l'architecture en couches de l'application mobile IPELAN
-(React Native + Expo SDK 54) et ses interactions avec Moodle 4.4.3.
-
-Le projet est organisé en quatre couches (UI, Hooks, Services, Storage) plus
-un backend Moodle externe.
+> Diagrammes Mermaid. Rendu natif sur GitHub, VS Code (Markdown Preview Mermaid), Obsidian.
 
 ---
 
@@ -14,37 +8,38 @@ un backend Moodle externe.
 
 ```mermaid
 flowchart TB
-    subgraph UI["UI - app/"]
-        AUTH["(auth)/<br/>onboarding · login · signup<br/>language · grade · reset"]
-        TABS["(tabs)/<br/>home · cours · progress · profile"]
-        STACKS["(stacks)/(cours)/<br/>quiz · listening · dictation<br/>association · game · result · lesson"]
-        SETTINGS["(settings)/<br/>index · edit-profile · about"]
+    subgraph UI["UI — app/"]
+        AUTH["(auth)/\nonboarding · login · signup\nlanguage · grade · reset"]
+        TABS["(tabs)/\nhome · cours · progress · profile"]
+        STACKS["(stacks)/(cours)/\nquiz · listening · dictation\nassociation · game · result\nlesson · epub · pdf · unified-viewer"]
+        SETTINGS["(settings)/\nindex · edit-profile · about"]
     end
 
-    subgraph HOOKS["Hooks - hooks/"]
-        H_AUTH["useLogin · useSignup<br/>useAuthRestore"]
-        H_ACT["useActivityContent<br/>useQuiz · useListening<br/>useAssociation"]
-        H_COURSE["useCourses · useMoodleCourses<br/>useCourseContent · useEpubReader"]
-        H_GAME["useLives · useUserStats<br/>useSyncStatus"]
+    subgraph HOOKS["Hooks — hooks/"]
+        H_AUTH["useLogin · useSignup · useAuthRestore"]
+        H_ACT["useActivityContent · useQuiz\nuseListening · useAssociation"]
+        H_COURSE["useCourses · useMoodleCourses\nuseCourseContent"]
+        H_GAME["useLives · useUserStats\nuseSyncStatus · useProgressSync\nuseAppState"]
     end
 
-    subgraph SERVICES["Services - services/"]
-        SVC_API["api/<br/>moodleClient · moodleAuth<br/>courseService · quizService<br/>dictationService · listeningService<br/>associationService · wordOrderService<br/>xpService · badgeService<br/>leaderboardService · backgroundSync"]
-        SVC_GAME["gamification/<br/>gamificationService<br/>(XP · coins · lives · badges)"]
-        SVC_SYNC["sync/<br/>syncQueue · queueProcessor<br/>progressSync · downloadService"]
-        SVC_EPUB["epub/<br/>epubLoader · epubParserLite<br/>unzipService · pathResolver"]
-        SVC_AUDIO["audio/<br/>audioService<br/>(cache offline)"]
-        SVC_REDUX["redux/<br/>store · authSlice"]
+    subgraph SERVICES["Services — services/"]
+        SVC_API["api/\nmoodleClient · moodleAuth\ncourseService · quizService\ndictationService · listeningService\nassociationService · wordOrderService\nxpService · badgeService · leaderboardService\nuserProgressService · backgroundSync"]
+        SVC_GAME["gamification/\ngamificationService\n(XP · coins · lives · badges · streak)"]
+        SVC_SYNC["sync/\nsyncQueue · queueProcessor\nprogressSync · downloadService\nprogressSync · syncQueue"]
+        SVC_EPUB["epub/\nepubLoader · epubParserLite\nunzipService · pathResolver"]
+        SVC_AUDIO["audio/audioService"]
+        SVC_REDUX["redux/\nstore · authSlice"]
+        SVC_BG["background/\nlifeRegeneration"]
     end
 
-    subgraph STORAGE["Storage - services/storage/"]
-        DB[("SQLite<br/>ipelan-data.db")]
-        SECURE["expo-secure-store<br/>tokenStorage"]
-        CACHE["expo-file-system<br/>(EPUB · audio)"]
+    subgraph STORAGE["Storage — services/storage/"]
+        DB[("SQLite\nipelan-data.db\nv5")]
+        SECURE["expo-secure-store\nmoodle_token · credentials"]
+        ASYNC["AsyncStorage\nuser_data · preferences"]
     end
 
-    subgraph MOODLE["Moodle 4.4.3 - moodle.richatt.com"]
-        WS["Web Services REST<br/>/webservice/rest/server.php"]
+    subgraph MOODLE["Moodle 4.4.3 — moodle.richatt.com"]
+        WS["REST /webservice/rest/server.php"]
         TOKEN["/login/token.php"]
         FILES["/webservice/pluginfile.php"]
     end
@@ -59,17 +54,16 @@ flowchart TB
     SVC_SYNC -- "queue retry" --> WS
     SVC_GAME -- "customfields" --> WS
 
-    classDef ui fill:#dbeafe,stroke:#1e40af,color:#1e3a8a;
-    classDef hooks fill:#fef3c7,stroke:#b45309,color:#78350f;
-    classDef services fill:#dcfce7,stroke:#166534,color:#14532d;
-    classDef storage fill:#f3e8ff,stroke:#6b21a8,color:#581c87;
-    classDef moodle fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d;
-
-    class UI,AUTH,TABS,STACKS,SETTINGS ui;
-    class HOOKS,H_AUTH,H_ACT,H_COURSE,H_GAME hooks;
-    class SERVICES,SVC_API,SVC_GAME,SVC_SYNC,SVC_EPUB,SVC_AUDIO,SVC_REDUX services;
-    class STORAGE,DB,SECURE,CACHE storage;
-    class MOODLE,WS,TOKEN,FILES moodle;
+    classDef ui fill:#dbeafe,stroke:#1e40af,color:#1e3a8a
+    classDef hooks fill:#fef3c7,stroke:#b45309,color:#78350f
+    classDef services fill:#dcfce7,stroke:#166534,color:#14532d
+    classDef storage fill:#f3e8ff,stroke:#6b21a8,color:#581c87
+    classDef moodle fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d
+    class UI,AUTH,TABS,STACKS,SETTINGS ui
+    class HOOKS,H_AUTH,H_ACT,H_COURSE,H_GAME hooks
+    class SERVICES,SVC_API,SVC_GAME,SVC_SYNC,SVC_EPUB,SVC_AUDIO,SVC_REDUX,SVC_BG services
+    class STORAGE,DB,SECURE,ASYNC storage
+    class MOODLE,WS,TOKEN,FILES moodle
 ```
 
 ---
@@ -83,30 +77,35 @@ sequenceDiagram
     participant H as useLogin
     participant A as moodleAuth
     participant M as Moodle
-    participant S as tokenStorage
+    participant S as SecureStore
     participant R as Redux authSlice
 
     U->>L: email + password
     L->>H: login(email, password)
     alt email contient @
-        H->>A: lookup username via admin token
+        H->>A: résoudre username via admin token
         A->>M: core_user_get_users_by_field(email)
-        M-->>A: { users: [{username}] }
+        M-->>A: [{username}]
     end
     H->>A: login(username, password)
-    A->>M: POST /login/token.php
-    M-->>A: { token }
+    A->>M: POST /login/token.php {service: ipelan_full}
+    M-->>A: {token}
     A->>M: core_webservice_get_site_info
-    M-->>A: { userid, fullname, ... }
-    H->>S: SecureStore.set(token, user)
-    H->>R: dispatch(loginSuccess)
+    M-->>A: {userid, fullname, ...}
+    H->>S: SecureStore.set("moodle_token", token)
+    H->>R: dispatch(loginSuccess({user, token}))
     R-->>L: isAuthenticated = true
-    L->>U: redirection (tabs)/(home)
+    L->>U: router.push("/(tabs)/(home)")
 ```
+
+**Restauration au démarrage** (`app/index.tsx`) :
+1. Lit le token depuis `SecureStore`
+2. Lit `user_data` depuis `AsyncStorage`
+3. Dispatch `loginSuccess` → navigation automatique vers tabs
 
 ---
 
-## 3. Flux d'une activité (Quiz / Listening / Dictation / Association)
+## 3. Flux d'une activité complète
 
 ```mermaid
 sequenceDiagram
@@ -114,140 +113,68 @@ sequenceDiagram
     participant HK as useActivityContent
     participant ID as moodleIdResolver
     participant M as Moodle WS
-    participant DB as SQLite (activity_progress)
-    participant Q as syncQueue
+    participant DB as SQLite
+    participant PS as progressSync
+    participant SQ as syncQueue
     participant R as result.tsx
 
-    SC->>HK: token, cmid, instanceId, courseId, type
-    HK->>ID: resolveActivityInstanceId(courseId, type, cmid)
-    ID->>M: core_course_get_contents
+    SC->>HK: {token, cmid, instanceId, courseId, type}
+    HK->>ID: resolveIds(courseId, cmid, token)
+    ID->>M: core_course_get_contents(courseid)
     M-->>ID: sections + modules
-    ID-->>HK: { instanceId, name, modname }
+    ID-->>HK: {instanceId, modname}
 
-    alt type == quiz
-        HK->>M: mod_quiz_start_attempt
-        M-->>HK: attemptId
-        HK->>M: mod_quiz_get_attempt_data (page=0..n)
-        M-->>HK: questions HTML
-    else type == dictation
+    alt quiz
+        HK->>M: mod_quiz_start_attempt(quizid)
+        HK->>M: mod_quiz_get_attempt_data(page=0..n)
+    else dictation (assign)
         HK->>M: mod_assign_get_assignments(courseids)
-        M-->>HK: assignment.intro + introfiles
-        HK->>HK: parseDictationWordsFromIntro
-    else type == listening
-        HK->>M: mod_choice_get_choice_options
-        M-->>HK: options + audioFile
-    else type == association
-        HK->>M: mod_glossary_get_entries_by_letter
-        M-->>HK: pairs
+    else listening (choice)
+        HK->>M: mod_choice_get_choice_options(choiceid)
+    else association (glossary)
+        HK->>M: mod_glossary_get_entries_by_letter(id, ALL)
     end
 
-    HK-->>SC: contenu activité
-    SC->>SC: utilisateur joue, score calculé
-    SC->>R: navigate /result?score&xp
-    R->>DB: saveActivityScore (best_score, xp_earned)
-    R->>R: calculateNewBadges + saveBadge
-    R->>Q: triggerGamificationSync (XP, coins, lives, badges)
-    Q->>M: core_user_update_users (customfields)
-    M-->>Q: ok
-    Q->>M: core_grades_update_grades OR core_completion_*
-    M-->>Q: ok
-    Q->>DB: markActivitySynced
+    SC->>SC: utilisateur joue → score calculé
+    SC->>R: navigate /result?score&xp&coins
+    R->>DB: saveActivityScore (activity_progress)
+    R->>PS: syncAfterActivity({courseId, cmid, score, maxScore, userId})
+    PS->>M: core_grades_update_grades OU core_completion_*
+    R->>SQ: syncGamification(userId, token)
+    SQ->>M: core_user_update_users (customfields XP/coins/badges)
 ```
 
 ---
 
-## 4. Mode hors ligne — File de sync persistante
-
-```mermaid
-flowchart LR
-    A[Activité terminée] --> B{Online ?}
-    B -->|Oui| C[Push direct Moodle]
-    B -->|Non| D[(SQLite<br/>sync_queue)]
-    D --> E[queueProcessor<br/>AppState=active]
-    E --> F{Online ?}
-    F -->|Non| D
-    F -->|Oui| G[POST WS<br/>backoff exponentiel<br/>2s · 4s · 8s]
-    G -->|exception| H{retries<br/>&lt; 3 ?}
-    H -->|Oui| D
-    H -->|Non| I[Drop + log]
-    G -->|ok| J[removeFromQueue]
-    C --> K[markActivitySynced]
-    J --> K
-
-    classDef online fill:#dcfce7,stroke:#166534;
-    classDef offline fill:#fef3c7,stroke:#b45309;
-    classDef storage fill:#f3e8ff,stroke:#6b21a8;
-    class C,G,J,K online;
-    class D,E offline;
-    class D storage;
-```
-
----
-
-## 5. Pipeline EPUB (lecture hors ligne)
-
-```mermaid
-flowchart LR
-    URL[URL EPUB Moodle] --> DL[downloadService<br/>downloadEPUB]
-    DL --> CACHE[(Cache local<br/>expo-file-system)]
-    CACHE --> UNZ[unzipService<br/>react-native-zip-archive]
-    UNZ --> CONT[META-INF/container.xml]
-    CONT --> OPF[epubParserLite<br/>findOPFPath + parseOPFLite]
-    OPF --> SPINE[Spine + manifest items]
-    SPINE --> RES[pathResolver<br/>résolution chemins relatifs]
-    RES --> WV[EPUBLessonViewer<br/>WebView baseURL=file://]
-    WV --> SQLDB[(SQLite<br/>epub_books<br/>epub_chapters)]
-
-    classDef ext fill:#fee2e2,stroke:#b91c1c;
-    classDef io fill:#dbeafe,stroke:#1e40af;
-    classDef db fill:#f3e8ff,stroke:#6b21a8;
-    class URL ext;
-    class CACHE,WV io;
-    class SQLDB db;
-```
-
----
-
-## 6. Schéma de la base SQLite
+## 4. Schéma SQLite complet (v5)
 
 ```mermaid
 erDiagram
     users ||--o{ user_badges : earns
     users ||--o| user_streaks : has
     users ||--o{ activity_progress : completes
+    users ||--o{ course_progress : tracks
+    users ||--o{ gamification_queue : queues
     courses ||--o{ course_sections : contains
     course_sections ||--o{ course_modules : contains
     course_modules ||--o{ module_contents : has
-    course_modules ||--o{ activity_progress : tracked_by
     epub_books ||--o{ epub_chapters : contains
-    courses ||--o| course_progress : tracks
 
     users {
         int id PK
         text username
         text email
+        text firstname
+        text lastname
         text fullname
         int ipelan_xp
         int coins
         int lives
         int streak
+        text last_activity
         text badges
-        text token
         text last_lives_update
-    }
-    user_badges {
-        text id PK
-        int user_id FK
-        text badge_id
-        text earned_at
-        text synced_at
-    }
-    user_streaks {
-        int user_id PK
-        int current_streak
-        int best_streak
-        text last_activity_date
-        int total_days_active
+        int token_expiry
     }
     activity_progress {
         int id PK
@@ -259,93 +186,114 @@ erDiagram
         int total_score
         int attempts_count
         int is_completed
-        text last_attempt
-        int xp_earned
+        text xp_earned
         int coins_earned
         text synced_at
+        UNIQUE user_id_module_id_course_id
     }
     course_progress {
         int id PK
+        int user_id
         int course_id
         int completed_activities
         int total_activities
         int total_xp
-        int best_score
         text last_activity_at
         text synced_at
+        UNIQUE user_id_course_id
     }
     sync_queue {
         int id PK
         text type
         text wsfunction
         text payload
+        int user_id
         text created_at
         int retries
         text last_error
     }
-    epub_books {
+    gamification_queue {
         int id PK
-        text title
-        text source_url
-        text local_path
-        int total_chapters
-        int last_chapter
+        int user_id
+        text job_type
+        text job_data
+        text created_at
+        int attempts
+        UNIQUE user_id_job_type
     }
-    epub_chapters {
-        int id PK
-        int book_id FK
-        int chapter_index
-        text chapter_title
-        text content
+    user_badges {
+        text id PK
+        int user_id FK
+        text badge_id
+        text earned_at
+        text synced_at
+        UNIQUE user_id_badge_id
+    }
+    user_streaks {
+        int user_id PK
+        int current_streak
+        int best_streak
+        text last_activity_date
+        int total_days_active
     }
 ```
 
----
+**Versionnement schema** (`PRAGMA user_version`) :
 
-## 7. Synchronisation Gamification → Moodle (customfields)
-
-| Custom field Moodle | Source locale | Type |
-|---|---|---|
-| `ipelan_xp` | `users.ipelan_xp` (somme `activity_progress.xp_earned`) | int |
-| `ipelan_coins` | `users.coins` | int |
-| `ipelan_lives` | `users.lives` (max 6, regen 1 / 12 h) | int |
-| `ipelan_streak` | `user_streaks.current_streak` | int |
-| `ipelan_badges` | `user_badges.badge_id` joints par `,` | text |
-| `ipelan_badges_count` | `count(user_badges)` | int |
-| `ipelan_last_badge` | dernier badge gagné (ordre `earned_at`) | text |
-
-> **Préalable côté Moodle** : ces champs personnalisés doivent être créés
-> (Site administration → Users → User profile fields). Sans eux, la sync
-> retourne une erreur de permission qui est gérée gracieusement.
+| Version | Migration |
+|---------|-----------|
+| v1 | `users.lives`, `last_activity`, `last_lives_update` |
+| v2 | `user_badges` + index |
+| v3 | `sync_queue.user_id` ; `course_progress` UNIQUE(user_id, course_id) |
+| v4 | `users.token_expiry` |
+| v5 | `gamification_queue` — persistance jobs in-memory entre crashes |
 
 ---
 
-## 8. Stack technique
+## 5. Stack technique
 
 | Couche | Technologie | Version |
-|---|---|---|
+|--------|-------------|---------|
 | Framework | Expo | ~54.0 |
 | Runtime | React Native | 0.81.5 |
 | Routing | expo-router | ~6.0.23 |
-| State | Redux Toolkit | ^2.11 |
-| Persistance | expo-sqlite | ~16.0.10 |
-| Sécurité tokens | expo-secure-store | ~15.0.8 |
+| Language | TypeScript | ~5.9.2 |
+| State global | Redux Toolkit + react-redux | 2.11.2 / 9.2.0 |
+| Styling | NativeWind + TailwindCSS | 2.0.11 / 3.3.2 |
+| SQLite | expo-sqlite | ~16.0.10 |
+| Secure Storage | expo-secure-store | ~15.0.8 |
+| Key-Value | AsyncStorage | ~2.2.0 |
 | Audio | expo-audio | ~1.1.1 |
-| Vidéo | expo-video | ~3.0.16 |
-| EPUB | xmldom + react-native-zip-archive | 0.6.0 / 7.0.2 |
-| Styling | NativeWind / Tailwind | 2.0.11 |
-| HTTP | fetch natif (via moodleClient) | — |
+| EPUB | jszip + xmldom + pako | 3.10.1 / 0.6.0 / 2.1.0 |
+| PDF | react-native-pdf | ^7.0.4 |
+| WebView | react-native-webview | 13.15.0 |
+| Animations | reanimated + gesture-handler | ~4.1.1 / ~2.28.0 |
+| Background | expo-background-fetch | ^55.0.15 |
+| Connectivity | netinfo | ^12.0.1 |
 
 ---
 
-## 9. Variables d'environnement
+## 6. Variables d'environnement
 
 ```env
 EXPO_PUBLIC_MOODLE_API_URL=https://moodle.richatt.com
-EXPO_PUBLIC_MOODLE_ADMIN_TOKEN=<token-admin>
-SERVICE_NAME=IPELAN_FULL_SERVICE
+EXPO_PUBLIC_MOODLE_ADMIN_TOKEN=<token-admin-wstoken>
+EXPO_PUBLIC_EPUB_BASE_URL=https://moodle.richatt.com
+EXPO_PUBLIC_AUDIO_BASE_URL=https://moodle.richatt.com
 ```
 
-> ⚠️ Toutes les variables exposées au runtime React Native **doivent**
-> commencer par `EXPO_PUBLIC_`. Les variables sans ce préfixe sont
-> `undefined` côté client.
+> ⚠️ Toutes les variables React Native **doivent** commencer par `EXPO_PUBLIC_`.  
+> `EXPO_PUBLIC_MOODLE_ADMIN_TOKEN` n'est utilisé que pour les opérations admin (signup, enrol, grade push, profile update).
+
+---
+
+## 7. Conventions de code
+
+| Convention | Règle |
+|------------|-------|
+| Appels Moodle | Toujours via `moodleCall()` ou `moodleFetch()` |
+| Token admin | `EXPO_PUBLIC_MOODLE_ADMIN_TOKEN` uniquement pour ops admin |
+| Styling |  `StyleSheet.create` |
+| Navigation | `useRouter().push(path as any)` — cast nécessaire (types stricts) |
+| Logs dev | Gardés par `const IS_DEV = process.env.NODE_ENV === "development"` |
+| Alias | `@/` → racine projet (tsconfig) |

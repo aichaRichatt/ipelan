@@ -343,18 +343,39 @@ export async function getOrCreateAttempt(
 
     if (IS_DEV) console.log('[quizService] No inProgress attempt found, creating new one');
 
-    // Essayer de creer une nouvelle tentative normalement
-    let startResult = await moodleFetch('/webservice/rest/server.php', {
-      wstoken: authToken,
-      wsfunction: 'mod_quiz_start_attempt',
-      moodlewsrestformat: 'json',
-      quizid: quizInstanceId,
-      'preflightdata[0][name]': 'confirmdatasaved',
-      'preflightdata[0][value]': '1',
-    });
+      let startResult;
+    try {
+      startResult = await moodleFetch('/webservice/rest/server.php', {
+        wstoken: authToken,
+        wsfunction: 'mod_quiz_start_attempt',
+        moodlewsrestformat: 'json',
+        quizid: quizInstanceId,
+        'preflightdata[0][name]': 'confirmdatasaved',
+        'preflightdata[0][value]': '1',
+      });
+    } catch (err: any) {
+       if (err?.message?.includes('Tentative encore en cours') || err?.message?.includes('attempt')) {
+        if (IS_DEV) console.log('[quizService] Attempt in progress blocking, forcing new attempt with forcenew=1');
+        try {
+          startResult = await moodleFetch('/webservice/rest/server.php', {
+            wstoken: authToken,
+            wsfunction: 'mod_quiz_start_attempt',
+            moodlewsrestformat: 'json',
+            quizid: quizInstanceId,
+            forcenew: '1',
+            'preflightdata[0][name]': 'confirmdatasaved',
+            'preflightdata[0][value]': '1',
+          });
+        } catch (forceErr: any) {
+          if (IS_DEV) console.warn('[quizService] force new attempt failed:', forceErr?.message);
+          throw new Error('Impossible de démarrer le quiz. Vérifiez que vous êtes inscrit au cours.');
+        }
+      } else {
+        throw err;
+      }
+    }
 
-    // Si erreur "Tentative encore en cours" et on n'a pas trouve de tentative, forcer la creation
-    if (startResult?.exception && startResult?.message?.includes('Tentative encore en cours')) {
+     if (startResult?.exception && startResult?.message?.includes('Tentative encore en cours')) {
       if (IS_DEV) console.log('[quizService] Attempt in progress blocking, forcing new attempt with forcenew=1');
       startResult = await moodleFetch('/webservice/rest/server.php', {
         wstoken: authToken,

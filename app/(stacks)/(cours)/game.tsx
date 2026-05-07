@@ -5,9 +5,295 @@ import { calculateXP } from "@/utils/xpCalculator";
 import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
+
+const styles = StyleSheet.create({
+  bgA78BFA_px3_py1_roundedfull: {
+    borderRadius: 9999,
+    paddingHorizontal: 12,
+    paddingVertical: 4
+  },
+  bgA78BFA10_border2_borderdashe: {
+    borderRadius: 16,
+    borderWidth: 2,
+    padding: 16
+  },
+  bggray500_rounded2xl_py4_items: {
+    alignItems: 'center',
+    backgroundColor: '#6B7280',
+    borderRadius: 16,
+    paddingVertical: 16
+  },
+  bggreen50_rounded2xl_p4_mb4: {
+    borderRadius: 16,
+    marginBottom: 16,
+    padding: 16
+  },
+  bgwhite_border2_bordergray200_: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    borderWidth: 2,
+    marginBottom: 8,
+    marginRight: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12
+  },
+  bgwhite_rounded2xl_p4_mb6_bord: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 24,
+    padding: 16
+  },
+  bgwhite_rounded3xl_p8_itemscen: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 32,
+    width: '100%'
+  },
+  bgyellow50_roundedxl_px6_py3_m: {
+    alignItems: 'center',
+    borderRadius: 12,
+    flexDirection: 'row',
+    marginBottom: 24,
+    paddingHorizontal: 24,
+    paddingVertical: 12
+  },
+  flex1: {
+    flex: 1
+  },
+  flex1_bg4a90e2_py4_roundedxl_m: {
+    backgroundColor: '#4a90e2',
+    borderRadius: 12,
+    flex: 1,
+    marginLeft: 8,
+    paddingVertical: 16
+  },
+  flex1_bgFAF9F6: {
+    backgroundColor: '#FAF9F6',
+    flex: 1
+  },
+  flex1_bggray200_py4_roundedxl_: {
+    backgroundColor: '#E5E7EB',
+    borderRadius: 12,
+    flex: 1,
+    marginRight: 8,
+    paddingVertical: 16
+  },
+  flex1_itemscenter_justifycente: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    paddingVertical: 32
+  },
+  flexrow_flexwrap: {
+    flexDirection: 'row'
+  },
+  flexrow_itemscenter_justifycen: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center'
+  },
+  flexrow_itemscenter_mb2: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    marginBottom: 8
+  },
+  flexrow_wfull: {
+    flexDirection: 'row',
+    width: '100%'
+  },
+  h2_bggray200_roundedfull_overf: {
+    backgroundColor: '#E5E7EB',
+    borderRadius: 9999,
+    height: 8,
+    overflow: 'hidden'
+  },
+  hfull_bgA78BFA_roundedfull: {
+    borderRadius: 9999,
+    height: '100%'
+  },
+  mb6: {
+    marginBottom: 24
+  },
+  mr4_p2_ml2: {
+    marginLeft: -8,
+    marginRight: 16,
+    padding: 8
+  },
+  mt4: {
+    marginTop: 16
+  },
+  mt4_bgyellow50_rounded2xl_p4: {
+    borderRadius: 16,
+    marginTop: 16,
+    padding: 16
+  },
+  px5_mb4: {
+    marginBottom: 16,
+    paddingHorizontal: 20
+  },
+  px5_py4_flexrow_itemscenter_bg: {
+    alignItems: 'center',
+    backgroundColor: '#FAF9F6',
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 16
+  },
+  style_1: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  style_2: {
+    flexDirection: 'row'
+  },
+  style_3: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 12
+  },
+  style_4: {
+    marginBottom: 24
+  },
+  style_5: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 20
+  },
+  style_6: {
+    backgroundColor: '#FAF9F6',
+    flex: 1
+  },
+  text2xl_fontbold_textgray900_m: {
+    color: '#111827',
+    fontSize: 24,
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center'
+  },
+  text4xl_fontblack: {
+    fontSize: 36,
+    fontWeight: '900'
+  },
+  text6xl_mb4: {
+    marginBottom: 16
+  },
+  textgray300_textxs: {
+    color: '#D1D5DB',
+    fontSize: 12
+  },
+  textgray400_textsm: {
+    color: '#9CA3AF',
+    fontSize: 14
+  },
+  textgray500_textcenter_mb6: {
+    color: '#6B7280',
+    marginBottom: 24,
+    textAlign: 'center'
+  },
+  textgray500_textsm_mb2: {
+    color: '#6B7280',
+    fontSize: 14,
+    marginBottom: 8
+  },
+  textgray500_textxs: {
+    color: '#6B7280',
+    fontSize: 12
+  },
+  textgray700_fontbold_textcente: {
+    color: '#374151',
+    fontWeight: '700',
+    textAlign: 'center'
+  },
+  textgray700_fontmedium_italic: {
+    color: '#374151',
+    fontStyle: 'italic',
+    fontWeight: '500'
+  },
+  textgray900_fontbold: {
+    color: '#111827',
+    fontWeight: '700'
+  },
+  textgreen700_fontbold_ml2: {
+    color: '#15803D',
+    fontWeight: '700',
+    marginLeft: 8
+  },
+  textgreen800_fontmedium: {
+    fontWeight: '500'
+  },
+  textlg_fontbold_textgray900: {
+    color: '#111827',
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  textsm_fontbold_textgray900_mb: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 12
+  },
+  textwhite_fontbold: {
+    color: '#FFFFFF',
+    fontWeight: '700'
+  },
+  textwhite_fontbold_textcenter: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    textAlign: 'center'
+  },
+  textwhite_fontbold_textlg: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  textwhite_fontbold_textsm: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700'
+  },
+  textxl_mr2: {
+    fontSize: 20,
+    marginRight: 8
+  },
+  textyellow700_fontbold_textlg: {
+    color: '#A16207',
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  textyellow700_ml2_textcenter: {
+    color: '#A16207',
+    marginLeft: 8,
+    textAlign: 'center'
+  },
+  w16_h12_border2_borderdashed_b: {
+    alignItems: 'center',
+    borderColor: '#D1D5DB',
+    borderRadius: 12,
+    borderWidth: 2,
+    height: 48,
+    justifyContent: 'center',
+    marginBottom: 8,
+    marginRight: 8,
+    width: 64
+  },
+  w32_h32_roundedfull_border8_mb: {
+    alignItems: 'center',
+    borderRadius: 9999,
+    height: 128,
+    justifyContent: 'center',
+    marginBottom: 24,
+    width: 128
+  },
+});
 
 export default function GameScreen() {
   const router = useRouter();
@@ -62,27 +348,27 @@ export default function GameScreen() {
 
   const handlePlaceWord = (word: string) => {
     if (placedWords.length >= sentence.words.length) return;
-    setPlacedWords([...placedWords, word]);
-    setAvailableWords(availableWords.filter(w => w !== word));
+    setPlacedWords(prev => [...prev, word]);
+    setAvailableWords(prev => prev.filter(w => w !== word));
   };
 
   const handleRemoveWord = (index: number) => {
     const word = placedWords[index];
-    setPlacedWords(placedWords.filter((_, i) => i !== index));
-    setAvailableWords([...availableWords, word]);
+    setPlacedWords(prev => prev.filter((_, i) => i !== index));
+    setAvailableWords(prev => [...prev, word]);
   };
 
   const normalizePhrase = (words: string[]) => words.join(' ').trim().replace(/\s+/g, ' ');
 
   const checkOrder = () => {
     const correct = normalizePhrase(placedWords) === normalizePhrase(sentence.words);
-    
+
     if (correct) {
-      setScore(score + 1);
+      setScore(prev => prev + 1);
       setTimeout(() => {
         if (currentSentenceIndex < sentences.length - 1) {
-          setCurrentSentenceIndex(currentSentenceIndex + 1);
-          initSentence();
+          setCurrentSentenceIndex(prev => prev + 1);
+          // No need to call initSentence() here — the useEffect on currentSentenceIndex handles it
         } else {
           setShowResult(true);
         }
@@ -93,9 +379,10 @@ export default function GameScreen() {
       if (newAttempts >= 3) {
         setShowAnswer(true);
       }
+      const allWords = [...availableWords, ...placedWords];
       setTimeout(() => {
         setPlacedWords([]);
-        setAvailableWords(shuffle([...availableWords, ...placedWords]));
+        setAvailableWords(shuffle(allWords));
       }, 1000);
     }
   };
@@ -111,40 +398,39 @@ export default function GameScreen() {
     const percentage = Math.round((score / sentences.length) * 100);
     
     return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top', 'bottom']}>
+      <SafeAreaView style={styles.style_6} edges={['top', 'bottom']}>
         <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 120 }}>
-          <View className="flex-1 items-center justify-center px-5 py-10">
-            <View className="bg-white rounded-3xl p-8 items-center shadow-lg w-full max-w-sm">
-              <Text className="text-6xl mb-4">{getScoreEmoji()}</Text>
-              <Text className="text-2xl font-bold text-gray-900 mb-2 text-center">
+          <View style={styles.style_5}>
+            <View style={styles.bgwhite_rounded3xl_p8_itemscen}>
+              <Text style={styles.text6xl_mb4}>{getScoreEmoji()}</Text>
+              <Text style={styles.text2xl_fontbold_textgray900_m}>
                 {percentage >= 66 ? "Bravo !" : "Continue tes efforts !"}
               </Text>
-              <Text className="text-gray-500 text-center mb-6">
+              <Text style={styles.textgray500_textcenter_mb6}>
                 Tu as complété {score} phrases sur {sentences.length}
               </Text>
               
-              <View className="w-32 h-32 rounded-full border-8 mb-6 items-center justify-center"
-                style={{ 
+              <View style={[styles.w32_h32_roundedfull_border8_mb,{ 
                   borderColor: percentage >= 60 ? '#10B981' : '#EF4444',
                   backgroundColor: `${percentage >= 60 ? '#10B981' : '#EF4444'}10`
-                }}
-              >
-                <Text className="text-4xl font-black" style={{ color: percentage >= 60 ? '#10B981' : '#EF4444' }}>
+                }]}
+               >
+                <Text style={[styles.text4xl_fontblack,{ color: percentage >= 60 ? '#10B981' : '#EF4444' }]} >
                   {percentage}%
                 </Text>
               </View>
 
-              <View className="bg-yellow-50 rounded-xl px-6 py-3 mb-6 flex-row items-center">
-                <Text className="text-xl mr-2">⭐</Text>
-                <Text className="text-yellow-700 font-bold text-lg">+{calculateXP('wordOrder', score, sentences.length).totalXP} XP gagnés</Text>
+              <View style={styles.bgyellow50_roundedxl_px6_py3_m}>
+                <Text style={styles.textxl_mr2}>⭐</Text>
+                <Text style={styles.textyellow700_fontbold_textlg}>+{calculateXP('wordOrder', score, sentences.length).totalXP} XP gagnés</Text>
               </View>
 
-              <View className="flex-row w-full">
+              <View style={styles.flexrow_wfull}>
                 <Pressable
                   onPress={handleContinue}
-                  className="flex-1 bg-gray-200 py-4 rounded-xl mr-2"
+                  style={styles.flex1_bggray200_py4_roundedxl_}
                 >
-                  <Text className="text-gray-700 font-bold text-center">Continuer</Text>
+                  <Text style={styles.textgray700_fontbold_textcente}>Continuer</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => {
@@ -153,9 +439,9 @@ export default function GameScreen() {
                     setShowResult(false);
                     initSentence();
                   }}
-                  className="flex-1 bg-[#4a90e2] py-4 rounded-xl ml-2"
+                  style={styles.flex1_bg4a90e2_py4_roundedxl_m}
                 >
-                  <Text className="text-white font-bold text-center">Rejouer</Text>
+                  <Text style={styles.textwhite_fontbold_textcenter}>Rejouer</Text>
                 </Pressable>
               </View>
             </View>
@@ -166,68 +452,72 @@ export default function GameScreen() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
-      <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
-        <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+    <SafeAreaView style={styles.flex1_bgFAF9F6} edges={['top']}>
+      <View style={styles.px5_py4_flexrow_itemscenter_bg}>
+        <Pressable onPress={() => router.back()} style={styles.mr4_p2_ml2}>
           <Feather name="arrow-left" size={24} color="black" />
         </Pressable>
-        <View className="flex-1">
-          <Text className="text-lg font-bold text-gray-900">Ordre des mots</Text>
-          <Text className="text-gray-500 text-xs">
+        <View style={styles.flex1}>
+          <Text style={styles.textlg_fontbold_textgray900}>Ordre des mots</Text>
+          <Text style={styles.textgray500_textxs}>
             Phrase {currentSentenceIndex + 1}/{sentences.length}
           </Text>
         </View>
-        <View className="bg-[#A78BFA] px-3 py-1 rounded-full">
-          <Text className="text-white font-bold text-sm">{score} pts</Text>
+        <View style={styles.bgA78BFA_px3_py1_roundedfull}>
+          <Text style={styles.textwhite_fontbold_textsm}>{score} pts</Text>
         </View>
       </View>
 
-      <View className="px-5 mb-4">
-        <View className="h-2 bg-gray-200 rounded-full overflow-hidden">
+      <View style={styles.px5_mb4}>
+        <View style={styles.h2_bggray200_roundedfull_overf}>
           <View 
-            className="h-full bg-[#A78BFA] rounded-full"
-            style={{ width: `${((currentSentenceIndex + 1) / sentences.length) * 100}%` }}
-          />
+            style={[styles.hfull_bgA78BFA_roundedfull,{ width: `${((currentSentenceIndex + 1) / sentences.length) * 100}%` }]}
+           />
         </View>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}>
         
-        <View className="bg-white rounded-2xl p-4 mb-6 border border-gray-200">
-          <Text className="text-gray-500 text-sm mb-2">Remets les mots dans le bon ordre :</Text>
-          <Text className="text-gray-700 font-medium italic">{sentence.translation}</Text>
+        <View style={styles.bgwhite_rounded2xl_p4_mb6_bord}>
+          <Text style={styles.textgray500_textsm_mb2}>Remets les mots dans le bon ordre :</Text>
+          <Text style={styles.textgray700_fontmedium_italic}>{sentence.translation}</Text>
         </View>
 
-        <View className="mb-6">
-          <Text className="text-sm font-bold text-gray-900 mb-3">Zone de réponse</Text>
-          <View className="bg-[#A78BFA]/10 border-2 border-dashed border-[#A78BFA] rounded-2xl p-4 min-h-[120px]">
+        <View style={styles.style_4}>
+          <Text style={styles.style_3}>Zone de réponse</Text>
+          <View style={styles.bgA78BFA10_border2_borderdashe}>
             {placedWords.length === 0 ? (
-              <View className="flex-1 items-center justify-center py-8">
-                <Text className="text-gray-400 text-sm">Place les mots ici</Text>
+              <View style={styles.flex1_itemscenter_justifycente}>
+                <Text style={styles.textgray400_textsm}>Place les mots ici</Text>
               </View>
             ) : (
-              <View className="flex-row flex-wrap">
+              <View style={styles.style_2}>
                 {placedWords.map((word, index) => (
                   <Pressable
                     key={`placed-${index}`}
                     onPress={() => handleRemoveWord(index)}
-                    className={`px-4 py-3 rounded-xl mr-2 mb-2 ${
-                      showAnswer && word === sentence.words[index] 
-                        ? 'bg-green-500' 
+                    style={{
+                      paddingHorizontal: 16,
+                      paddingVertical: 12,
+                      borderRadius: 12,
+                      marginRight: 8,
+                      marginBottom: 8,
+                      backgroundColor: showAnswer && word === sentence.words[index] 
+                        ? '#22C55E' 
                         : showAnswer && word !== sentence.words[index]
-                          ? 'bg-red-500'
-                          : 'bg-[#A78BFA]'
-                    }`}
+                          ? '#EF4444'
+                          : '#A78BFA'
+                    }}
                   >
-                    <Text className="text-white font-bold">{word}</Text>
+                    <Text style={styles.textwhite_fontbold}>{word}</Text>
                   </Pressable>
                 ))}
                 {Array.from({ length: sentence.words.length - placedWords.length }).map((_, index) => (
                   <View 
                     key={`slot-${index}`}
-                    className="w-16 h-12 border-2 border-dashed border-gray-300 rounded-xl mr-2 mb-2 items-center justify-center"
+                    style={styles.w16_h12_border2_borderdashed_b}
                   >
-                    <Text className="text-gray-300 text-xs">{placedWords.length + index + 1}</Text>
+                    <Text style={styles.textgray300_textxs}>{placedWords.length + index + 1}</Text>
                   </View>
                 ))}
               </View>
@@ -235,58 +525,61 @@ export default function GameScreen() {
           </View>
         </View>
 
-        <View className="mb-6">
-          <Text className="text-sm font-bold text-gray-900 mb-3">Mots disponibles</Text>
-          <View className="flex-row flex-wrap">
+        <View style={styles.mb6}>
+          <Text style={styles.textsm_fontbold_textgray900_mb}>Mots disponibles</Text>
+          <View style={styles.flexrow_flexwrap}>
             {availableWords.map((word, index) => (
               <Pressable
                 key={`avail-${index}`}
                 onPress={() => handlePlaceWord(word)}
-                className="bg-white border-2 border-gray-200 rounded-xl px-4 py-3 mr-2 mb-2"
+                style={styles.bgwhite_border2_bordergray200_}
               >
-                <Text className="text-gray-900 font-bold">{word}</Text>
+                <Text style={styles.textgray900_fontbold}>{word}</Text>
               </Pressable>
             ))}
           </View>
         </View>
 
         {showAnswer && (
-          <View className="bg-green-50 rounded-2xl p-4 mb-4">
-            <View className="flex-row items-center mb-2">
+          <View style={styles.bggreen50_rounded2xl_p4_mb4}>
+            <View style={styles.flexrow_itemscenter_mb2}>
               <Feather name="check-circle" size={20} color="#10B981" />
-              <Text className="text-green-700 font-bold ml-2">La bonne réponse :</Text>
+              <Text style={styles.textgreen700_fontbold_ml2}>La bonne réponse :</Text>
             </View>
-            <Text className="text-green-800 font-medium">{sentence.words.join(' ')}</Text>
+            <Text style={styles.textgreen800_fontmedium}>{sentence.words.join(' ')}</Text>
           </View>
         )}
 
-        <View className="mt-4">
+        <View style={styles.mt4}>
           {wrongAttempts >= 3 && !showAnswer ? (
             <Pressable
               onPress={() => setShowAnswer(true)}
-              className="bg-gray-500 rounded-2xl py-4 items-center"
+              style={styles.bggray500_rounded2xl_py4_items}
             >
-              <Text className="text-white font-bold text-lg">Voir la réponse</Text>
+              <Text style={styles.style_1}>Voir la réponse</Text>
             </Pressable>
           ) : (
             <Pressable
               onPress={checkOrder}
               disabled={placedWords.length !== sentence.words.length}
-              className={`rounded-2xl py-4 items-center ${
-                placedWords.length === sentence.words.length 
-                  ? 'bg-[#A78BFA]' 
-                  : 'bg-gray-300'
-              }`}
+              style={{
+                borderRadius: 16,
+                paddingVertical: 16,
+                alignItems: 'center',
+                backgroundColor: placedWords.length === sentence.words.length 
+                  ? '#A78BFA' 
+                  : '#D1D5DB'
+              }}
             >
-              <Text className="text-white font-bold text-lg">Valider</Text>
+              <Text style={styles.textwhite_fontbold_textlg}>Valider</Text>
             </Pressable>
           )}
         </View>
 
-        <View className="mt-4 bg-yellow-50 rounded-2xl p-4">
-          <View className="flex-row items-center justify-center">
+        <View style={styles.mt4_bgyellow50_rounded2xl_p4}>
+          <View style={styles.flexrow_itemscenter_justifycen}>
             <Feather name="info" size={18} color="#F59E0B" />
-            <Text className="text-yellow-700 ml-2 text-center">
+            <Text style={styles.textyellow700_ml2_textcenter}>
               Clique sur un mot pour le placer. Clique sur un mot placé pour le retirer.
             </Text>
           </View>

@@ -84,3 +84,6 @@ scripts/
 AUDIT_IPELAN.pdf
 test/
 SKILLs.md
+docs/
+docs/*
+/docs

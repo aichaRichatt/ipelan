@@ -11,6 +11,9 @@ export interface UserGamificationProfile {
   badgeCount: number;
   lastBadgeId?: string | null;
   lastActivityDate: string;
+  lastLivesUpdate?: string | null; // ✅ Timestamp dernière régénération de vies
+  lastSync?: string | null;        // ✅ Timestamp dernière sync Moodle (détection conflit multi-device)
+  courseProgress?: Record<string, { c: number; t: number }> | null; // ✅ Progression des cours pour sync multi-device
 }
 
 function parseCustomFields(user: any): Record<string, string> {
@@ -70,12 +73,14 @@ export async function getUserGamificationFromMoodle(
       return { xp: 0, coins: 0, lives: 6, streak: 0, badges: [], badgeCount: 0, lastBadgeId: null, lastActivityDate: '' };
     }
 
-    if (!result?.users?.[0]) {
+    // Moodle retourne soit un array direct, soit {users: [...]}
+    const users = Array.isArray(result) ? result : result?.users;
+    if (!users?.[0]) {
       console.warn('[xpService] No users returned from Moodle. Result keys:', Object.keys(result || {}));
       return { xp: 0, coins: 0, lives: 6, streak: 0, badges: [], badgeCount: 0, lastBadgeId: null, lastActivityDate: '' };
     }
 
-    const user = result.users[0];
+    const user = users[0];
 
     // 🔒 VÉRIFICATION DE SÉCURITÉ : S'assurer que l'ID retourné correspond à l'ID demandé
     const returnedUserId = parseInt(user.id, 10);
@@ -93,6 +98,14 @@ export async function getUserGamificationFromMoodle(
       .map((id: string) => id.trim())
       .filter((id: string) => id.length > 0);
 
+    let courseProgress: Record<string, { c: number; t: number }> | null = null;
+    try {
+      const raw = fields.ipelan_course_progress || '';
+      if (raw) courseProgress = JSON.parse(raw);
+    } catch { 
+      console.log("[xpService] Erreur ")
+    }
+
     return {
       xp: parseInt(fields.ipelan_xp || '0', 10),
       coins: parseInt(fields.ipelan_coins || '0', 10),
@@ -102,6 +115,9 @@ export async function getUserGamificationFromMoodle(
       badgeCount: parseInt(fields.ipelan_badges_count || '0', 10) || badgeIds.length,
       lastBadgeId: fields.ipelan_last_badge || (badgeIds.length > 0 ? badgeIds[0] : null),
       lastActivityDate: fields.ipelan_last_activity || '',
+      lastLivesUpdate: fields.ipelan_last_lives_update || null, // ✅ Timestamp depuis serveur
+      lastSync: fields.ipelan_last_sync || null,               // ✅ Timestamp dernière sync
+      courseProgress,                                           // ✅ Progression des cours pour Device B
     };
   } catch (err: any) {
     console.warn('[xpService] getUserGamificationFromMoodle exception:', err.message);
@@ -147,14 +163,9 @@ export async function updateUserXP(
       wsfunction: 'core_user_update_users',
       moodlewsrestformat: 'json',
       'users[0][id]': userId,
-      'users[0][customfields][0][type]': 'ipelan_xp',
+      'users[0][customfields][0][type]': 'ipelan_xp', // Points d'expérience
       'users[0][customfields][0][value]': String(newXp),
     });
-
-    if (result?.exception) {
-      console.warn('[xpService] update XP error:', result.message);
-      return false;
-    }
 
     return true;
   } catch (err: any) {
@@ -193,16 +204,11 @@ export async function updateUserStreak(
       wsfunction: 'core_user_update_users',
       moodlewsrestformat: 'json',
       'users[0][id]': userId,
-      'users[0][customfields][0][type]': 'ipelan_streak',
+      'users[0][customfields][0][type]': 'ipelan_streak', // Séquence de jours consécutifs
       'users[0][customfields][0][value]': String(newStreak),
-      'users[0][customfields][1][type]': 'ipelan_last_activity',
+      'users[0][customfields][1][type]': 'ipelan_last_activity', // Date de dernière activité
       'users[0][customfields][1][value]': today,
     });
-
-    if (result?.exception) {
-      console.warn('[xpService] update streak error:', result.message);
-      return false;
-    }
 
     return true;
   } catch (err: any) {
@@ -225,6 +231,7 @@ export async function updateUserStreak(
  * Conservée uniquement pour compatibilité ascendante. Sera retirée dans
  * une version future.
  */
+/** @deprecated Use triggerGamificationSync instead. Calling this would duplicate XP in Moodle. */
 export async function awardXPForActivity(
   token: string,
   userId: number,
@@ -235,20 +242,5 @@ export async function awardXPForActivity(
   if (process.env.NODE_ENV === 'development') {
     console.warn('[xpService] awardXPForActivity est déprécié - utilisez triggerGamificationSync');
   }
-  const baseXP: Record<string, number> = {
-    quiz: 20,
-    listening: 15,
-    dictation: 15,
-    association: 10,
-  };
-
-  const multiplier = maxScore > 0 ? score / maxScore : 0;
-  const xpAwarded = Math.round(baseXP[activityType] * multiplier);
-
-  if (xpAwarded > 0) {
-    await updateUserXP(token, userId, xpAwarded);
-    await updateUserStreak(token, userId);
-  }
-
-  return xpAwarded;
+  return 0;
 }

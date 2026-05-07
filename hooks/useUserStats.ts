@@ -8,6 +8,7 @@ import {
   setXP,
 } from '@/services/api/userProgressService';
 import { getUserGamificationFromMoodle } from '@/services/api/xpService';
+import { startLifeBackgroundFetch } from '@/services/background/lifeRegeneration';
 import { getGlobalGamificationStats } from '@/services/gamification/gamificationService';
 import { updateUser } from '@/services/redux/slices/authSlice';
 import { RootState } from '@/services/redux/store';
@@ -15,8 +16,9 @@ import { countUserBadges, initBadgeTable } from '@/services/storage/badge-storag
 import { getAllCourseProgress } from '@/services/storage/course-progress';
 import { syncQueue } from '@/services/sync/syncQueue';
 import { verifyUserIdentityBeforeSync } from '@/services/utils/userIdentity';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { useAppState } from './useAppState';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
 
@@ -68,6 +70,11 @@ export function useUserStats(): UseUserStatsReturn {
   const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    return () => { isMountedRef.current = false; };
+  }, []);
+
   useEffect(() => {
     initStreakTable().catch(console.warn);
     initBadgeTable().catch(console.warn);
@@ -84,11 +91,22 @@ export function useUserStats(): UseUserStatsReturn {
     }
 
     setIsLoading(true);
+
+    // ✅ Vérifier et régénérer les vies automatiquement (même si app était fermée)
+    const { recalculateLivesOnForeground } = await import('@/services/background/lifeRegeneration');
+    const lifeResult = await recalculateLivesOnForeground(userId);
+    if (lifeResult.livesRegenerated > 0 && IS_DEV) {
+      console.log('[useUserStats] Auto-regenerated', lifeResult.livesRegenerated, 'lives on foreground');
+    }
+
+    // ✅ Démarrer le background fetch pour régénération future
+    await startLifeBackgroundFetch();
+    if (!isMountedRef.current) return;
     setError(null);
 
     try {
       const localProgress = await getUserProgress(userId);
-      const courseProgress = await getAllCourseProgress();
+      const courseProgress = await getAllCourseProgress(userId);
       const badgeCount = await countUserBadges(userId);
 
       const completedCourses = courseProgress.filter(c => {
@@ -119,7 +137,6 @@ export function useUserStats(): UseUserStatsReturn {
         console.log('[useUserStats] Local stats loaded:', localStats);
       }
 
-      // Check network status
       const isOnline = await checkOnline() && token !== null;
 
       if (isOnline && token) {
@@ -144,6 +161,11 @@ export function useUserStats(): UseUserStatsReturn {
             console.log('[useUserStats] Identity verified, proceeding with sync');
           }
 
+          // Lire le timestamp de la dernière sync locale (pour détection de conflits)
+          const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+          const localLastSyncStr = await AsyncStorage.getItem('@ipelan_last_sync');
+          const localLastSync = localLastSyncStr ? new Date(localLastSyncStr).getTime() : 0;
+
           // Fetch unified gamification profile from Moodle
           const moodleProfile = await getUserGamificationFromMoodle(token, userId);
 
@@ -151,31 +173,67 @@ export function useUserStats(): UseUserStatsReturn {
             console.log('[useUserStats] Moodle gamification:', moodleProfile);
           }
 
+          // ✅ Seed course_progress depuis Moodle pour Device B (new install)
+          if (moodleProfile.courseProgress && Object.keys(moodleProfile.courseProgress).length > 0) {
+            const { saveCourseProgress, getCourseProgress } = await import('@/services/storage/course-progress');
+            for (const [courseIdStr, data] of Object.entries(moodleProfile.courseProgress)) {
+              const courseId = parseInt(courseIdStr, 10);
+              if (courseId > 0 && data.t > 0) {
+                const localProg = await getCourseProgress(courseId, userId);
+                // Seed si: pas de données locales, ou données locales incomplètes, ou plus d'activités complétées côté serveur
+                if (!localProg || localProg.totalActivities === 0 || data.c > localProg.completedActivities) {
+                  await saveCourseProgress(courseId, data.c, data.t, 0, localProg?.bestScore ?? 0, userId);
+                }
+              }
+            }
+            if (IS_DEV) console.log('[useUserStats] Course progress seeded from Moodle:', moodleProfile.courseProgress);
+          }
 
+          // ✅ Détection de conflit multi-device via ipelan_last_sync
+          const serverLastSync = moodleProfile.lastSync ? new Date(moodleProfile.lastSync).getTime() : 0;
+          const serverIsNewer = serverLastSync > localLastSync + 5000; // tolérance 5s
+          if (IS_DEV && serverIsNewer) {
+            console.warn('[useUserStats] ⚠️ Conflit détecté: le serveur a été sync plus récemment (autre appareil). Server:', moodleProfile.lastSync, '/ Local:', localLastSyncStr);
+          }
+
+          // ✅ Recalculer les vies avec le timestamp serveur (ipelan_last_lives_update)
+          // Garantit la cohérence multi-device : si l'utilisateur a été actif sur un autre appareil,
+          // son timestamp de régénération de vies est plus récent → correction locale
+          if (moodleProfile.lastLivesUpdate) {
+            const { recalculateLivesOnForeground } = await import('@/services/background/lifeRegeneration');
+            const liveResultServer = await recalculateLivesOnForeground(userId, moodleProfile.lastLivesUpdate);
+            localStats = {
+              ...localStats,
+              lives: liveResultServer.currentLives,
+              nextHeartTime: liveResultServer.nextHeartTime,
+            };
+            if (IS_DEV) console.log('[useUserStats] Lives recalculated with server timestamp:', liveResultServer.currentLives, 'nextHeart:', liveResultServer.nextHeartTime);
+          }
+
+          // Stratégie de merge :
+          // XP/coins/streak : toujours MAX (peuvent seulement augmenter)
+          // Lives : si serveur plus récent → serveur fait foi (user a peut-être dépensé des vies)
+          //         sinon → local fait foi (regen locale appliquée)
+          // Badges : toujours union (jamais perdre un badge)
           const mergedXP = Math.max(localStats.xp, moodleProfile.xp);
           const mergedCoins = Math.max(localStats.coins, moodleProfile.coins);
-          const mergedLives = Math.max(localStats.lives, moodleProfile.lives);
+          const mergedLives = serverIsNewer
+            ? Math.max(localStats.lives, moodleProfile.lives) // autre device → prendre le max quand même pour la regen
+            : localStats.lives; // local fait foi si plus récent
           const mergedStreak = Math.max(localStats.streak, moodleProfile.streak);
           const mergedStreakBest = Math.max(localStats.streakBest, moodleProfile.streak);
           const mergedBadges = Math.max(localStats.badges, moodleProfile.badgeCount);
 
-          // If Moodle has higher values, write them back to local SQLite
-          const needsUpdate =
-            mergedXP > localStats.xp ||
-            mergedCoins > localStats.coins ||
-            mergedLives > localStats.lives ||
-            mergedStreak > localStats.streak ||
-            mergedBadges > localStats.badges;
-
-          if (needsUpdate) {
-            if (IS_DEV) {
-              console.log('[useUserStats] Moodle has higher values, updating local DB');
-            }
-            if (mergedXP > localStats.xp) await setXP(userId, mergedXP);
-            if (mergedCoins > localStats.coins) await setCoins(userId, mergedCoins);
-            if (mergedLives > localStats.lives) await setLives(userId, mergedLives);
-            if (mergedStreak > localStats.streak) await setStreak(userId, mergedStreak);
-          }
+          // ✅ Recompute course counts AFTER seeding so Device B sees correct values
+          const seededCourseProgress = await getAllCourseProgress(userId);
+          const finalCoursesCompleted = seededCourseProgress.filter(c => {
+            const p = c.totalActivities > 0 ? Math.round((c.completedActivities / c.totalActivities) * 100) : 0;
+            return p === 100;
+          }).length;
+          const finalCoursesInProgress = seededCourseProgress.filter(c => {
+            const p = c.totalActivities > 0 ? Math.round((c.completedActivities / c.totalActivities) * 100) : 0;
+            return p > 0 && p < 100;
+          }).length;
 
           const mergedStats: UserStats = {
             xp: mergedXP,
@@ -184,8 +242,8 @@ export function useUserStats(): UseUserStatsReturn {
             streak: mergedStreak,
             streakBest: mergedStreakBest,
             badges: mergedBadges,
-            coursesInProgress: localStats.coursesInProgress,
-            coursesCompleted: localStats.coursesCompleted,
+            coursesInProgress: finalCoursesInProgress,
+            coursesCompleted: finalCoursesCompleted,
             lastActivity: moodleProfile.lastActivityDate || new Date().toISOString(),
             nextHeartTime: localStats.nextHeartTime,
           };
@@ -215,10 +273,22 @@ export function useUserStats(): UseUserStatsReturn {
             streak: mergedStats.streak,
           }));
 
+          // ✅ Sauvegarder le timestamp de sync locale pour la prochaine détection de conflit
+          await AsyncStorage.setItem('@ipelan_last_sync', new Date().toISOString());
+
           // Trigger background sync to ensure Moodle is up to date with merged state
           if (token) {
             syncQueue.syncGamification(userId, token);
           }
+
+          // ✅ Background non-blocking: rebuild activity_progress from Moodle completion statuses
+          // Runs silently after UI is updated — INSERT OR IGNORE never overwrites local scores
+          ;(async () => {
+            try {
+              const { fetchAndPopulateActivityProgressFromMoodle } = await import('@/services/sync/progressSync');
+              await fetchAndPopulateActivityProgressFromMoodle(userId, token);
+            } catch {}
+          })();
         } catch (syncErr) {
           console.warn('[useUserStats] Moodle sync failed, using local:', syncErr);
           setStats(localStats);
@@ -243,10 +313,11 @@ export function useUserStats(): UseUserStatsReturn {
         }
       }
     } catch (err: any) {
+      if (!isMountedRef.current) return;
       console.error('[useUserStats] Error loading stats:', err);
       setError(err.message || 'Failed to load stats');
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) setIsLoading(false);
     }
   }, [userId, token, checkOnline, dispatch]);
 
@@ -343,16 +414,36 @@ export function useUserStats(): UseUserStatsReturn {
     loadStats();
   }, [loadStats]);
 
-  // ✅ Recharger automatiquement quand le profil Redux est modifie (apres une activite)
-  useEffect(() => {
-    if (user?.id && (user.xp !== undefined || user.coins !== undefined || user.lives !== undefined)) {
-      // Petit delai pour laisser SQLite se mettre a jour d'abord
-      const timer = setTimeout(() => {
-        loadStats();
-      }, 100);
-      return () => clearTimeout(timer);
+  // ✅ Détecter quand l'app revient au premier plan et recalculer les vies
+  const handleForeground = useCallback(() => {
+    if (userId) {
+      if (IS_DEV) console.log('[useUserStats] App came to foreground, recalculating lives...');
+      loadStats();
     }
-  }, [user?.xp, user?.coins, user?.lives, user?.id, loadStats]);
+  }, [userId, loadStats]);
+  useAppState(handleForeground);
+
+  // ✅ Auto-refresh des vies quand nextHeartTime arrive (même si l'app reste ouverte)
+  useEffect(() => {
+    if (!userId || !stats.nextHeartTime) return;
+
+    const msUntilNextHeart = new Date(stats.nextHeartTime).getTime() - Date.now();
+
+    if (msUntilNextHeart <= 0) {
+      // Le timer est déjà passé — recalculer immédiatement
+      loadStats();
+      return;
+    }
+
+    if (IS_DEV) console.log('[useUserStats] Next heart in', Math.round(msUntilNextHeart / 60000), 'min');
+
+    const timer = setTimeout(() => {
+      if (IS_DEV) console.log('[useUserStats] Heart timer fired — reloading lives...');
+      loadStats();
+    }, msUntilNextHeart + 1000); // +1s buffer pour éviter les edge cases
+
+    return () => clearTimeout(timer);
+  }, [stats.nextHeartTime, userId, loadStats]);
 
   return {
     stats,

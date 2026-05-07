@@ -5,6 +5,7 @@ const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN;
 const BADGES_STORAGE_KEY = "@ipelan_user_badges";
 const BADGES_TIMESTAMP_KEY = "@ipelan_badges_timestamp";
 const IS_DEV = process.env.NODE_ENV === 'development';
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
 export interface MoodleBadge {
   id: number;
@@ -27,28 +28,26 @@ export async function getUserBadges(token: string, userId: number): Promise<Mood
 
   try {
     const result = await moodleFetch("/webservice/rest/server.php", params, "POST");
-
-    if (result?.exception && ADMIN_TOKEN) {
-      const adminParams = {
-        wstoken: ADMIN_TOKEN,
-        wsfunction: "core_badges_get_user_badges",
-        userid: userId,
-        moodlewsrestformat: "json"
-      };
-      const adminResult = await moodleFetch("/webservice/rest/server.php", adminParams, "POST");
-      if (adminResult?.badges && Array.isArray(adminResult.badges)) {
-        return adminResult.badges;
-      }
-      return [];
-    }
-
     if (result?.badges && Array.isArray(result.badges)) {
       return result.badges;
     }
-
     return [];
   } catch (error) {
-    console.warn("[badgeService] getUserBadges failed:", error);
+    // User token may lack badge permission — retry with admin token
+    if (ADMIN_TOKEN) {
+      try {
+        const adminResult = await moodleFetch("/webservice/rest/server.php", {
+          wstoken: ADMIN_TOKEN,
+          wsfunction: "core_badges_get_user_badges",
+          userid: userId,
+          moodlewsrestformat: "json"
+        }, "POST");
+        return adminResult?.badges && Array.isArray(adminResult.badges) ? adminResult.badges : [];
+      } catch (adminErr) {
+        if (IS_DEV) console.warn("[badgeService] Admin fallback also failed:", adminErr);
+      }
+    }
+    if (IS_DEV) console.warn("[badgeService] getUserBadges failed:", error);
     return [];
   }
 }
@@ -80,7 +79,15 @@ export async function getAndSyncUserBadges(
   userId: number
 ): Promise<{ badges: MoodleBadge[]; fromCache: boolean }> {
   try {
-    const localBadges = await getUserBadgesLocal();
+    // Return cached data if still fresh (< 24h)
+    const timestampRaw = await AsyncStorage.getItem(BADGES_TIMESTAMP_KEY);
+    if (timestampRaw) {
+      const age = Date.now() - parseInt(timestampRaw, 10);
+      if (age < CACHE_TTL_MS) {
+        const cached = await getUserBadgesLocal();
+        if (cached.length > 0) return { badges: cached, fromCache: true };
+      }
+    }
 
     const freshBadges = await getUserBadges(token, userId);
     if (freshBadges.length > 0) {
@@ -88,9 +95,10 @@ export async function getAndSyncUserBadges(
       return { badges: freshBadges, fromCache: false };
     }
 
+    const localBadges = await getUserBadgesLocal();
     return { badges: localBadges, fromCache: true };
   } catch (error) {
-    console.warn("[badgeService] getAndSyncUserBadges failed:", error);
+    if (IS_DEV) console.warn("[badgeService] getAndSyncUserBadges failed:", error);
     const localBadges = await getUserBadgesLocal();
     return { badges: localBadges, fromCache: true };
   }
@@ -116,18 +124,12 @@ export async function syncBadgesToMoodle(
       'users[0][customfields][0][type]': 'ipelan_badges',
       'users[0][customfields][0][value]': lastBadge, // Dernier badge uniquement !
       'users[0][customfields][1][type]': 'ipelan_badges_count',
-      'users[0][customfields][1][value]': String(badgeIds.length),
-      'users[0][customfields][2][type]': 'ipelan_last_activity',
+      'users[0][customfields][1][value]': String(badgeIds.length), // Nombre total de badges
+      'users[0][customfields][2][type]': 'ipelan_last_activity', // Date de dernière activité
       'users[0][customfields][2][value]': today,
     });
 
-    if (result?.exception) {
-      console.warn('[badgeService] syncBadgesToMoodle error:', result.message);
-      return false;
-    }
-
-
-    console.log(`[badgeService] Synced to Moodle: lastBadge=${lastBadge}, count=${badgeIds.length}`);
+    if (IS_DEV) console.log(`[badgeService] Synced to Moodle: lastBadge=${lastBadge}, count=${badgeIds.length}`);
 
 
     return true;
@@ -152,11 +154,6 @@ export async function getBadgesFromMoodle(
       'criteria[0][key]': 'id',
       'criteria[0][value]': userId,
     });
-
-    if (result?.exception) {
-      console.warn('[badgeService] getBadgesFromMoodle error:', result.message);
-      return { badgeIds: [], count: 0 };
-    }
 
     const user = result?.users?.[0];
     if (!user || !user.customfields) {

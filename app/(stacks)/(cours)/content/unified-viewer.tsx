@@ -7,13 +7,14 @@ import { deleteAsync, documentDirectory, downloadAsync } from "expo-file-system/
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    Pressable,
-    ScrollView,
-    Text,
-    View,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
@@ -37,6 +38,253 @@ interface DetectedContent {
   filename: string;
   mimeType?: string;
 }
+
+const styles = StyleSheet.create({
+  bgwhite_rounded2xl_p4_shadowlg: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16
+  },
+  flex1: {
+    flex: 1
+  },
+  flex1_bgblack: {
+    backgroundColor: '#000000',
+    flex: 1
+  },
+  flex1_bgFAF9F6: {
+    backgroundColor: '#FAF9F6',
+    flex: 1
+  },
+  flex1_bgFAF9F6_itemscenter_jus: {
+    alignItems: 'center',
+    backgroundColor: '#FAF9F6',
+    flex: 1,
+    justifyContent: 'center'
+  },
+  flex1_bggray100: {
+    backgroundColor: '#F3F4F6',
+    flex: 1
+  },
+  flex1_fontbold_ml2: {
+    flex: 1,
+    fontWeight: '700',
+    marginLeft: 8
+  },
+  flex1_itemscenter_justifycente: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center'
+  },
+  flexrow_itemscenter: {
+    alignItems: 'center',
+    flexDirection: 'row'
+  },
+  flexrow_itemscenter_justifybet: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    padding: 16
+  },
+  flexrow_justifybetween: {
+    flexDirection: 'row',
+    justifyContent: 'space-between'
+  },
+  h2_bggray200_roundedfull_overf: {
+    backgroundColor: '#E5E7EB',
+    borderRadius: 9999,
+    height: 8,
+    marginBottom: 8,
+    overflow: 'hidden'
+  },
+  hfull_bg4a90e2_roundedfull: {
+    backgroundColor: '#4a90e2',
+    borderRadius: 9999,
+    height: '100%'
+  },
+  mt4_textgray500: {
+    color: '#6B7280',
+    marginTop: 16
+  },
+  p2: {
+    padding: 8
+  },
+  p2_mr2: {
+    marginRight: 8,
+    padding: 8
+  },
+  px4_py3_flexrow_itemscenter_bg: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderColor: '#E5E7EB',
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 12
+  },
+  style_1: {
+    flex: 1
+  },
+  style_10: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 12
+  },
+  style_11: {
+    backgroundColor: '#FAF9F6',
+    flex: 1
+  },
+  style_12: {
+    color: '#6B7280',
+    marginTop: 16
+  },
+  style_2: {
+    alignItems: 'center',
+    backgroundColor: '#E5E7EB',
+    borderRadius: 9999,
+    height: 56,
+    justifyContent: 'center',
+    width: 56
+  },
+  style_3: {
+    color: '#6B7280',
+    fontSize: 12
+  },
+  style_4: {
+    alignItems: 'center',
+    backgroundColor: '#FAF9F6',
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 20
+  },
+  style_5: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 20
+  },
+  style_6: {
+    flex: 1
+  },
+  style_7: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center'
+  },
+  style_8: {
+    color: '#374151',
+    fontWeight: '700',
+    marginTop: 16,
+    textAlign: 'center'
+  },
+  style_9: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 20
+  },
+  textbase_fontbold_textgray900: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '700'
+  },
+  textcenter_textgray500_textsm_: {
+    color: '#6B7280',
+    fontSize: 14,
+    marginBottom: 8,
+    textAlign: 'center'
+  },
+  textgray400_textxs_mt2: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    marginTop: 8
+  },
+  textgray500_fontmedium_textsm: {
+    color: '#6B7280',
+    fontSize: 14,
+    fontWeight: '500'
+  },
+  textgray500_textsm_mt2: {
+    color: '#6B7280',
+    fontSize: 14,
+    marginTop: 8
+  },
+  textgray500_textsm_mt2_textcen: {
+    color: '#6B7280',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center'
+  },
+  textgray500_textxs: {
+    color: '#6B7280',
+    fontSize: 12
+  },
+  textgray700_fontbold_mt4: {
+    color: '#374151',
+    fontWeight: '700',
+    marginTop: 16
+  },
+  textgray700_fontbold_mt4_textc: {
+    color: '#374151',
+    fontWeight: '700',
+    marginTop: 16,
+    textAlign: 'center'
+  },
+  textgray700_fontbold_textlg_te: {
+    color: '#374151',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 32,
+    textAlign: 'center'
+  },
+  textxs_fontmedium_uppercase: {
+    fontSize: 12,
+    fontWeight: '500',
+    textTransform: 'uppercase'
+  },
+  w14_h14_roundedfull_bggray200_: {
+    alignItems: 'center',
+    backgroundColor: '#E5E7EB',
+    borderRadius: 9999,
+    height: 56,
+    justifyContent: 'center',
+    marginLeft: 24,
+    opacity: 0.5,
+    width: 56
+  },
+  w20_h20_roundedfull_bg002366_i: {
+    alignItems: 'center',
+    backgroundColor: '#002366',
+    borderRadius: 9999,
+    height: 80,
+    justifyContent: 'center',
+    width: 80
+  },
+  w36_h36_roundedfull_bgwhite_it: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 9999,
+    justifyContent: 'center'
+  },
+  w48_h48_roundedfull_bggradient: {
+    alignItems: 'center',
+    borderRadius: 9999,
+    height: 192,
+    justifyContent: 'center',
+    width: 192
+  },
+  wfull_maxwsm_mb8: {
+    marginBottom: 32,
+    width: '100%'
+  },
+});
 
 export default function UnifiedContentViewer() {
   const router = useRouter();
@@ -393,7 +641,11 @@ export default function UnifiedContentViewer() {
     return () => {
       // Audio cleanup is mostly handled by the hook, but we pause just in case
       if (audioPlayer) {
-        audioPlayer.pause();
+        try {
+          audioPlayer.pause();
+        } catch {
+          // Player may already be released by expo-audio on unmount — safe to ignore
+        }
       }
     };
   }, [audioPlayer]);
@@ -469,27 +721,27 @@ export default function UnifiedContentViewer() {
 
   if (loading) {
     return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F6] items-center justify-center">
+      <SafeAreaView style={styles.flex1_bgFAF9F6_itemscenter_jus}>
         <ActivityIndicator size="large" color="#002366" />
-        <Text className="mt-4 text-gray-500">Chargement...</Text>
+        <Text style={styles.style_12}>Chargement...</Text>
       </SafeAreaView>
     );
   }
 
   if (error) {
     return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={["top"]}>
-        <View className="px-4 py-3 flex-row items-center bg-white border-b">
-          <Pressable onPress={() => router.back()} className="p-2">
+      <SafeAreaView style={styles.style_11} edges={["top"]}>
+        <View style={styles.style_10}>
+          <Pressable onPress={() => router.back()} style={styles.p2}>
             <Feather name="arrow-left" size={24} color="black" />
           </Pressable>
-          <Text className="flex-1 font-bold ml-2">
+          <Text style={styles.flex1_fontbold_ml2}>
             {moduleTitle || "Erreur"}
           </Text>
         </View>
-        <View className="flex-1 items-center justify-center px-5">
+        <View style={styles.style_9}>
           <Ionicons name="alert-circle" size={64} color="#EF4444" />
-          <Text className="text-gray-700 font-bold mt-4 text-center">
+          <Text style={styles.style_8}>
             {error}
           </Text>
         </View>
@@ -525,8 +777,8 @@ export default function UnifiedContentViewer() {
             }}
           >
             {imageUri && (
-              <View className="bg-white rounded-2xl p-4 shadow-lg">
-                <Text className="text-center text-gray-500 text-sm mb-2">
+              <View style={styles.bgwhite_rounded2xl_p4_shadowlg}>
+                <Text style={styles.textcenter_textgray500_textsm_}>
                   {detectedContent.filename}
                 </Text>
                 <WebView
@@ -562,7 +814,7 @@ export default function UnifiedContentViewer() {
           </html>
         ` : '';
         return (
-          <View className="flex-1 bg-black">
+          <View style={styles.flex1_bgblack}>
             {videoUri && (
               <WebView
                 source={{ html: videoHtml }}
@@ -599,7 +851,7 @@ export default function UnifiedContentViewer() {
           // For native builds, dynamically import react-native-pdf
           const PdfViewer = require('react-native-pdf').default;
           return (
-            <View className="flex-1 bg-gray-100">
+            <View style={styles.flex1_bggray100}>
               <PdfViewer
                 source={{ uri: authPdfUrl, cache: true }}
                 style={{
@@ -619,10 +871,10 @@ export default function UnifiedContentViewer() {
           );
         }
         return (
-          <View className="flex-1 items-center justify-center">
+          <View style={styles.style_7}>
             <ActivityIndicator size="large" color="#002366" />
-            <Text className="mt-4 text-gray-500">Traitement du PDF...</Text>
-            <Text className="text-gray-400 text-xs mt-2">Téléchargement...</Text>
+            <Text style={styles.mt4_textgray500}>Traitement du PDF...</Text>
+            <Text style={styles.textgray400_textxs_mt2}>Téléchargement...</Text>
           </View>
         );
 
@@ -633,7 +885,7 @@ export default function UnifiedContentViewer() {
             console.log("[UnifiedViewer] EPUB WebView baseUrl:", webViewBaseUrl);
           }
           return (
-            <View className="flex-1">
+            <View style={styles.style_6}>
               <WebView
                 key={`webview-${currentChapterIndex}`}
                 source={{ html: htmlContent, baseUrl: webViewBaseUrl }}
@@ -649,23 +901,33 @@ export default function UnifiedContentViewer() {
                 mixedContentMode="always"
               />
               {epubChapters.length > 1 && (
-                <View className="flex-row items-center justify-between p-4 bg-white border-t border-gray-200 mb-4">
+                <View style={styles.flexrow_itemscenter_justifybet}>
                   <Pressable
                     onPress={() => loadChapter(currentChapterIndex - 1)}
                     disabled={currentChapterIndex === 0}
-                    className={`px-4 py-2 rounded-lg ${currentChapterIndex === 0 ? 'bg-gray-200' : 'bg-[#002366]'}`}
+                    style={{
+                      paddingHorizontal: 16,
+                      paddingVertical: 8,
+                      borderRadius: 8,
+                      backgroundColor: currentChapterIndex === 0 ? '#E5E7EB' : '#002366'
+                    }}
                   >
-                    <Text className={currentChapterIndex === 0 ? 'text-gray-400' : 'text-white'}>Précédent</Text>
+                    <Text style={{ color: currentChapterIndex === 0 ? '#9CA3AF' : '#FFFFFF' }}>Précédent</Text>
                   </Pressable>
-                  <Text className="text-gray-500 font-medium text-sm">
+                  <Text style={styles.textgray500_fontmedium_textsm}>
                     {currentChapterIndex + 1} / {epubChapters.length}
                   </Text>
                   <Pressable
                     onPress={() => loadChapter(currentChapterIndex + 1)}
                     disabled={currentChapterIndex === epubChapters.length - 1}
-                    className={`px-4 py-2 rounded-lg ${currentChapterIndex === epubChapters.length - 1 ? 'bg-gray-200' : 'bg-[#002366]'}`}
+                    style={{
+                      paddingHorizontal: 16,
+                      paddingVertical: 8,
+                      borderRadius: 8,
+                      backgroundColor: currentChapterIndex === epubChapters.length - 1 ? '#E5E7EB' : '#002366'
+                    }}
                   >
-                    <Text className={currentChapterIndex === epubChapters.length - 1 ? 'text-gray-400' : 'text-white'}>Suivant</Text>
+                    <Text style={{ color: currentChapterIndex === epubChapters.length - 1 ? '#9CA3AF' : '#FFFFFF' }}>Suivant</Text>
                   </Pressable>
                 </View>
               )}
@@ -673,12 +935,12 @@ export default function UnifiedContentViewer() {
           );
         }
         return (
-          <View className="flex-1 items-center justify-center px-5">
+          <View style={styles.style_5}>
             <ActivityIndicator size="large" color="#002366" />
-            <Text className="text-gray-700 font-bold mt-4 text-center">
+            <Text style={styles.textgray700_fontbold_mt4_textc}>
               {detectedContent.filename}
             </Text>
-            <Text className="text-gray-500 text-sm mt-2 text-center">
+            <Text style={styles.textgray500_textsm_mt2_textcen}>
               Chargement de l&apos;EPUB...
             </Text>
           </View>
@@ -687,44 +949,43 @@ export default function UnifiedContentViewer() {
       case "audio":
         const progress = audioDuration > 0 ? (position / audioDuration) * 100 : 0;
         return (
-          <View className="flex-1 items-center justify-center px-5 bg-[#FAF9F6]">
-            <View className="w-48 h-48 rounded-full bg-gradient-to-br from-[#002366] to-[#4a90e2] items-center justify-center mb-12 shadow-xl">
-              <View className="w-36 h-36 rounded-full bg-white items-center justify-center">
+          <View style={styles.style_4}>
+            <View style={styles.w48_h48_roundedfull_bggradient}>
+              <View style={styles.w36_h36_roundedfull_bgwhite_it}>
                 <Ionicons name="musical-notes" size={56} color="#002366" />
               </View>
             </View>
 
-            <Text className="text-gray-700 font-bold text-lg text-center mb-8">
+            <Text style={styles.textgray700_fontbold_textlg_te}>
               {detectedContent.filename}
             </Text>
 
-            <View className="w-full max-w-sm mb-8">
-              <View className="h-2 bg-gray-200 rounded-full overflow-hidden mb-2">
+            <View style={styles.wfull_maxwsm_mb8}>
+              <View style={styles.h2_bggray200_roundedfull_overf}>
                 <View
-                  className="h-full bg-[#4a90e2] rounded-full"
-                  style={{ width: `${progress}%` }}
-                />
+                  style={[styles.hfull_bg4a90e2_roundedfull,{ width: `${progress}%` }]}
+                 />
               </View>
-              <View className="flex-row justify-between">
-                <Text className="text-gray-500 text-xs">
+              <View style={styles.flexrow_justifybetween}>
+                <Text style={styles.style_3}>
                   {formatTime(position / 1000)}
                 </Text>
-                <Text className="text-gray-500 text-xs">
+                <Text style={styles.textgray500_textxs}>
                   {formatTime(audioDuration / 1000)}
                 </Text>
               </View>
             </View>
 
-            <View className="flex-row items-center">
+            <View style={styles.flexrow_itemscenter}>
               <Pressable
                 onPress={restartAudio}
-                className="w-14 h-14 rounded-full bg-gray-200 items-center justify-center mr-6"
+                style={styles.style_2}
               >
                 <Feather name="rotate-ccw" size={24} color="#002366" />
               </Pressable>
               <Pressable
                 onPress={togglePlayPause}
-                className="w-20 h-20 rounded-full bg-[#002366] items-center justify-center shadow-lg"
+                style={styles.w20_h20_roundedfull_bg002366_i}
               >
                 <Feather
                   name={isPlaying ? "pause" : "play"}
@@ -732,7 +993,7 @@ export default function UnifiedContentViewer() {
                   color="white"
                 />
               </Pressable>
-              <View className="w-14 h-14 rounded-full bg-gray-200 items-center justify-center ml-6 opacity-50">
+              <View style={styles.w14_h14_roundedfull_bggray200_}>
                 <Feather name="skip-forward" size={24} color="#9CA3AF" />
               </View>
             </View>
@@ -741,12 +1002,12 @@ export default function UnifiedContentViewer() {
 
       default:
         return (
-          <View className="flex-1 items-center justify-center">
+          <View style={styles.flex1_itemscenter_justifycente}>
             <Feather name="file" size={64} color="#9CA3AF" />
-            <Text className="text-gray-700 font-bold mt-4">
+            <Text style={styles.textgray700_fontbold_mt4}>
               {detectedContent.filename}
             </Text>
-            <Text className="text-gray-500 text-sm mt-2">
+            <Text style={styles.textgray500_textsm_mt2}>
               Type: {detectedContent.type}
             </Text>
           </View>
@@ -755,36 +1016,40 @@ export default function UnifiedContentViewer() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={["top"]}>
-      <View className="px-4 py-3 flex-row items-center bg-white border-b border-gray-200">
-        <Pressable onPress={() => router.back()} className="p-2 mr-2">
+    <SafeAreaView style={styles.flex1_bgFAF9F6} edges={["top"]}>
+      <View style={styles.px4_py3_flexrow_itemscenter_bg}>
+        <Pressable onPress={() => router.back()} style={styles.p2_mr2}>
           <Feather name="arrow-left" size={24} color="black" />
         </Pressable>
-        <View className="flex-1">
-          <Text className="text-base font-bold text-gray-900" numberOfLines={1}>
+        <View style={styles.style_1}>
+          <Text style={styles.textbase_fontbold_textgray900} numberOfLines={1}>
             {moduleTitle || "Contenu"}
           </Text>
           <View
-            className={`inline-block px-2 py-0.5 rounded-full mt-1 ${
-              detectedContent.type === "pdf"
-                ? "bg-red-100"
+            style={{
+              paddingHorizontal: 8,
+              paddingVertical: 2,
+              borderRadius: 9999,
+              marginTop: 4,
+              backgroundColor: detectedContent.type === "pdf"
+                ? '#FEE2E2'
                 : detectedContent.type === "epub"
-                  ? "bg-green-100"
+                  ? '#DCFCE7'
                   : detectedContent.type === "audio"
-                    ? "bg-purple-100"
+                    ? '#F3E8FF'
                     : detectedContent.type === "video"
-                      ? "bg-orange-100"
-                      : "bg-blue-100"
-            }`}
+                      ? '#FFEDD5'
+                      : '#DBEAFE'
+            }}
           >
-            <Text className="text-xs font-medium uppercase">
+            <Text style={styles.textxs_fontmedium_uppercase}>
               {detectedContent.type}
             </Text>
           </View>
         </View>
       </View>
 
-      <View className="flex-1">{renderContent()}</View>
+      <View style={styles.flex1}>{renderContent()}</View>
     </SafeAreaView>
   );
 }

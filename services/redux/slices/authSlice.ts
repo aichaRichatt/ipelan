@@ -27,12 +27,16 @@ const authSlice = createSlice({
     loginFailure: (state, action: PayloadAction<string>) => {
       state.isLoading = false;
       state.error = action.payload;
+      state.isAuthenticated = false;
     },
     logout: (state) => {
       state.user = null;
       state.token = null;
       state.isAuthenticated = false;
       state.isLoading = false;
+      state.error = null;
+    },
+    clearError: (state) => {
       state.error = null;
     },
     updateUser: (state, action: PayloadAction<Partial<IPELANUser>>) => {
@@ -43,5 +47,5 @@ const authSlice = createSlice({
   },
 });
 
-export const { loginStart, loginSuccess, loginFailure, logout, updateUser } = authSlice.actions;
+export const { loginStart, loginSuccess, loginFailure, logout, clearError, updateUser } = authSlice.actions;
 export default authSlice.reducer;

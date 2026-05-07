@@ -1,14 +1,14 @@
 import { Feather } from "@expo/vector-icons";
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Pressable, Text, View, Alert, ActivityIndicator } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 import { useSelector } from "react-redux";
-import { RootState } from "../../../../services/redux/store";
 import { getCourseContents } from "../../../../services/api/courseService";
-import { mapModuleToContentType } from "../../../../utils/contentMapper";
 import { getMoodleLesson, getMoodleLessonPages } from "../../../../services/contentLoader";
+import { RootState } from "../../../../services/redux/store";
+import { mapModuleToContentType } from "../../../../utils/contentMapper";
 
 const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN;
 const MOODLE_URL = process.env.EXPO_PUBLIC_MOODLE_API_URL || "https://moodle.richatt.com";
@@ -38,6 +38,142 @@ interface MoodleModule {
   url?: string;
   instance?: number;
 }
+
+const styles = StyleSheet.create({
+  absolute_bottom_0_left_0_right_0_bg_whit: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderTopWidth: 1,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    position: 'absolute'
+  },
+  flex_1: {
+    flex: 1
+  },
+  flex_1_bg___FAF9F6: {
+    backgroundColor: '#FAF9F6',
+    flex: 1
+  },
+  flex_1_bg___FAF9F6__items_center_justify: {
+    alignItems: 'center',
+    backgroundColor: '#FAF9F6',
+    flex: 1,
+    justifyContent: 'center'
+  },
+  flex_1_bg_white_mx_4_rounded_xl_overflow: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    flex: 1,
+    marginHorizontal: 16,
+    overflow: 'hidden'
+  },
+  flex_1_items_center_justify_center_px_5: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 20
+  },
+  h_1_bg_gray_200_rounded_full_overflow_hi: {
+    backgroundColor: '#E5E7EB',
+    borderRadius: 9999,
+    height: 4,
+    overflow: 'hidden'
+  },
+  h_full_bg___F59E0B__rounded_full_transit: {
+    backgroundColor: '#F59E0B',
+    borderRadius: 9999,
+    height: '100%'
+  },
+  mr_4_p_2__ml_2: {
+    marginLeft: -8,
+    marginRight: 16,
+    padding: 8
+  },
+  mt_2_text_gray_400_text_xs: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    marginTop: 8
+  },
+  mt_4_text_gray_600: {
+    color: '#4B5563',
+    marginTop: 16
+  },
+  px_5_mb_2: {
+    marginBottom: 8,
+    paddingHorizontal: 20
+  },
+  px_5_py_4_flex_row_items_center_bg___FAF: {
+    alignItems: 'center',
+    backgroundColor: '#FAF9F6',
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 16
+  },
+  style_1: {
+    marginLeft: -8,
+    marginRight: 16,
+    padding: 8
+  },
+  style_2: {
+    alignItems: 'center',
+    backgroundColor: '#FAF9F6',
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 16
+  },
+  style_3: {
+    backgroundColor: '#FAF9F6',
+    flex: 1
+  },
+  style_4: {
+    color: '#4B5563',
+    marginTop: 16
+  },
+  style_5: {
+    alignItems: 'center',
+    backgroundColor: '#FAF9F6',
+    flex: 1,
+    justifyContent: 'center'
+  },
+  text_center_text_gray_400_text_xs_mt_2: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    marginTop: 8,
+    textAlign: 'center'
+  },
+  text_gray_400_text_sm_mt_2_text_center: {
+    color: '#9CA3AF',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center'
+  },
+  text_gray_500_mt_4_text_center: {
+    color: '#6B7280',
+    marginTop: 16,
+    textAlign: 'center'
+  },
+  text_gray_500_text_xs: {
+    color: '#6B7280',
+    fontSize: 12
+  },
+  text_lg_font_bold_text_gray_900: {
+    color: '#111827',
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  text_lg_font_bold_text_gray_900_flex_1: {
+    color: '#111827',
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  text_white_font_bold_text_lg: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700'
+  },
+});
 
 export default function LessonScreen() {
   const router = useRouter();
@@ -574,38 +710,38 @@ export default function LessonScreen() {
 
   if (isLoading) {
     return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F6] items-center justify-center">
+      <SafeAreaView style={styles.style_5}>
         <ActivityIndicator size="large" color="#002366" />
-        <Text className="mt-4 text-gray-600">Chargement de la leçon...</Text>
-        <Text className="mt-2 text-gray-400 text-xs">Récupération du contenu depuis Moodle</Text>
+        <Text style={styles.style_4}>Chargement de la leçon...</Text>
+        <Text style={styles.mt_2_text_gray_400_text_xs}>Récupération du contenu depuis Moodle</Text>
       </SafeAreaView>
     );
   }
 
   if (error && (error.startsWith('PDF_DETECTED:') || error.startsWith('EPUB_DETECTED:') || error.startsWith('AUDIO_DETECTED:') || error.startsWith('VIDEO_DETECTED:') || error.startsWith('CONTENT_URL:'))) {
     return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F6] items-center justify-center">
+      <SafeAreaView style={styles.flex_1_bg___FAF9F6__items_center_justify}>
         <ActivityIndicator size="large" color="#002366" />
-        <Text className="mt-4 text-gray-600">Redirection...</Text>
+        <Text style={styles.mt_4_text_gray_600}>Redirection...</Text>
       </SafeAreaView>
     );
   }
 
   if (error) {
     return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={["top"]}>
-        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
-          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+      <SafeAreaView style={styles.style_3} edges={["top"]}>
+        <View style={styles.style_2}>
+          <Pressable onPress={() => router.back()} style={styles.style_1}>
             <Feather name="arrow-left" size={24} color="black" />
           </Pressable>
-          <Text className="text-lg font-bold text-gray-900 flex-1" numberOfLines={1}>
+          <Text style={styles.text_lg_font_bold_text_gray_900_flex_1} numberOfLines={1}>
             {lessonTitle}
           </Text>
         </View>
-        <View className="flex-1 items-center justify-center px-5">
+        <View style={styles.flex_1_items_center_justify_center_px_5}>
           <Feather name="alert-circle" size={48} color="#D1D5DB" />
-          <Text className="text-gray-500 mt-4 text-center">{error}</Text>
-          <Text className="text-gray-400 text-sm mt-2 text-center">
+          <Text style={styles.text_gray_500_mt_4_text_center}>{error}</Text>
+          <Text style={styles.text_gray_400_text_sm_mt_2_text_center}>
             Ce module n&apos;as pas de contenu configuré dans Moodle
           </Text>
         </View>
@@ -614,29 +750,28 @@ export default function LessonScreen() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={["top"]}>
-      <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
-        <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+    <SafeAreaView style={styles.flex_1_bg___FAF9F6} edges={["top"]}>
+      <View style={styles.px_5_py_4_flex_row_items_center_bg___FAF}>
+        <Pressable onPress={() => router.back()} style={styles.mr_4_p_2__ml_2}>
           <Feather name="arrow-left" size={24} color="black" />
         </Pressable>
-        <View className="flex-1">
-          <Text className="text-lg font-bold text-gray-900" numberOfLines={1}>
+        <View style={styles.flex_1}>
+          <Text style={styles.text_lg_font_bold_text_gray_900} numberOfLines={1}>
             {lessonTitle}
           </Text>
-          <Text className="text-gray-500 text-xs">Cours IPELAN</Text>
+          <Text style={styles.text_gray_500_text_xs}>Cours IPELAN</Text>
         </View>
       </View>
 
-      <View className="px-5 mb-2">
-        <View className="h-1 bg-gray-200 rounded-full overflow-hidden">
+      <View style={styles.px_5_mb_2}>
+        <View style={styles.h_1_bg_gray_200_rounded_full_overflow_hi}>
           <View
-            className="h-full bg-[#F59E0B] rounded-full transition-all duration-300"
-            style={{ width: hasScrolledToBottom ? "100%" : "30%" }}
-          />
+            style={[styles.h_full_bg___F59E0B__rounded_full_transit,{ width: hasScrolledToBottom ? "100%" : "30%" }]}
+           />
         </View>
       </View>
 
-      <View className="flex-1 bg-white mx-4 rounded-xl overflow-hidden mb-24">
+      <View style={styles.flex_1_bg_white_mx_4_rounded_xl_overflow}>
         <WebView
           source={{ html: htmlContent }}
           style={{ flex: 1 }}
@@ -653,20 +788,23 @@ export default function LessonScreen() {
         />
       </View>
 
-      <View className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-5 py-4">
+      <View style={styles.absolute_bottom_0_left_0_right_0_bg_whit}>
         <Pressable
           onPress={handleContinue}
           disabled={!hasScrolledToBottom}
-          className={`rounded-2xl py-4 items-center ${
-            hasScrolledToBottom ? "bg-[#002366]" : "bg-gray-300"
-          }`}
+          style={{
+            borderRadius: 16,
+            paddingVertical: 16,
+            alignItems: 'center',
+            backgroundColor: hasScrolledToBottom ? '#002366' : '#D1D5DB'
+          }}
         >
-          <Text className="text-white font-bold text-lg">
+          <Text style={styles.text_white_font_bold_text_lg}>
             Continuer vers les activités
           </Text>
         </Pressable>
         {!hasScrolledToBottom && (
-          <Text className="text-center text-gray-400 text-xs mt-2">
+          <Text style={styles.text_center_text_gray_400_text_xs_mt_2}>
             Déroule la page pour continuer
           </Text>
         )}

@@ -1,11 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useEffect } from "react";
-import { ActivityIndicator, Alert, Dimensions, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useResetPassword } from '../../hooks/useResetPassword';
 
-const { width } = Dimensions.get("window");
 const IS_DEV = process.env.NODE_ENV === 'development';
 
 export default function ResetPassword() {
@@ -20,7 +19,6 @@ export default function ResetPassword() {
     goToLogin,
   } = useResetPassword();
 
-  // Show error alert when error changes
   useEffect(() => {
     if (error) {
       Alert.alert('Erreur', error);
@@ -40,36 +38,36 @@ export default function ResetPassword() {
   };
 
   const renderStep1 = () => (
-    <View style={styles.stepContainer}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Réinitialiser Mot De Passe</Text>
+    <View style={styles.step1Container}>
+      <View style={styles.step1TitleContainer}>
+        <Text style={styles.step1Title}>Réinitialiser Mot De Passe</Text>
       </View>
-      <View style={styles.inputContainer}>
-         <View style={styles.sectionStyle}>
-           <Ionicons name="mail-outline" size={20} color="#666" style={styles.iconStyle} />
-           <TextInput
-             value={email}
-             placeholder="Email"
-             placeholderTextColor="#999"
-             style={styles.input}
-             onChangeText={setEmail}
-             keyboardType="email-address"
-             autoCapitalize="none"
-           />
-         </View>
+      <View style={styles.flex1}>
+        <View style={styles.inputRow}>
+          <Ionicons name="mail-outline" size={20} color="#666" style={{ marginRight: 10 }} />
+          <TextInput
+            value={email}
+            placeholder="Email"
+            placeholderTextColor="#999"
+            style={styles.inputText}
+            onChangeText={setEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
+        </View>
       </View>
     </View>
   );
 
   const renderStep2 = () => (
-    <View style={[styles.stepContainer, { alignItems: 'center', justifyContent: 'center' }]}>
-      <View style={styles.successCard}>
+    <View style={styles.step2Container}>
+      <View style={styles.step2Card}>
         <Ionicons name="mail-open-outline" size={60} color="#4a90e2" style={{ marginBottom: 20 }} />
-        <Text style={styles.successTitle}>Email Envoyé</Text>
-        <Text style={styles.successText}>
+        <Text style={styles.step2Title}>Email Envoyé</Text>
+        <Text style={styles.step2Body}>
           Un lien de réinitialisation a été envoyé à votre adresse email. Veuillez vérifier votre boîte de réception et suivre les instructions pour réinitialiser votre mot de passe.
         </Text>
-        <Text style={styles.supportText}>
+        <Text style={styles.step2Hint}>
           Si vous ne recevez pas l&apos;email dans les prochaines minutes, vérifiez votre dossier spam.
         </Text>
       </View>
@@ -77,15 +75,19 @@ export default function ResetPassword() {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.main}>
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
         {step === 1 && renderStep1()}
         {step === 2 && renderStep2()}
 
         {step !== 2 && (
-          <View style={styles.footer}>
+          <View style={styles.bottomContainer}>
             <Pressable
-              style={[styles.button, !email && step === 1 ? styles.buttonDisabled : null]}
+              style={[
+                styles.button,
+                { backgroundColor: (!email && step === 1) ? '#CCC' : '#002366', elevation: 5 },
+                (!email && step === 1) && styles.buttonDisabled,
+              ]}
               onPress={handleContinue}
               disabled={isLoading || !email}
             >
@@ -104,9 +106,9 @@ export default function ResetPassword() {
         )}
 
         {step === 2 && (
-          <View style={styles.footer}>
-            <Pressable 
-              style={styles.button}
+          <View style={styles.bottomContainer}>
+            <Pressable
+              style={[styles.button, { backgroundColor: '#002366', elevation: 5 }]}
               onPress={handleContinue}
             >
               <Text style={styles.buttonText}>Retour à la Connexion</Text>
@@ -122,112 +124,98 @@ export default function ResetPassword() {
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#FAF9F6',
+  },
   container: {
     flex: 1,
-    backgroundColor: "#FAF9F6",
+    paddingHorizontal: 24,
   },
-  main: {
+  flex1: {
     flex: 1,
-    paddingHorizontal: 25,
   },
-  stepContainer: {
+  step1Container: {
     flex: 1,
     paddingTop: 40,
   },
-  header: {
+  step1TitleContainer: {
     marginBottom: 40,
   },
-  title: {
+  step1Title: {
     fontSize: 24,
-    fontWeight: "bold",
-    color: "#002366",
+    fontWeight: 'bold',
+    color: '#002366',
   },
-  inputContainer: {
-    flex: 1,
-  },
-  sectionStyle: {
+  inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: '#E8E8E8',
     height: 60,
     borderRadius: 12,
     marginVertical: 10,
-    paddingHorizontal: 15,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
+    paddingHorizontal: 16,
     elevation: 2,
   },
-  iconStyle: {
-    marginRight: 10,
-  },
-  input: {
+  inputText: {
     flex: 1,
     fontSize: 16,
-    color: "#333",
+    color: '#333',
   },
-  footer: {
+  step2Container: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  step2Card: {
+    padding: 32,
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    elevation: 5,
+  },
+  step2Title: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#002366',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  step2Body: {
+    fontSize: 16,
+    color: '#555',
+    textAlign: 'center',
+    marginBottom: 16,
+    lineHeight: 24,
+  },
+  step2Hint: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+    fontStyle: 'italic',
+    marginTop: 8,
+  },
+  bottomContainer: {
     paddingBottom: 40,
   },
   button: {
-    backgroundColor: "#002366",
     height: 60,
     borderRadius: 30,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'relative',
-    shadowColor: "#002366",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
   },
   buttonDisabled: {
-    backgroundColor: "#CCC",
     opacity: 0.6,
   },
   buttonText: {
-    color: "#FFFFFF",
+    color: '#ffffff',
     fontSize: 16,
-    fontWeight: "600",
+    fontWeight: '600',
   },
   buttonIcon: {
     marginLeft: 10,
-  },
-  successCard: {
-    padding: 30,
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  successTitle: {
-    fontSize: 22,
-    fontWeight: "bold",
-    color: "#002366",
-    marginBottom: 15,
-    textAlign: 'center',
-  },
-  successText: {
-    fontSize: 16,
-    color: "#555",
-    textAlign: 'center',
-    marginBottom: 15,
-    lineHeight: 24,
-  },
-  supportText: {
-    fontSize: 14,
-    color: "#999",
-    textAlign: 'center',
-    fontStyle: 'italic',
-    marginTop: 10,
   },
 });

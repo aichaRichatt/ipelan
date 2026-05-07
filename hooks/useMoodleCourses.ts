@@ -1,5 +1,5 @@
 // hooks/useMoodleCourses.ts
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getAllBadgesWithStatus } from '../constants/badges';
 import { moodleCall } from '../services/api/moodleClient';
 import { getDBConnection } from '../services/storage/db-service';
@@ -64,37 +64,39 @@ function getCompletableModules(sections: any[]): any[] {
   return result;
 }
 
-async function getLocalCompletions(courseId: number) {
+async function getLocalCompletions(courseId: number, userId?: number) {
   try {
     const db = await getDBConnection();
     return await db.getAllAsync<any>(
-      `SELECT module_id as cmid, is_completed, best_score as score, total_score as max_score, type as modname
-       FROM activity_progress
-       WHERE course_id = ?`,
-      [courseId]
+      userId != null
+        ? `SELECT module_id as cmid, is_completed, best_score as score, total_score as max_score, type as modname
+           FROM activity_progress
+           WHERE course_id = ? AND user_id = ?`
+        : `SELECT module_id as cmid, is_completed, best_score as score, total_score as max_score, type as modname
+           FROM activity_progress
+           WHERE course_id = ?`,
+      userId != null ? [courseId, userId] : [courseId]
     );
   } catch { return []; }
 }
 
-async function fetchCourseProgress(token: string, course: CourseInput): Promise<CourseProgress | null> {
+async function fetchCourseProgress(token: string, course: CourseInput, userId?: number): Promise<CourseProgress | null> {
+  if (!course.id || course.id <= 0) return null;
   try {
     const sections = await moodleCall('core_course_get_contents', { courseid: String(course.id) }, token);
-    if (sections?.exception) throw new Error(sections.message || `Moodle error: ${sections.exception}`);
 
     const completableModules = getCompletableModules(sections);
     const totalActivities = completableModules.length;
 
     let completionMap: Record<number, boolean> = {};
     try {
-      const completionResult = await moodleCall('core_completion_get_activities_completion_status', { courseid: String(course.id) }, token);
-      if (!completionResult?.exception) {
-        for (const stat of completionResult?.statuses ?? []) {
-          completionMap[stat.cmid] = stat.state >= 1;
-        }
+      const completionResult = await moodleCall('core_completion_get_activities_completion_status', { courseid: String(course.id), userid: String(userId) }, token);
+      for (const stat of completionResult?.statuses ?? []) {
+        completionMap[stat.cmid] = stat.state >= 1;
       }
     } catch { }
 
-    const localRows = await getLocalCompletions(course.id);
+    const localRows = await getLocalCompletions(course.id, userId);
     const localMap = new Map(localRows.map(r => [r.cmid, r]));
 
     const breakdown: Record<string, { completed: number; total: number }> = {};
@@ -148,7 +150,7 @@ export function useMoodleCourses(courses: CourseInput[], userId: number | null) 
   const [error, setError] = useState<string | null>(null);
   const { streak, recordActivity } = useStreak(userId);
 
-  const coursesString = JSON.stringify(courses);
+  const coursesString = useMemo(() => JSON.stringify(courses), [courses]);
 
   const loadProgress = useCallback(async () => {
     const inputCourses = JSON.parse(coursesString) as CourseInput[];
@@ -157,7 +159,7 @@ export function useMoodleCourses(courses: CourseInput[], userId: number | null) 
     try {
       const token = await getToken();
       if (!token) throw new Error('Non authentifié');
-      const results = await Promise.all(inputCourses.map(c => fetchCourseProgress(token, c)));
+      const results = await Promise.all(inputCourses.map(c => fetchCourseProgress(token, c, userId ?? undefined)));
       setProgressList(results.filter(Boolean) as CourseProgress[]);
     } catch (e: any) { setError(e.message); } finally { setLoading(false); }
   }, [coursesString]);

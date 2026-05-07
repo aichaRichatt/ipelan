@@ -12,6 +12,7 @@ export interface DownloadResult {
 
 class DownloadService {
   private baseDir: Directory;
+  private inFlight = new Map<string, Promise<DownloadResult>>();
 
   constructor() {
     this.baseDir = new Directory(Paths.cache, 'content');
@@ -49,49 +50,49 @@ class DownloadService {
   }
 
   async downloadFile(url: string): Promise<DownloadResult> {
-    const filename = this.getFilenameFromUrl(url);
+    // Strip token from cache key so re-authenticated URLs hit the same cache entry
+    const cacheKey = url.split('?')[0];
+
+    const existing = this.inFlight.get(cacheKey);
+    if (existing) return existing;
+
+    const promise = this._downloadFile(url, cacheKey);
+    this.inFlight.set(cacheKey, promise);
+    try {
+      return await promise;
+    } finally {
+      this.inFlight.delete(cacheKey);
+    }
+  }
+
+  private async _downloadFile(url: string, cacheKey: string): Promise<DownloadResult> {
+    const filename = this.getFilenameFromUrl(cacheKey);
     const localFile = new File(this.baseDir, filename);
-    
+
     await this.ensureBaseDir();
 
-    try {
-      const result = await File.downloadFileAsync(url, localFile);
-      
-      return {
-        uri: localFile.uri,
-        status: 200,
-      };
-    } catch (error) {
-      console.warn('Download failed:', error);
-      return {
-        uri: localFile.uri,
-        status: 0,
-      };
+    if (localFile.exists) {
+      return { uri: localFile.uri, status: 200 };
     }
+
+    await File.downloadFileAsync(url, localFile);
+    return { uri: localFile.uri, status: 200 };
   }
 
   async downloadEPUB(epubUrl: string): Promise<string> {
     const filename = 'lesson.epub';
-    const localPath = this.getLocalPath(epubUrl, filename);
     const localFile = new File(this.baseDir, filename);
-    
+
     if (localFile.exists) {
-      return localPath;
+      return localFile.uri;
     }
 
     await this.ensureBaseDir();
-    
-    try {
-      await File.downloadFileAsync(epubUrl, localFile);
-    } catch (error) {
-      console.warn('Failed to download EPUB:', error);
-    }
-    
-    return localPath;
+    await File.downloadFileAsync(epubUrl, localFile);
+    return localFile.uri;
   }
 
   async downloadAudio(audioUrl: string): Promise<string> {
-    // Cache key (sans paramètre token) pour rester cohérent avec getLocalUri()
     const cacheKey = audioUrl.split('?')[0];
     const filename = this.getFilenameFromUrl(cacheKey);
 
@@ -103,12 +104,7 @@ class DownloadService {
       return localFile.uri;
     }
 
-    try {
-      await File.downloadFileAsync(audioUrl, localFile);
-    } catch (error) {
-      console.warn('Failed to download audio:', error);
-    }
-
+    await File.downloadFileAsync(audioUrl, localFile);
     return localFile.uri;
   }
 

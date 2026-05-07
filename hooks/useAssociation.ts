@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
 import { moodleFetch } from '../services/api/moodleClient';
-import { getAuthToken } from '../services/contentLoader';
 import { resolveActivityInstanceId, stripHtml } from '../services/utils/moodleIdResolver';
 import { categorizeMoodleError, logActivityFetch, getUserFriendlyError } from '../services/utils/moodleErrorHandler';
 
@@ -40,7 +39,7 @@ export function useAssociationContent(
   const [userError, setUserError] = useState<string | null>(null);
 
   const fetchAssociationContent = useCallback(async () => {
-    const authToken = getAuthToken(token);
+    const authToken = token;
     if (!authToken) {
       const err = { type: 'auth' as const, message: 'Token manquant', originalError: null, fallbackUsed: true };
       setUserError(getUserFriendlyError(err));
@@ -91,14 +90,6 @@ export function useAssociationContent(
         glossaryid: glossaryInstanceId,
         letter: 'ALL',
       });
-
-      if (glossaryResult?.exception) {
-        logActivityFetch('Association', 'ENTRIES_ERROR', glossaryResult.message);
-        const moodleError = categorizeMoodleError(glossaryResult, 'fetch_association');
-        setError(moodleError.message);
-        setUserError(getUserFriendlyError(moodleError));
-        return;
-      }
 
       const entries = glossaryResult?.entries || [];
       

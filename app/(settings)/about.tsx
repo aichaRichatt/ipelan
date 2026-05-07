@@ -1,8 +1,231 @@
 import { Feather } from "@expo/vector-icons";
-import React from "react";
-import { Pressable, Text, View, ScrollView, Linking } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import React from "react";
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+const styles = StyleSheet.create({
+  bggray100_px3_py1_roundedfull: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 9999,
+    paddingHorizontal: 12,
+    paddingVertical: 4
+  },
+  bgwhite_rounded3xl_p6_mb4_bord: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 24,
+    borderWidth: 1,
+    marginBottom: 16,
+    padding: 24
+  },
+  flex1: {
+    flex: 1
+  },
+  flex1_bgFAF9F6: {
+    backgroundColor: '#FAF9F6',
+    flex: 1
+  },
+  flexrow_flexwrap: {
+    flexDirection: 'row'
+  },
+  flexrow_itemscenter_py2: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    paddingVertical: 8
+  },
+  flexrow_itemsstart_mb4: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    marginBottom: 16
+  },
+  fontmedium_textsm: {
+    fontSize: 14,
+    fontWeight: '500'
+  },
+  fontsemibold_textgray900_mb1: {
+    color: '#111827',
+    fontWeight: '600',
+    marginBottom: 4
+  },
+  itemscenter_py8_mb4: {
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingVertical: 32
+  },
+  mb8: {
+    marginBottom: 32
+  },
+  mr4_p2_ml2: {
+    marginLeft: -8,
+    marginRight: 16,
+    padding: 8
+  },
+  px4_py2_roundedfull_mr2_mb2: {
+    borderRadius: 9999,
+    marginBottom: 8,
+    marginRight: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8
+  },
+  px5_py4_flexrow_itemscenter_bg: {
+    alignItems: 'center',
+    backgroundColor: '#FAF9F6',
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 16
+  },
+  py3: {
+    paddingVertical: 12
+  },
+  style_1: {
+    color: '#4B5563'
+  },
+  style_10: {
+    color: '#111827',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 16
+  },
+  style_11: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 24,
+    borderWidth: 1,
+    marginBottom: 16,
+    padding: 24
+  },
+  style_12: {
+    color: '#4B5563',
+    marginBottom: 16
+  },
+  style_13: {
+    color: '#111827',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 12
+  },
+  style_14: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 24,
+    borderWidth: 1,
+    marginBottom: 16,
+    padding: 24
+  },
+  style_2: {
+    paddingVertical: 12
+  },
+  style_3: {
+    color: '#4B5563'
+  },
+  style_4: {
+    paddingVertical: 12
+  },
+  style_5: {
+    color: '#4B5563',
+    fontSize: 14
+  },
+  style_6: {
+    color: '#111827',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 12
+  },
+  style_7: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 24,
+    borderWidth: 1,
+    marginBottom: 16,
+    padding: 24
+  },
+  style_8: {
+    color: '#111827',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 16
+  },
+  style_9: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 24,
+    borderWidth: 1,
+    marginBottom: 16,
+    padding: 24
+  },
+  text2xl_fontbold_textgray900_m: {
+    color: '#111827',
+    fontSize: 24,
+    fontWeight: '700',
+    marginBottom: 4
+  },
+  text4a90e2_ml3: {
+    color: '#4a90e2',
+    marginLeft: 12
+  },
+  textgray500_mb2: {
+    color: '#6B7280',
+    marginBottom: 8
+  },
+  textgray600: {
+    color: '#4B5563'
+  },
+  textgray600_leadingrelaxed: {
+    color: '#4B5563'
+  },
+  textgray600_leadingrelaxed_mb4: {
+    color: '#4B5563',
+    marginBottom: 16
+  },
+  textgray600_textsm_leadingrela: {
+    color: '#4B5563',
+    fontSize: 14,
+    marginTop: 8
+  },
+  textlg_fontbold_textgray900: {
+    color: '#111827',
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  textlg_fontbold_textgray900_mb: {
+    color: '#111827',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 12
+  },
+  textsm_textgray500: {
+    color: '#6B7280',
+    fontSize: 14
+  },
+  textsm_textgray600: {
+    color: '#4B5563',
+    fontSize: 14
+  },
+  textwhite_text3xl_fontblack: {
+    color: '#FFFFFF',
+    fontSize: 30,
+    fontWeight: '900'
+  },
+  w10_h10_roundedfull_bgblue100_: {
+    alignItems: 'center',
+    backgroundColor: '#DBEAFE',
+    borderRadius: 9999,
+    height: 40,
+    justifyContent: 'center',
+    marginRight: 12,
+    width: 40
+  },
+  w24_h24_rounded3xl_bg002366_it: {
+    alignItems: 'center',
+    backgroundColor: '#002366',
+    borderRadius: 24,
+    height: 96,
+    justifyContent: 'center',
+    marginBottom: 16,
+    width: 96
+  },
+});
 
 export default function AboutScreen() {
   const router = useRouter();
@@ -14,43 +237,43 @@ export default function AboutScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
-      <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
-        <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+    <SafeAreaView style={styles.flex1_bgFAF9F6} edges={['top']}>
+      <View style={styles.px5_py4_flexrow_itemscenter_bg}>
+        <Pressable onPress={() => router.back()} style={styles.mr4_p2_ml2}>
           <Feather name="arrow-left" size={24} color="black" />
         </Pressable>
-        <Text className="text-lg font-bold text-gray-900">À propos d&apos;IPELAN</Text>
+        <Text style={styles.textlg_fontbold_textgray900}>À propos d&apos;IPELAN</Text>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}>
         
-        <View className="items-center py-8 mb-4">
-          <View className="w-24 h-24 rounded-3xl bg-[#002366] items-center justify-center mb-4">
-            <Text className="text-white text-3xl font-black">IP</Text>
+        <View style={styles.itemscenter_py8_mb4}>
+          <View style={styles.w24_h24_rounded3xl_bg002366_it}>
+            <Text style={styles.textwhite_text3xl_fontblack}>IP</Text>
           </View>
-          <Text className="text-2xl font-bold text-gray-900 mb-1">IPELAN</Text>
-          <Text className="text-gray-500 mb-2">م.ت.ن.ل.و</Text>
-          <View className="bg-gray-100 px-3 py-1 rounded-full">
-            <Text className="text-sm text-gray-600">Version {appVersion}</Text>
+          <Text style={styles.text2xl_fontbold_textgray900_m}>IPELAN</Text>
+          <Text style={styles.textgray500_mb2}>م.ت.ن.ل.و</Text>
+          <View style={styles.bggray100_px3_py1_roundedfull}>
+            <Text style={styles.textsm_textgray600}>Version {appVersion}</Text>
           </View>
         </View>
 
-        <View className="bg-white rounded-3xl p-6 mb-4 border border-gray-200">
-          <Text className="text-lg font-bold text-gray-900 mb-3">Qu&apos;est-ce qu&apos;IPELAN ?</Text>
-          <Text className="text-gray-600 leading-relaxed mb-4">
+        <View style={styles.style_14}>
+          <Text style={styles.style_13}>Qu&apos;est-ce qu&apos;IPELAN ?</Text>
+          <Text style={styles.style_12}>
             IPELAN est une application éducative mobile conçue pour enseigner les langues nationales de Mauritanie : le Pulaar, le Soninké et le Wolof.
           </Text>
-          <Text className="text-gray-600 leading-relaxed mb-4">
+          <Text style={styles.textgray600_leadingrelaxed_mb4}>
             Destinée aux élèves du cycle fondamental, l&apos;application propose des activités interactives, des quiz et des exercices adaptés aux enfants.
           </Text>
-          <Text className="text-gray-600 leading-relaxed">
+          <Text style={styles.textgray600_leadingrelaxed}>
             L&apos;application fonctionne hors-ligne, permettant aux élèves d&apos;apprendre même sans connexion internet.
           </Text>
         </View>
 
         {/* Features */}
-        <View className="bg-white rounded-3xl p-6 mb-4 border border-gray-200">
-          <Text className="text-lg font-bold text-gray-900 mb-4">Fonctionnalités</Text>
+        <View style={styles.style_11}>
+          <Text style={styles.style_10}>Fonctionnalités</Text>
           
           <FeatureItem 
             icon="book-open"
@@ -75,10 +298,10 @@ export default function AboutScreen() {
         </View>
 
         {/* Languages */}
-        <View className="bg-white rounded-3xl p-6 mb-4 border border-gray-200">
-          <Text className="text-lg font-bold text-gray-900 mb-4">Langues disponibles</Text>
+        <View style={styles.style_9}>
+          <Text style={styles.style_8}>Langues disponibles</Text>
           
-          <View className="flex-row flex-wrap">
+          <View style={styles.flexrow_flexwrap}>
             <LanguageTag label="Pulaar" color="#FF9500" />
             <LanguageTag label="Soninké" color="#4CD964" />
             <LanguageTag label="Wolof" color="#007AFF" />
@@ -86,38 +309,38 @@ export default function AboutScreen() {
         </View>
 
         {/* Credits */}
-        <View className="bg-white rounded-3xl p-6 mb-4 border border-gray-200">
-          <Text className="text-lg font-bold text-gray-900 mb-3">Crédits</Text>
-          <Text className="text-gray-600 text-sm leading-relaxed">
+        <View style={styles.style_7}>
+          <Text style={styles.style_6}>Crédits</Text>
+          <Text style={styles.style_5}>
             Application développée pour l&apos;éducation en Mauritanie.
           </Text>
-          <Text className="text-gray-600 text-sm leading-relaxed mt-2">
+          <Text style={styles.textgray600_textsm_leadingrela}>
             © 2026 IPELAN. Tous droits réservés.
           </Text>
         </View>
 
         {/* Contact */}
-        <View className="bg-white rounded-3xl p-6 mb-4 border border-gray-200">
-          <Text className="text-lg font-bold text-gray-900 mb-3">Contact</Text>
+        <View style={styles.bgwhite_rounded3xl_p6_mb4_bord}>
+          <Text style={styles.textlg_fontbold_textgray900_mb}>Contact</Text>
           <Pressable 
             onPress={() => handleOpenLink("mailto:contact@ipelan.com")}
-            className="flex-row items-center py-2"
+            style={styles.flexrow_itemscenter_py2}
           >
             <Feather name="mail" size={18} color="#4a90e2" />
-            <Text className="text-[#4a90e2] ml-3">contact@ipelan.com</Text>
+            <Text style={styles.text4a90e2_ml3}>contact@ipelan.com</Text>
           </Pressable>
         </View>
 
         {/* Legal */}
-        <View className="mb-8">
-          <Pressable className="py-3">
-            <Text className="text-gray-600">Conditions d&apos;utilisation</Text>
+        <View style={styles.mb8}>
+          <Pressable style={styles.style_4} onPress={() => handleOpenLink("https://moodle.richatt.com/mod/page/view.php?id=terms")}>
+            <Text style={styles.style_3}>Conditions d&apos;utilisation</Text>
           </Pressable>
-          <Pressable className="py-3">
-            <Text className="text-gray-600">Politique de confidentialité</Text>
+          <Pressable style={styles.style_2} onPress={() => handleOpenLink("https://moodle.richatt.com/mod/page/view.php?id=privacy")}>
+            <Text style={styles.style_1}>Politique de confidentialité</Text>
           </Pressable>
-          <Pressable className="py-3">
-            <Text className="text-gray-600">Licences open source</Text>
+          <Pressable style={styles.py3} onPress={() => handleOpenLink("https://moodle.richatt.com/mod/page/view.php?id=licenses")}>
+            <Text style={styles.textgray600}>Licences open source</Text>
           </Pressable>
         </View>
 
@@ -128,13 +351,13 @@ export default function AboutScreen() {
 
 function FeatureItem({ icon, title, description }: { icon: string; title: string; description: string }) {
   return (
-    <View className="flex-row items-start mb-4">
-      <View className="w-10 h-10 rounded-full bg-blue-100 items-center justify-center mr-3">
+    <View style={styles.flexrow_itemsstart_mb4}>
+      <View style={styles.w10_h10_roundedfull_bgblue100_}>
         <Feather name={icon as any} size={18} color="#4a90e2" />
       </View>
-      <View className="flex-1">
-        <Text className="font-semibold text-gray-900 mb-1">{title}</Text>
-        <Text className="text-sm text-gray-500">{description}</Text>
+      <View style={styles.flex1}>
+        <Text style={styles.fontsemibold_textgray900_mb1}>{title}</Text>
+        <Text style={styles.textsm_textgray500}>{description}</Text>
       </View>
     </View>
   );
@@ -143,10 +366,9 @@ function FeatureItem({ icon, title, description }: { icon: string; title: string
 function LanguageTag({ label, color }: { label: string; color: string }) {
   return (
     <View 
-      className="px-4 py-2 rounded-full mr-2 mb-2"
-      style={{ backgroundColor: `${color}20` }}
-    >
-      <Text className="font-medium text-sm" style={{ color }}>{label}</Text>
+      style={[styles.px4_py2_roundedfull_mr2_mb2,{ backgroundColor: `${color}20` }]}
+     >
+      <Text style={[styles.fontmedium_textsm,{ color }]} >{label}</Text>
     </View>
   );
 }

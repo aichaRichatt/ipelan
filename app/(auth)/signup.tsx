@@ -4,10 +4,6 @@ import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, Sc
 import { SafeAreaView } from "react-native-safe-area-context";
 import { PolicyModal } from "../../components/PolicyModal";
 import { useSignup } from "../../hooks/useSignup";
-import { createTables, getDBConnection, saveUser } from "../../services/storage/db-service";
-import { saveUserData } from "../../services/storage/tokenStorage";
-
-const IS_DEV = process.env.NODE_ENV === "development";
 
 export default function SignUp() {
   const router = useRouter();
@@ -18,15 +14,15 @@ export default function SignUp() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showPolicy, setShowPolicy] = useState(false);
   const [policyAccepted, setPolicyAccepted] = useState(false);
-  
+
   const { signup } = useSignup();
 
   const validatePassword = (pwd: string): string | null => {
-    if (pwd.length < 8) {
-      return "Le mot de passe doit contenir au moins 8 caractères";
-    }
-  
-  
+    if (pwd.length < 8) return "Le mot de passe doit contenir au moins 8 caractères";
+    if (!/[A-Z]/.test(pwd)) return "Au moins une majuscule requise (ex: A, B, C...)";
+    if (!/[a-z]/.test(pwd)) return "Au moins une minuscule requise (ex: a, b, c...)";
+    if (!/[0-9]/.test(pwd)) return "Au moins un chiffre requis (ex: 1, 2, 3...)";
+    if (!/[^A-Za-z0-9]/.test(pwd)) return "Au moins un caractère spécial requis (ex: @, #, !)";
     return null;
   };
 
@@ -38,7 +34,6 @@ export default function SignUp() {
     const cleanFirstname = sanitizeInput(firstname);
     const cleanLastname = sanitizeInput(lastname);
     const cleanEmail = sanitizeInput(email).toLowerCase();
- 
 
     if (!cleanFirstname || !cleanLastname || !cleanEmail || !password) {
       Alert.alert("Erreur", "Tous les champs sont obligatoires");
@@ -58,7 +53,7 @@ export default function SignUp() {
 
     const pwdError = validatePassword(password);
     if (pwdError) {
-      Alert.alert("Erreur", pwdError);
+      Alert.alert("Erreur de mot de passe", pwdError);
       return;
     }
 
@@ -78,58 +73,18 @@ export default function SignUp() {
         firstname: cleanFirstname,
         lastname: cleanLastname
       });
-      
-      const userData = {
-        id: 0,
-        username: generatedUsername,
-        email: cleanEmail,
-        firstname: cleanFirstname,
-        lastname: cleanLastname,
-        fullname: `${cleanFirstname} ${cleanLastname}`,
-        ipelan_xp: 0,
-        coins: 0,
-        streak: 0,
-        avatar: "",
-        token: ""
-      };
-
-      try {
-        await saveUserData(userData);
-      } catch (storageErr) {
-        if (IS_DEV) console.warn("[Signup] Failed to save user data to AsyncStorage:", storageErr);
-      }
-
-      try {
-        const db = await getDBConnection();
-        if (db) {
-          await createTables(db);
-          await saveUser(db, {
-            id: 0,
-            username: generatedUsername,
-            email: cleanEmail,
-            fullname: `${cleanFirstname} ${cleanLastname}`,
-            ipelan_xp: 0,
-            coins: 0,
-            streak: 0,
-            token: ""
-          } as any);
-        }
-      } catch (dbErr) {
-        if (IS_DEV) console.warn("[Signup] Failed to save user data to SQLite:", dbErr);
-      }
 
       Alert.alert(
-        "Compte créé!",
-        `Bienvenue ${cleanFirstname}! Votre compte a été créé avec succès. Vous avez été automatiquement inscrit à tous les cours disponibles et pouvez maintenant accéder à toutes les activités!`,
+        "Compte créé !",
+        `Bienvenue ${cleanFirstname} ! Votre compte a été créé. Vérifiez votre email pour activer votre compte, puis connectez-vous.`,
         [
           {
-            text: "Commencer à apprendre",
+            text: "Se connecter",
             onPress: () => router.replace("/(auth)/login"),
             style: "default"
           }
         ]
       );
-      return;
     } catch (signupErr: any) {
       const errMsg = signupErr.message || "";
       if (errMsg.toLowerCase().includes("exist") || errMsg.toLowerCase().includes("already") || errMsg.toLowerCase().includes("déjà")) {
@@ -151,97 +106,97 @@ export default function SignUp() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary">
-      <KeyboardAvoidingView 
-        style={{ flex: 1 }} 
+    <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView
+        style={styles.flex1}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <ScrollView contentContainerStyle={{flexGrow: 1}} keyboardShouldPersistTaps="handled">
-          <View style={styles.container}>
-            <View className="mb-8 items-center">
-              <Text className="text-3xl font-bold text-blue-700">Inscription</Text>
-              <Text className="text-gray-500 mt-2">Rejoignez la communauté Ipelan</Text>
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          <View style={styles.innerContainer}>
+            <View style={styles.headerContainer}>
+              <Text style={styles.title}>Inscription</Text>
+              <Text style={styles.subtitle}>Rejoignez la communauté Ipelan</Text>
             </View>
 
-            <View className="flex-row items-center bg-gray-50 border border-gray-200 h-14 rounded-xl my-2 px-4 w-full">
+            <View style={styles.inputRow}>
               <TextInput
                 value={lastname}
-                className="flex-1 h-full"
+                style={styles.textInput}
                 placeholder="Nom"
                 autoCapitalize="words"
                 onChangeText={setLastname}
               />
             </View>
 
-            <View className="flex-row items-center bg-gray-50 border border-gray-200 h-14 rounded-xl my-2 px-4 w-full">
+            <View style={styles.inputRow}>
               <TextInput
                 value={firstname}
-                className="flex-1 h-full"
+                style={styles.textInput}
                 placeholder="Prénom"
                 autoCapitalize="words"
                 onChangeText={setFirstname}
               />
             </View>
 
-            <View className="flex-row items-center bg-gray-50 border border-gray-200 h-14 rounded-xl my-2 px-4 w-full">
+            <View style={styles.inputRow}>
               <TextInput
                 value={email}
                 keyboardType="email-address"
                 autoCapitalize="none"
-                className="flex-1 h-full"
+                style={styles.textInput}
                 placeholder="Email"
                 onChangeText={setEmail}
               />
             </View>
 
-            <View className="flex-row items-center bg-gray-50 border border-gray-200 h-14 rounded-xl my-2 px-4 w-full">
+            <View style={styles.inputRow}>
               <TextInput
                 value={password}
-                placeholder="Mot de passe (8 caractères min.)"
+                placeholder="Mot de passe (A-z, 0-9, @...)"
                 secureTextEntry
-                className="flex-1 h-full"
+                style={styles.textInput}
                 onChangeText={setPassword}
               />
             </View>
 
-            <Pressable 
+            <Pressable
               onPress={() => setShowPolicy(true)}
-              className="flex-row items-center w-full py-3"
+              style={styles.policyRow}
             >
               <View style={[styles.checkbox, policyAccepted && styles.checkboxChecked]}>
-                {policyAccepted && <Text style={{color: '#fff', fontSize: 10}}>✓</Text>}
+                {policyAccepted && <Text style={styles.checkmark}>✓</Text>}
               </View>
-              <Text className="text-gray-600 text-sm ml-2">
-                J&apos;accepte les <Text className="text-blue-600 font-bold">conditions d&apos;utilisation</Text>
+              <Text style={styles.policyText}>
+                J&apos;accepte les <Text style={styles.policyLink}>conditions d&apos;utilisation</Text>
               </Text>
             </Pressable>
 
-            <View className="w-full mt-4">
+            <View style={styles.buttonContainer}>
               {isProcessing ? (
-                <View className="items-center py-4">
+                <View style={styles.loadingContainer}>
                   <ActivityIndicator size="large" color="#2563eb" />
-                  <Text className="text-gray-500 mt-2 text-sm">Création en cours...</Text>
+                  <Text style={styles.loadingText}>Création en cours...</Text>
                 </View>
               ) : (
-                <Pressable 
+                <Pressable
                   onPress={handleSignup}
-                  className="bg-blue-600 p-4 rounded-xl items-center"
+                  style={styles.signupButton}
                 >
-                  <Text className="text-white font-bold text-lg">S&apos;inscrire</Text>
+                  <Text style={styles.signupButtonText}>S&apos;inscrire</Text>
                 </Pressable>
               )}
             </View>
 
-            <Pressable onPress={() => router.replace("/(auth)/login")} className="mt-6 pb-10">
-              <Text className="text-blue-600 text-center">
-                Vous avez déjà un compte ? <Text className="font-bold">Se connecter</Text>
+            <Pressable onPress={() => router.replace("/(auth)/login")} style={styles.loginLink}>
+              <Text style={styles.loginLinkText}>
+                Vous avez déjà un compte ? <Text style={styles.loginLinkBold}>Se connecter</Text>
               </Text>
             </Pressable>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
 
-      <PolicyModal 
+      <PolicyModal
         visible={showPolicy}
         onAccept={() => {
           setPolicyAccepted(true);
@@ -254,11 +209,58 @@ export default function SignUp() {
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+  },
+  flex1: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+  },
+  innerContainer: {
     padding: 20,
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  headerContainer: {
+    marginBottom: 32,
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 30,
+    fontWeight: 'bold',
+    color: '#1d4ed8',
+  },
+  subtitle: {
+    color: '#6b7280',
+    marginTop: 8,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    height: 56,
+    borderRadius: 12,
+    marginVertical: 8,
+    paddingHorizontal: 16,
+    width: '100%',
+  },
+  textInput: {
+    flex: 1,
+    height: '100%',
+    fontSize: 15,
+    color: '#111827',
+  },
+  policyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    paddingVertical: 12,
   },
   checkbox: {
     width: 20,
@@ -271,5 +273,53 @@ const styles = StyleSheet.create({
   },
   checkboxChecked: {
     backgroundColor: '#2563eb',
-  }
+  },
+  checkmark: {
+    color: '#ffffff',
+    fontSize: 10,
+  },
+  policyText: {
+    color: '#4b5563',
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  policyLink: {
+    color: '#2563eb',
+    fontWeight: 'bold',
+  },
+  buttonContainer: {
+    width: '100%',
+    marginTop: 16,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  loadingText: {
+    color: '#6b7280',
+    marginTop: 8,
+    fontSize: 14,
+  },
+  signupButton: {
+    backgroundColor: '#2563eb',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  signupButtonText: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 18,
+  },
+  loginLink: {
+    marginTop: 24,
+    paddingBottom: 40,
+  },
+  loginLinkText: {
+    color: '#2563eb',
+    textAlign: 'center',
+  },
+  loginLinkBold: {
+    fontWeight: 'bold',
+  },
 });

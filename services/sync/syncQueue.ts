@@ -5,8 +5,12 @@
  */
 
 import { isMoodleOnline } from '../api/moodleClient';
-import { getGlobalGamificationStats, syncUserGamificationToMoodle, triggerGamificationSync } from '../gamification/gamificationService';
-import { getDBConnection } from '../storage/db-service';
+import { triggerGamificationSync } from '../gamification/gamificationService';
+import {
+  persistGamificationJob,
+  removePersistedGamificationJob,
+  getPendingGamificationJobs,
+} from '../storage/sync-queue';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
 
@@ -64,6 +68,9 @@ class SyncQueue {
       createdAt: Date.now(),
     });
 
+    // Persister dans SQLite (sans token — il sera rechargé depuis SecureStore au restart)
+    persistGamificationJob(userId, type, data || {}).catch(() => {});
+
     if (IS_DEV) {
       console.log(`[SyncQueue] Job added: ${type}`, data);
     }
@@ -94,13 +101,15 @@ class SyncQueue {
 
       if (success) {
         this.jobs.shift(); // Supprimer job réussi
+        removePersistedGamificationJob(job.userId, job.type).catch(() => {});
         if (IS_DEV) console.log(`[SyncQueue] Job completed: ${job.type}`);
       } else {
         job.attempts++;
         if (job.attempts >= job.maxAttempts) {
-          // Job échoué définitivement - le garder pour retry manuel plus tard
+          // Job échoué définitivement
           if (IS_DEV) console.warn(`[SyncQueue] Job failed after ${job.maxAttempts} attempts: ${job.type}`);
           this.jobs.shift();
+          removePersistedGamificationJob(job.userId, job.type).catch(() => {});
         } else {
           // Attendre avant retry (backoff exponentiel)
           const delay = Math.min(1000 * Math.pow(2, job.attempts), 30000);
@@ -146,33 +155,9 @@ class SyncQueue {
 
   private async _doSyncCourseProgress(job: SyncJob): Promise<boolean> {
     try {
-      const { courseId, completedActivities, totalActivities, totalXP } = job.data;
-
-      const localStats = await getGlobalGamificationStats(job.userId);
-      await syncUserGamificationToMoodle(job.userId, {
-        totalXp: localStats.totalXp,
-        coins: localStats.coins,
-        lives: localStats.lives,
-        streak: localStats.streak,
-        allBadgeIds: localStats.allBadgeIds
-      }, job.token);
-
-      // 3. Marquer la progression du cours comme sync dans SQLite
-      const db = await getDBConnection();
-      await db.runAsync(
-        'UPDATE course_progress SET synced_at = ? WHERE course_id = ?',
-        [new Date().toISOString(), courseId]
-      );
-
-      if (IS_DEV) {
-        console.log(`[SyncQueue] Course ${courseId} synced:`, {
-          xp: localStats.totalXp,
-          coins: localStats.coins,
-          latestBadge: localStats.latestBadge,
-        });
-      }
-
-      return true;
+      // Delegate to triggerGamificationSync which handles all fields including
+      // ipelan_course_progress, ipelan_last_sync, lives, etc. correctly.
+      return await triggerGamificationSync(job.userId, job.token);
     } catch (err) {
       if (IS_DEV) console.error('[SyncQueue] Course progress sync error:', err);
       return false;
@@ -212,6 +197,59 @@ class SyncQueue {
 
   syncGamification(userId: number, token: string) {
     this.addJob('gamification', userId, token, {});
+  }
+
+  clearJobs(userId?: number) {
+    if (userId !== undefined) {
+      const removed = this.jobs.filter(j => j.userId === userId);
+      this.jobs = this.jobs.filter(j => j.userId !== userId);
+      // Supprimer aussi de SQLite
+      removed.forEach(j => removePersistedGamificationJob(j.userId, j.type).catch(() => {}));
+    } else {
+      this.jobs = [];
+      // clearJobs sans userId = déconnexion → pas besoin de purger toute la table
+    }
+    this.notify();
+  }
+
+  /**
+   * Appelé au démarrage de l'app (après restauration auth) pour récupérer
+   * les jobs gamification qui n'ont pas été traités avant le dernier kill/crash.
+   * Le token est passé en paramètre — ne jamais le lire depuis SQLite.
+   */
+  async restorePersistedJobs(token: string): Promise<void> {
+    try {
+      const pending = await getPendingGamificationJobs();
+      if (pending.length === 0) return;
+
+      let restored = 0;
+      for (const row of pending) {
+        // Ne pas re-ajouter si un job du même type est déjà en mémoire
+        const exists = this.jobs.some(j => j.type === row.job_type && j.userId === row.user_id);
+        if (exists) continue;
+
+        const id = `${row.job_type}_restored_${row.id}`;
+        this.jobs.push({
+          id,
+          type: row.job_type as SyncJob['type'],
+          userId: row.user_id,
+          token,
+          data: (() => { try { return JSON.parse(row.job_data); } catch { return {}; } })(),
+          attempts: 0, // repartir de 0 avec le nouveau token
+          maxAttempts: 5,
+          createdAt: Date.now(),
+        });
+        restored++;
+      }
+
+      if (restored > 0) {
+        if (IS_DEV) console.log(`[SyncQueue] ${restored} job(s) restauré(s) depuis SQLite`);
+        this.notify();
+        this.processQueue();
+      }
+    } catch (err) {
+      if (IS_DEV) console.warn('[SyncQueue] Impossible de restaurer les jobs persistés:', err);
+    }
   }
 }
 

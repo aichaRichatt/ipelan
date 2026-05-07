@@ -1,3 +1,5 @@
+import { getLevelFromXP, getXPToNextLevel } from './levelCalculator';
+
 export type ActivityType = 'quiz' | 'dictation' | 'listening' | 'association' | 'wordOrder' | 'lesson' | 'html' | 'resource' | 'folder' | 'book' | 'label';
 
 export interface XPConfig {
@@ -7,6 +9,9 @@ export interface XPConfig {
   streakBonus: number;
   attemptPenalty: number;
 }
+
+export const STREAK_BONUS_CAP = 5;
+export const TIME_BONUS_THRESHOLD_SECONDS = 60;
 
 export const XP_CONFIG: Record<ActivityType, XPConfig> = {
   quiz: {
@@ -124,25 +129,22 @@ export function calculateXP(
   }
 
   let timeBonus = 0;
-  if (options.timeSpent && options.timeSpent < 60) {
+  if (options.timeSpent && options.timeSpent < TIME_BONUS_THRESHOLD_SECONDS) {
     timeBonus = config.timeBonus;
   }
 
   let streakBonus = 0;
   if (streak >= 3) {
-    streakBonus = config.streakBonus * Math.min(streak, 5);
+    streakBonus = config.streakBonus * Math.min(streak, STREAK_BONUS_CAP);
   }
 
   const attemptPenalty = Math.max(0, (attempts - 1) * config.attemptPenalty);
 
   const totalXP = Math.max(0, baseXP + perfectBonus + timeBonus + streakBonus - attemptPenalty);
 
-  // Use cumulative total XP (not just this activity) for correct level calculation
   const cumulativeTotal = cumulativeXP + totalXP;
-  const { level } = getGradeFromXP(cumulativeTotal);
-  const xpThresholds = [0, 100, 300, 600, 1000, 1500];
-  const nextThreshold = xpThresholds.find(t => t > cumulativeTotal) ?? Infinity;
-  const nextLevelXP = nextThreshold === Infinity ? 0 : nextThreshold - cumulativeTotal;
+  const { level } = getLevelFromXP(cumulativeTotal);
+  const nextLevelXP = getXPToNextLevel(cumulativeTotal);
 
   return {
     totalXP,
@@ -162,21 +164,6 @@ export function getXPForCompletion(activityType: ActivityType): number {
 }
 
 export function getGradeFromXP(totalXP: number): { grade: string; level: number; progress: number } {
-  const levels = [
-    { min: 0, max: 100, name: 'Débutant', level: 1 },
-    { min: 100, max: 300, name: 'Apprenant', level: 2 },
-    { min: 300, max: 600, name: 'Intermédiaire', level: 3 },
-    { min: 600, max: 1000, name: 'Avancé', level: 4 },
-    { min: 1000, max: 1500, name: 'Expert', level: 5 },
-    { min: 1500, max: Infinity, name: 'Maître', level: 6 },
-  ];
-
-  for (const lvl of levels) {
-    if (totalXP < lvl.max) {
-      const progress = ((totalXP - lvl.min) / (lvl.max - lvl.min)) * 100;
-      return { grade: lvl.name, level: lvl.level, progress: Math.min(100, Math.max(0, progress)) };
-    }
-  }
-
-  return { grade: 'Maître', level: 6, progress: 100 };
+  const info = getLevelFromXP(totalXP);
+  return { grade: info.title, level: info.level, progress: info.progress };
 }

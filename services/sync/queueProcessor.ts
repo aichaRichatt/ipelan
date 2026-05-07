@@ -1,6 +1,7 @@
- 
+import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
 import { AppState, AppStateStatus } from 'react-native';
 import { isMoodleOnline, moodleCall } from '../api/moodleClient';
+import { markActivitySynced } from '../storage/activity-progress';
 import { getToken }                 from '../storage/tokenStorage';
 import {
   getPendingItems,
@@ -21,25 +22,28 @@ const isOnline = isMoodleOnline;
 // ─── Traiter un item avec backoff ─────────────────────────────────────────────
 
 async function processItem(
-  item: { id: number; wsfunction: string; payload: string; retries: number },
+  item: { id: number; type: string; wsfunction: string; payload: string; retries: number },
   token: string
 ): Promise<boolean> {
-  // Backoff exponentiel : 2s, 4s, 8s
   if (item.retries > 0) {
     const delay = BACKOFF_BASE_MS * Math.pow(2, item.retries - 1);
     await new Promise(r => setTimeout(r, delay));
   }
 
   try {
-    const params = JSON.parse(item.payload);
-    const result = await moodleCall(item.wsfunction, params, token);
-    
-    if (result?.exception) {
-       throw new Error(result.message || 'Moodle exception');
-    }
-
+    const raw = JSON.parse(item.payload);
+    // Extraire les métadonnées internes avant d'envoyer à Moodle
+    const courseId = raw._courseId ? parseInt(raw._courseId as string, 10) : 0;
+    const { _courseId, ...params } = raw;
+    await moodleCall(item.wsfunction, params, token);
     await removeFromQueue(item.id);
     console.log('[QueueProcessor] ✅ Traité:', item.wsfunction);
+
+    // Après une complétion confirmée par Moodle, marquer l'activité comme synchronisée
+    if (item.type === 'completion' && params.cmid && courseId > 0) {
+      await markActivitySynced(parseInt(params.cmid as string, 10), courseId).catch(() => {});
+    }
+
     return true;
   } catch (e: any) {
     const errMsg = e.message ?? 'Erreur inconnue';
@@ -89,9 +93,11 @@ export async function processQueue(): Promise<{
   return { processed, failed, remaining };
 }
 
-// ─── Enregistrer le listener AppState ────────────────────────────────────────
+// ─── Listeners ───────────────────────────────────────────────────────────────
 
 let appStateSubscription: any = null;
+let netInfoUnsubscribe: (() => void) | null = null;
+let wasOffline = false; // détecte la transition offline → online
 
 export function registerQueueProcessor(): void {
   // Traiter au démarrage
@@ -101,7 +107,6 @@ export function registerQueueProcessor(): void {
   if (appStateSubscription) {
     appStateSubscription.remove();
   }
-
   appStateSubscription = AppState.addEventListener(
     'change',
     (state: AppStateStatus) => {
@@ -111,10 +116,26 @@ export function registerQueueProcessor(): void {
     }
   );
 
-  console.log('[QueueProcessor] Enregistré');
+  // Traiter automatiquement au retour du réseau (offline → online)
+  if (netInfoUnsubscribe) {
+    netInfoUnsubscribe();
+  }
+  netInfoUnsubscribe = NetInfo.addEventListener((state: NetInfoState) => {
+    const isConnected = state.isConnected ?? false;
+    if (isConnected && wasOffline) {
+      console.log('[QueueProcessor] Réseau retrouvé — sync automatique');
+      processQueue().catch(console.warn);
+    }
+    wasOffline = !isConnected;
+  });
+
+  console.log('[QueueProcessor] Enregistré (AppState + NetInfo)');
 }
 
 export function unregisterQueueProcessor(): void {
   appStateSubscription?.remove();
   appStateSubscription = null;
+  netInfoUnsubscribe?.();
+  netInfoUnsubscribe = null;
+  wasOffline = false;
 }

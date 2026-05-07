@@ -1,15 +1,14 @@
+import { useProgressSync } from "@/hooks/useProgressSync";
 import { getCourseContents } from "@/services/api/courseService";
 import { processActivityResults } from "@/services/gamification/gamificationService";
 import { updateUser } from "@/services/redux/slices/authSlice";
 import { RootState } from "@/services/redux/store";
-import { getBestScore, saveActivityScore } from "@/services/storage/activity-progress";
-import { updateCourseProgressFromActivities } from "@/services/storage/course-progress";
-import { syncAfterActivityWithRetry } from "@/services/sync/progressSync";
-import { ActivityType } from "@/utils/xpCalculator";
+import { getBestScore } from "@/services/storage/activity-progress";
+import { ActivityType, STREAK_BONUS_CAP, XP_CONFIG } from "@/utils/xpCalculator";
 import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
 
@@ -22,6 +21,210 @@ const activityTypeMap: Record<string, ActivityType> = {
   'Association': 'association',
   'Ordre des mots': 'wordOrder',
 };
+
+const styles = StyleSheet.create({
+  bggradienttor_from002366_to4a9: {
+    alignItems: 'center',
+    borderRadius: 16,
+    marginBottom: 24,
+    padding: 24,
+    width: '100%'
+  },
+  bgpurple100_rounded2xl_px4_py3: {
+    alignItems: 'center',
+    backgroundColor: '#F3E8FF',
+    borderRadius: 16,
+    flexDirection: 'row',
+    marginBottom: 8,
+    marginRight: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12
+  },
+  bgred100_rounded2xl_px4_py3_mb: {
+    alignItems: 'center',
+    backgroundColor: '#FEE2E2',
+    borderRadius: 16,
+    flexDirection: 'row',
+    marginBottom: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12
+  },
+  bgwhite_rounded3xl_p8_itemscen: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 32,
+    width: '100%'
+  },
+  bgyellow100_rounded2xl_px4_py3: {
+    alignItems: 'center',
+    backgroundColor: '#FEF9C3',
+    borderRadius: 16,
+    flexDirection: 'row',
+    marginBottom: 8,
+    marginRight: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12
+  },
+  flex1_bgFAF9F6: {
+    backgroundColor: '#FAF9F6',
+    flex: 1
+  },
+  flex1_itemscenter_justifycente: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 20
+  },
+  flex1_py4_roundedxl_ml2_bg0023: {
+    backgroundColor: '#002366',
+    borderRadius: 12,
+    flex: 1,
+    marginLeft: 8,
+    paddingVertical: 16
+  },
+  flex1_py4_roundedxl_mr2_bggray: {
+    backgroundColor: '#E5E7EB',
+    borderRadius: 12,
+    flex: 1,
+    marginRight: 8,
+    paddingVertical: 16
+  },
+  flex1_textxs_fontmedium_textor: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '500'
+  },
+  flexrow_wfull: {
+    flexDirection: 'row',
+    width: '100%'
+  },
+  flexrow_wfull_justifycenter_mb: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 24,
+    width: '100%'
+  },
+  fontbold_textcenter_textgray70: {
+    color: '#374151',
+    fontWeight: '700',
+    textAlign: 'center'
+  },
+  mr4_p2_ml2: {
+    marginLeft: -8,
+    marginRight: 16,
+    padding: 8
+  },
+  mt4_py2: {
+    marginTop: 16,
+    paddingVertical: 8
+  },
+  px5_py4_flexrow_itemscenter_bg: {
+    alignItems: 'center',
+    backgroundColor: '#FAF9F6',
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 16
+  },
+  style_1: {
+    fontSize: 20,
+    marginRight: 8
+  },
+  style_2: {
+    fontSize: 20,
+    marginRight: 8
+  },
+  text2xl_fontbold_textgray900_m: {
+    color: '#111827',
+    fontSize: 24,
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center'
+  },
+  text5xl_fontblack: {
+    fontWeight: '900'
+  },
+  text5xl_mb2: {
+    marginBottom: 8
+  },
+  textgray500_textcenter: {
+    color: '#6B7280',
+    textAlign: 'center'
+  },
+  textgray500_textcenter_mb2: {
+    color: '#6B7280',
+    marginBottom: 8,
+    textAlign: 'center'
+  },
+  textgray500_textcenter_mb6: {
+    color: '#6B7280',
+    marginBottom: 24,
+    textAlign: 'center'
+  },
+  textlg_fontbold_textgray900: {
+    color: '#111827',
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  textpurple700_fontbold_textlg: {
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  textred700_fontbold_textlg: {
+    color: '#B91C1C',
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  textwhite_fontbold_textcenter: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    textAlign: 'center'
+  },
+  textwhite_fontbold_textlg: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  textwhite_textsm_fontmedium_mb: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 8
+  },
+  textwhite_textxs_textcenter_op: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    marginTop: 4,
+    opacity: 0.8,
+    textAlign: 'center'
+  },
+  textxl_mr2: {
+    fontSize: 20,
+    marginRight: 8
+  },
+  textyellow700_fontbold_textlg: {
+    color: '#A16207',
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  w40_h40_roundedfull_itemscente: {
+    alignItems: 'center',
+    borderRadius: 9999,
+    height: 160,
+    justifyContent: 'center',
+    marginBottom: 24,
+    width: 160
+  },
+  wfull_rounded2xl_p3_mb6_bgoran: {
+    alignItems: 'center',
+    backgroundColor: '#FFEDD5',
+    borderRadius: 16,
+    flexDirection: 'row',
+    marginBottom: 24,
+    padding: 12,
+    width: '100%'
+  },
+});
 
 export default function ResultScreen() {
   const router = useRouter();
@@ -42,11 +245,15 @@ export default function ResultScreen() {
   
   const score = parseInt(params.score || "0", 10);
   const total = parseInt(params.total || "1", 10);
-  const xp = parseInt(params.xp || "0", 10);
   const moduleId = parseInt(params.moduleId || "0", 10);
   const instanceId = parseInt(params.instanceId || params.moduleId || "0", 10);
   const courseId = parseInt(params.courseId || "0", 10);
   const activityType = activityTypeMap[params.activity || ''] || 'quiz';
+
+  const rawXp = parseInt(params.xp || "0", 10);
+  const xpConfig = XP_CONFIG[activityType];
+  const maxXP = xpConfig.baseXP + xpConfig.perfectBonus + xpConfig.timeBonus + xpConfig.streakBonus * STREAK_BONUS_CAP;
+  const xp = Math.min(Math.max(0, rawXp), maxXP);
   
   const percentage = Math.round((score / Math.max(total, 1)) * 100);
   const isCompleted = percentage >= 50;
@@ -57,45 +264,40 @@ export default function ResultScreen() {
   const dispatch = useDispatch();
   const user = useSelector((state: RootState) => state.auth.user);
 
- 
-  const [syncStatus, setSyncStatus] = useState<'pending' | 'syncing' | 'success' | 'error'>('pending');
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const { state: syncState, saveProgressLocally, syncActivityToMoodle } = useProgressSync(token);
+  const syncStatus = syncState.status === 'idle' ? 'pending' : syncState.status;
+  const syncMessage = syncState.message;
 
   useEffect(() => {
+    let isCancelled = false;
+
     const saveProgress = async () => {
       if (!moduleId || !courseId) {
         if (IS_DEV) console.log('[Result] Missing moduleId or courseId');
         return;
       }
+      if (isCancelled) return;
 
       let activityCount = 0;
+      let fetchedSections: any[] = [];
       try {
-        const sections = await getCourseContents(token || '', courseId);
-        if (sections && sections.length > 0) {
-          activityCount = sections.reduce((sum, s) => sum + (s.modules?.length || 0), 0);
+        fetchedSections = await getCourseContents(token || '', courseId);
+        if (fetchedSections && fetchedSections.length > 0) {
+          const { getCompletableModules } = await import('@/services/storage/course-progress');
+          const completable = getCompletableModules(fetchedSections);
+          // Utiliser uniquement les modules avec suivi d'achèvement (source de vérité Moodle)
+          // Fallback sur le total brut si aucun module completable trouvé
+          activityCount = completable.length > 0
+            ? completable.length
+            : fetchedSections.reduce((sum: number, s: any) => sum + (s.modules?.length || 0), 0);
         }
       } catch (err) {
         if (IS_DEV) console.warn('[Result] Failed to get course contents:', err);
         activityCount = 1;
       }
 
-      if (IS_DEV) {
-        console.log('[Result] Saving progress:', {
-          moduleId,
-          courseId,
-          activityType,
-          score,
-          total,
-          xp,
-          isCompleted,
-          totalActivities: activityCount,
-        });
-      }
-
       try {
-        // ✅ Étape 1 : Sauvegarder localement en SQLite
-        setSyncStatus('pending');
-        setSyncMessage('Sauvegarde en cours...');
+        if (isCancelled) return;
 
         let cEarned = 0;
         let lLost = 0;
@@ -104,21 +306,33 @@ export default function ResultScreen() {
           const { coinsEarned, livesLost } = await processActivityResults(userId, score, total);
           cEarned = coinsEarned;
           lLost = livesLost;
-          setEarnedCoins(coinsEarned);
-          setLostLives(livesLost);
+          if (!isCancelled) {
+            setEarnedCoins(coinsEarned);
+            setLostLives(livesLost);
+          }
         }
 
-        await saveActivityScore(moduleId, courseId, activityType, score, total, xp, userId || undefined, cEarned, token || undefined);
-        await updateCourseProgressFromActivities(courseId, activityCount);
+        //  Sauvegarde locale via le hook (fonctionne hors-ligne)
+        await saveProgressLocally({
+          moduleId,
+          courseId,
+          activityType,
+          score,
+          total,
+          xpEarned: xp,
+          userId: userId ?? undefined,
+          coinsEarned: cEarned,
+          totalActivities: activityCount,
+        });
+
+        if (isCancelled) return;
 
         if (userId) {
           const { getGlobalGamificationStats } = await import('@/services/gamification/gamificationService');
           const { calculateNewBadges, saveBadge, getUserBadges } = await import('@/services/storage/badge-storage');
 
-          // Lire les valeurs absolues depuis SQLite après toutes les écritures
           const currentStats = await getGlobalGamificationStats(userId);
 
-          // Dispatch absolu — pas d'arithmétique sur un Redux potentiellement périmé
           dispatch(updateUser({
             coins: currentStats.coins,
             lives: currentStats.lives,
@@ -138,56 +352,25 @@ export default function ResultScreen() {
             daysActive: currentStats.streak
           }, existingIds);
 
+          // Sauvegarder les badges en SQLite même si l'utilisateur a quitté l'écran
+          // (opération DB locale, pas de setState → safe même après unmount)
           if (newEarned.length > 0) {
             for (const b of newEarned) {
               await saveBadge(userId, b.id);
             }
-            setNewBadge(newEarned[newEarned.length - 1]);
+            // Afficher le badge uniquement si l'écran est encore monté
+            if (!isCancelled) {
+              setNewBadge(newEarned[newEarned.length - 1]);
+            }
           }
 
           const { triggerGamificationSync } = await import('@/services/gamification/gamificationService');
           await triggerGamificationSync(userId, token || undefined);
         }
 
-        if (IS_DEV) {
-          console.log('[Result] ✅ Local save successful');
-        }
+        if (IS_DEV) console.log('[Result]  Local save successful');
 
-        if (token) {
-          setSyncStatus('syncing');
-          setSyncMessage('Synchronisation avec Moodle...');
-
-           syncAfterActivityWithRetry(moduleId, courseId, activityType, score, total, xp, instanceId, 3, token || undefined, userId)
-            .then(() => {
-              setSyncStatus('success');
-              setSyncMessage('✅ Synchronisé avec Moodle');
-
-              if (IS_DEV) {
-                console.log('[Result] ✅ Moodle progress sync completed');
-              }
-
-              setTimeout(() => {
-                setSyncMessage(null);
-              }, 2000);
-            })
-            .catch((err) => {
-              setSyncStatus('error');
-              setSyncMessage(`⚠️ Erreur: ${err.message || 'Sync échouée'}`);
-
-              if (IS_DEV) {
-                console.error('[Result] Moodle sync exception:', err);
-              }
-            });
-        } else {
-          setSyncStatus('pending');
-          setSyncMessage('Mode hors ligne (sync au redémarrage)');
-
-          if (IS_DEV) {
-            console.log('[Result] No token, offline mode');
-          }
-        }
-
-        const savedProgress = await getBestScore(moduleId, courseId);
+        const savedProgress = await getBestScore(moduleId, courseId, userId ?? undefined);
         if (IS_DEV) {
           console.log('[Result] Best score saved:', {
             bestScore: savedProgress?.bestScore,
@@ -196,59 +379,63 @@ export default function ResultScreen() {
           });
         }
 
-         if (isCompleted && courseId) {
+        //  Sync Moodle via le hook (offline-first: met en queue si hors-ligne)
+        if (!isCancelled) {
+          syncActivityToMoodle({
+            moduleId,
+            courseId,
+            score,
+            maxScore: total,
+            userId: userId ?? undefined,
+            instanceId,
+          }).then(async (result) => {
+            if (isCancelled) return;
+            if (result === 'success') {
+              setTimeout(() => {
+                if (!isCancelled) { /* state cleared automatically */ }
+              }, 2000);
+            }
+          });
+        }
+
+        if (isCompleted && courseId) {
           try {
             const { getCourseProgressForCompletion } = await import('@/services/storage/course-progress');
-            const courseProgress = await getCourseProgressForCompletion(courseId);
-            
+            const courseProgress = await getCourseProgressForCompletion(courseId, userId ?? undefined);
+
             if (courseProgress && courseProgress.progress >= 100) {
-              console.log('[Result] Course completed! Finding next course...');
-              
-              // Get all courses for user's language/grade to find next one
+              if (IS_DEV) console.log('[Result] Course completed! Finding next course...');
+
               const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
               const PREFERENCES_KEY = '@ipelan_preferences';
               const prefsStr = await AsyncStorage.getItem(PREFERENCES_KEY);
-              
+
               if (prefsStr && token) {
                 const preferences = JSON.parse(prefsStr);
                 const { getCoursesForLanguageAndGrade } = await import('@/services/api/courseService');
                 const allCourses = await getCoursesForLanguageAndGrade(token, preferences.language, preferences.grade);
-                
-                // Find current course index
                 const currentIndex = allCourses.findIndex((c: any) => c.id === courseId);
-                
+
                 if (currentIndex >= 0 && currentIndex < allCourses.length - 1) {
                   const nextCourse = allCourses[currentIndex + 1];
-                  console.log('[Result] Next course found:', nextCourse.fullname);
-                  
-                  // Show success message then redirect
-                  setSyncMessage('🎉 Cours terminé! Passage au suivant...');
-                  
                   setTimeout(() => {
-                    router.push(`/(stacks)/(cours)/${nextCourse.id}` as any);
+                    if (!isCancelled) router.push(`/(stacks)/(cours)/${nextCourse.id}` as any);
                   }, 2000);
-                  return; // Exit early, we're redirecting
-                } else {
-                  console.log('[Result] All courses completed!');
-                  setSyncMessage('🎉 Félicitations! Vous avez terminé tous les cours!');
+                  return;
                 }
               }
             }
           } catch (err) {
-            console.warn('[Result] Failed to check course completion:', err);
+            if (IS_DEV) console.warn('[Result] Failed to check course completion:', err);
           }
         }
       } catch (err) {
-        setSyncStatus('error');
-        setSyncMessage(`Erreur: ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
-
-        if (IS_DEV) {
-          console.error('[Result] Failed to save activity progress:', err);
-        }
+        if (IS_DEV) console.error('[Result] Failed to save activity progress:', err);
       }
     };
     saveProgress();
-  }, [moduleId, courseId, activityType, score, total, isCompleted, xp, instanceId, token, userId]);
+    return () => { isCancelled = true; };
+  }, [moduleId, courseId, activityType, score, total, isCompleted, xp, instanceId, token, userId, saveProgressLocally, syncActivityToMoodle]);
   
   const getGrade = () => {
     if (percentage >= 90) return { text: "Excellent !", color: "#10B981" };
@@ -270,129 +457,96 @@ export default function ResultScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
-      <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
-        <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+    <SafeAreaView style={styles.flex1_bgFAF9F6} edges={['top']}>
+      <View style={styles.px5_py4_flexrow_itemscenter_bg}>
+        <Pressable onPress={() => router.back()} style={styles.mr4_p2_ml2}>
           <Feather name="arrow-left" size={24} color="black" />
         </Pressable>
-        <Text className="text-lg font-bold text-gray-900">Résultats</Text>
+        <Text style={styles.textlg_fontbold_textgray900}>Résultats</Text>
       </View>
       
       <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 120 }}>
-        <View className="flex-1 items-center justify-center px-5 py-10">
-          <View className="bg-white rounded-3xl p-8 items-center shadow-lg w-full max-w-sm">
+        <View style={styles.flex1_itemscenter_justifycente}>
+          <View style={styles.bgwhite_rounded3xl_p8_itemscen}>
             <View 
-              className="w-40 h-40 rounded-full items-center justify-center mb-6"
-              style={{ 
+              style={[styles.w40_h40_roundedfull_itemscente,{ 
                 borderWidth: 8,
                 borderColor: grade.color,
                 backgroundColor: grade.color + '10'
-              }}
-            >
-              <Text className="text-5xl font-black" style={{ color: grade.color }}>
+              }]}
+             >
+              <Text style={[styles.text5xl_fontblack,{ color: grade.color }]} >
                 {percentage}%
               </Text>
             </View>
 
-            <Text className="text-2xl font-bold text-gray-900 mb-2 text-center">
+            <Text style={styles.text2xl_fontbold_textgray900_m}>
               {grade.text}
             </Text>
             
-            <Text className="text-gray-500 text-center mb-2">
+            <Text style={styles.textgray500_textcenter_mb2}>
               {params.activity || "Activité"}
             </Text>
-            <Text className="text-gray-500 text-center mb-6">
+            <Text style={styles.textgray500_textcenter_mb6}>
               {score} bonnes réponses sur {total}
             </Text>
 
-            <View className="flex-row w-full justify-center mb-6 flex-wrap">
-              <View className="bg-purple-100 rounded-2xl px-4 py-3 mr-2 mb-2 flex-row items-center">
-                <Text className="text-xl mr-2">⭐</Text>
-                <Text className="text-purple-700 font-bold text-lg">+{xp} XP</Text>
+            <View style={styles.flexrow_wfull_justifycenter_mb}>
+              <View style={styles.bgpurple100_rounded2xl_px4_py3}>
+                <Text style={styles.style_2}>⭐</Text>
+                <Text style={styles.textpurple700_fontbold_textlg}>+{xp} XP</Text>
               </View>
               {earnedCoins > 0 && (
-                <View className="bg-yellow-100 rounded-2xl px-4 py-3 mr-2 mb-2 flex-row items-center">
-                  <Text className="text-xl mr-2">🪙</Text>
-                  <Text className="text-yellow-700 font-bold text-lg">+{earnedCoins}</Text>
+                <View style={styles.bgyellow100_rounded2xl_px4_py3}>
+                  <Text style={styles.style_1}>🪙</Text>
+                  <Text style={styles.textyellow700_fontbold_textlg}>+{earnedCoins}</Text>
                 </View>
               )}
               {lostLives > 0 && (
-                <View className="bg-red-100 rounded-2xl px-4 py-3 mb-2 flex-row items-center">
-                  <Text className="text-xl mr-2">💔</Text>
-                  <Text className="text-red-700 font-bold text-lg">-{lostLives}</Text>
+                <View style={styles.bgred100_rounded2xl_px4_py3_mb}>
+                  <Text style={styles.textxl_mr2}>💔</Text>
+                  <Text style={styles.textred700_fontbold_textlg}>-{lostLives}</Text>
                 </View>
               )}
             </View>
 
-            {/* ✅ AFFICHER L'ÉTAT DE SYNCHRONISATION */}
-            {syncMessage && (
-              <View
-                className={`w-full rounded-2xl p-4 mb-6 flex-row items-center ${
-                  syncStatus === 'success'
-                    ? 'bg-green-100'
-                    : syncStatus === 'syncing'
-                      ? 'bg-blue-100'
-                      : 'bg-orange-100'
-                }`}
-              >
-                {syncStatus === 'syncing' && (
-                  <ActivityIndicator size="small" color="#002366" style={{ marginRight: 12 }} />
-                )}
-                {syncStatus === 'success' && (
-                  <Feather name="check-circle" size={20} color="#10B981" style={{ marginRight: 12 }} />
-                )}
-                {syncStatus === 'error' && (
-                  <Feather name="alert-circle" size={20} color="#F59E0B" style={{ marginRight: 12 }} />
-                )}
-                <Text
-                  className={`flex-1 text-sm font-medium ${
-                    syncStatus === 'success'
-                      ? 'text-green-700'
-                      : syncStatus === 'syncing'
-                        ? 'text-blue-700'
-                        : 'text-orange-700'
-                  }`}
-                >
-                  {syncMessage}
-                </Text>
+            {/* Sync Moodle en arrière-plan - non bloquant */}
+            {syncMessage && syncStatus === 'error' && (
+              <View style={styles.wfull_rounded2xl_p3_mb6_bgoran}>
+                <Feather name="alert-circle" size={16} color="#F59E0B" style={{ marginRight: 8 }} />
+                <Text style={styles.flex1_textxs_fontmedium_textor}>{syncMessage}</Text>
               </View>
             )}
 
             {newBadge && (
-              <View className="bg-gradient-to-r from-[#002366] to-[#4a90e2] rounded-2xl p-6 w-full mb-6 items-center">
-                <Text className="text-white text-sm font-medium mb-2">Nouveau badge débloqué !</Text>
-                <Text className="text-5xl mb-2">{newBadge.icon}</Text>
-                <Text className="text-white font-bold text-lg">{newBadge.name}</Text>
-                <Text className="text-white text-xs text-center opacity-80 mt-1">{newBadge.description}</Text>
+              <View style={styles.bggradienttor_from002366_to4a9}>
+                <Text style={styles.textwhite_textsm_fontmedium_mb}>Nouveau badge débloqué !</Text>
+                <Text style={styles.text5xl_mb2}>{newBadge.icon}</Text>
+                <Text style={styles.textwhite_fontbold_textlg}>{newBadge.name}</Text>
+                <Text style={styles.textwhite_textxs_textcenter_op}>{newBadge.description}</Text>
               </View>
             )}
 
-            <View className="flex-row w-full">
+            <View style={styles.flexrow_wfull}>
               <Pressable
                 onPress={() => router.back()}
-                disabled={syncStatus === 'syncing'}
-                className={`flex-1 py-4 rounded-xl mr-2 ${syncStatus === 'syncing' ? 'bg-gray-100' : 'bg-gray-200'}`}
+                style={styles.flex1_py4_roundedxl_mr2_bggray}
               >
-                <Text className={`font-bold text-center ${syncStatus === 'syncing' ? 'text-gray-400' : 'text-gray-700'}`}>Rejouer</Text>
+                <Text style={styles.fontbold_textcenter_textgray70}>Rejouer</Text>
               </Pressable>
               <Pressable
                 onPress={handleContinue}
-                disabled={syncStatus === 'syncing'}
-                className={`flex-1 py-4 rounded-xl ml-2 ${syncStatus === 'syncing' ? 'bg-[#002366]/50' : 'bg-[#002366]'}`}
+                style={styles.flex1_py4_roundedxl_ml2_bg0023}
               >
-                {syncStatus === 'syncing' ? (
-                  <ActivityIndicator size="small" color="white" />
-                ) : (
-                  <Text className="text-white font-bold text-center">Continuer</Text>
-                )}
+                <Text style={styles.textwhite_fontbold_textcenter}>Continuer</Text>
               </Pressable>
             </View>
             
             <Pressable
               onPress={() => router.push(`/(stacks)/(cours)/${params.courseId || ''}` as any)}
-              className="mt-4 py-2"
+              style={styles.mt4_py2}
             >
-              <Text className="text-gray-500 text-center">Retour au module</Text>
+              <Text style={styles.textgray500_textcenter}>Retour au module</Text>
             </Pressable>
           </View>
         </View>

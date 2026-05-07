@@ -1,3 +1,5 @@
+import { ENV } from '../../constants/env';
+
 const IS_DEV = process.env.NODE_ENV === "development";
 
 export const Config = {
@@ -19,6 +21,7 @@ export async function moodleFetch(
     body = new URLSearchParams();
     body.append("moodlewsrestformat", "json");
     Object.keys(params).forEach(key => {
+      if (key === "moodlewsrestformat") return;
       if (params[key] === null || params[key] === undefined) return;
 
       if (typeof params[key] === 'object' && params[key] !== null) {
@@ -40,6 +43,9 @@ export async function moodleFetch(
     });
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), ENV.API.API_TIMEOUT);
+
   try {
     const response = await fetch(url.toString(), {
       method,
@@ -47,6 +53,7 @@ export async function moodleFetch(
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: method !== "GET" ? body?.toString() : null,
+      signal: controller.signal,
     });
 
     const text = await response.text();
@@ -64,7 +71,10 @@ export async function moodleFetch(
     }
 
     if (data?.exception) {
-      return { exception: data.exception, errorcode: data.errorcode, message: data.message };
+      const err = new Error(data.message || data.exception);
+      (err as any).errorcode = data.errorcode;
+      (err as any).exception = data.exception;
+      throw err;
     }
 
     if (data?.error) {
@@ -73,8 +83,17 @@ export async function moodleFetch(
 
     return data;
   } catch (error: any) {
-    if (IS_DEV) console.error("[API] Error:", error.message);
+    if (error.name === "AbortError") throw new Error("Délai de connexion dépassé");
+    if (IS_DEV) {
+      if ((error as any).exception) {
+        console.warn("[API] Moodle:", error.message);
+      } else {
+        console.error("[API] Error:", error.message);
+      }
+    }
     throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -95,21 +114,18 @@ export async function moodleCall(
   return moodleFetch('/webservice/rest/server.php', callParams, 'POST');
 }
 
-/**
- * Vérifie la connectivité avec le serveur Moodle.
- * Implémentation centralisée — ne pas dupliquer dans les services de sync.
- *
- * Stratégie : HEAD /login/index.php (endpoint léger toujours présent),
- * timeout 3 s. Toute réponse < 500 (200, 302...) est considérée comme « online ».
- */
 export async function isMoodleOnline(timeoutMs: number = 3000): Promise<boolean> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${Config.baseURL}/login/index.php`, {
       method: 'HEAD',
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: controller.signal,
     });
     return res.ok || res.status < 500;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }

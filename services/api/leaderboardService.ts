@@ -1,4 +1,5 @@
 import { moodleFetch } from './moodleClient';
+import { convertFileUrlForAuth } from '../utils/moodleIdResolver';
 
 export interface LeaderboardEntry {
   rank: number;
@@ -23,22 +24,18 @@ export async function getLeaderboard(
       'options[0][value]': 'id,firstname,lastname,fullname,profileimageurl,profileimageurlsmall,customfields',
     });
 
-    if (result?.exception) {
-      console.warn('[leaderboardService] get_enrolled_users error:', result.message);
-      return [];
-    }
-
     const users = result || [];
     const entries: LeaderboardEntry[] = [];
 
     for (const user of users) {
       const customfields = user.customfields || [];
-      
+
       const xpField = customfields.find((f: any) => f.shortname === 'ipelan_xp');
       const streakField = customfields.find((f: any) => f.shortname === 'ipelan_streak');
 
       const xp = parseInt(xpField?.value ?? '0', 10);
       const streak = parseInt(streakField?.value ?? '0', 10);
+      const rawAvatar = user.profileimageurl || user.profileimageurlsmall || '';
 
       entries.push({
         rank: 0,
@@ -46,7 +43,7 @@ export async function getLeaderboard(
         fullname: user.fullname || `${user.firstname || ''} ${user.lastname || ''}`.trim(),
         xp,
         streak,
-        avatarUrl: user.profileimageurl || user.profileimageurlsmall || '',
+        avatarUrl: rawAvatar ? convertFileUrlForAuth(rawAvatar, token) : '',
       });
     }
 
@@ -96,11 +93,6 @@ export async function getGlobalLeaderboard(
       limitnum: limit,
     });
 
-    if (result?.exception) {
-      console.warn('[leaderboardService] get_users error:', result.message);
-      return [];
-    }
-
     const users = result?.users || [];
     const entries: LeaderboardEntry[] = [];
 
@@ -112,6 +104,7 @@ export async function getGlobalLeaderboard(
 
       const xp = parseInt(xpField?.value ?? '0', 10);
       const streak = parseInt(streakField?.value ?? '0', 10);
+      const rawAvatar = user.profileimageurl || user.profileimageurlsmall || '';
 
       if (xp > 0) {
         entries.push({
@@ -122,7 +115,7 @@ export async function getGlobalLeaderboard(
             `${user.firstname || ''} ${user.lastname || ''}`.trim(),
           xp,
           streak,
-          avatarUrl: user.profileimageurl || user.profileimageurlsmall || '',
+          avatarUrl: rawAvatar ? convertFileUrlForAuth(rawAvatar, token) : '',
         });
       }
     }

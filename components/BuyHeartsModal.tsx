@@ -1,6 +1,6 @@
+import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
-import { View, Text, Modal, Pressable, StyleSheet, Dimensions, Animated } from 'react-native';
-import { Feather, Ionicons, FontAwesome5 } from '@expo/vector-icons';
+import { Dimensions, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 interface BuyHeartsModalProps {
   isVisible: boolean;
@@ -78,14 +78,14 @@ export const BuyHeartsModal: React.FC<BuyHeartsModalProps> = ({
           <View style={styles.statsRow}>
             <View style={styles.statBox}>
               <Text style={styles.statLabel}>Votre solde</Text>
-              <View className="flex-row items-center">
+              <View style={styles.style_1}>
                 <Text style={styles.statValue}>{coins}</Text>
                 <Text style={styles.coinIcon}> 🪙</Text>
               </View>
             </View>
             <View style={[styles.statBox, { borderLeftWidth: 1, borderLeftColor: '#E5E7EB' }]}>
               <Text style={styles.statLabel}>Prix du cœur</Text>
-              <View className="flex-row items-center">
+              <View style={styles.flexrow_itemscenter}>
                 <Text style={styles.statValue}>{cost}</Text>
                 <Text style={styles.coinIcon}> 🪙</Text>
               </View>
@@ -271,5 +271,14 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     fontSize: 16,
     fontWeight: '600',
+  },
+
+  flexrow_itemscenter: {
+    alignItems: 'center',
+    flexDirection: 'row'
+  },
+  style_1: {
+    alignItems: 'center',
+    flexDirection: 'row'
   },
 });

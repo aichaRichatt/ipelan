@@ -1,17 +1,8 @@
 import { getDBConnection } from '../storage/db-service';
 import { moodleFetch } from './moodleClient';
 
-let dbInstance: any = null;
-
-async function getDB() {
-  if (!dbInstance) {
-    dbInstance = await getDBConnection();
-  }
-  return dbInstance;
-}
-
 export async function initStreakTable(): Promise<void> {
-  const db = await getDB();
+  const db = await getDBConnection();
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS pending_sync (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,18 +24,13 @@ export async function initStreakTable(): Promise<void> {
  * Source de vérité : table `user_streaks` (gérée par services/storage/streak.ts).
  * Cette fonction délègue à `updateStreakAfterActivity` puis met à jour le miroir
  * dans `users.streak` pour les lectures rapides côté UI.
- *
- * Avant : deux systèmes parallèles (users.streak + user_streaks) qui divergeaient
- * et perdaient le best_streak.
  */
 export async function updateStreak(userId: number): Promise<number> {
   try {
-    // Délégation à la source de vérité (table user_streaks)
     const { updateStreakAfterActivity } = await import('../storage/streak');
     const updated = await updateStreakAfterActivity(userId);
 
-    // Miroir dans users (pour les lectures Redux/UI rapides)
-    const db = await getDB();
+    const db = await getDBConnection();
     await db.runAsync(
       `UPDATE users SET streak = ?, last_activity = ? WHERE id = ?`,
       [updated.currentStreak, updated.lastActivityDate, userId]
@@ -57,10 +43,9 @@ export async function updateStreak(userId: number): Promise<number> {
   }
 }
 
-// Set XP to a specific value (for sync from Moodle - replaces local value)
 export async function setXP(userId: number, xp: number): Promise<void> {
   try {
-    const db = await getDB();
+    const db = await getDBConnection();
     await db.runAsync(
       `UPDATE users SET ipelan_xp = ? WHERE id = ?`,
       [Math.max(0, xp), userId]
@@ -70,24 +55,23 @@ export async function setXP(userId: number, xp: number): Promise<void> {
   }
 }
 
-// Set streak to a specific value (for sync from Moodle - replaces local value)
 export async function setStreak(userId: number, streak: number, best?: number): Promise<void> {
   try {
-    const today = new Date().toISOString().split('T')[0];
-    const db = await getDB();
+    const now = new Date();
+    const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const db = await getDBConnection();
     await db.runAsync(
       `UPDATE users SET streak = ?, last_activity = ? WHERE id = ?`,
-      [Math.max(1, streak), today, userId]
+      [Math.max(1, streak), localDate, userId]
     );
   } catch (err) {
     console.warn('[userProgressService] setStreak error:', err);
   }
 }
 
-// Set coins to a specific value (for sync from Moodle)
 export async function setCoins(userId: number, coins: number): Promise<void> {
   try {
-    const db = await getDB();
+    const db = await getDBConnection();
     await db.runAsync(
       `UPDATE users SET coins = ? WHERE id = ?`,
       [Math.max(0, coins), userId]
@@ -97,10 +81,9 @@ export async function setCoins(userId: number, coins: number): Promise<void> {
   }
 }
 
-// Set lives to a specific value (for sync from Moodle)
 export async function setLives(userId: number, lives: number): Promise<void> {
   try {
-    const db = await getDB();
+    const db = await getDBConnection();
     await db.runAsync(
       `UPDATE users SET lives = ? WHERE id = ?`,
       [Math.max(0, Math.min(6, lives)), userId]
@@ -112,7 +95,7 @@ export async function setLives(userId: number, lives: number): Promise<void> {
 
 export async function addXP(userId: number, xpToAdd: number): Promise<number> {
   try {
-    const db = await getDB();
+    const db = await getDBConnection();
     const row = await db.getFirstAsync('SELECT ipelan_xp as xp FROM users WHERE id = ?', [userId]) as { xp: number } | null;
 
     const currentXP = (row?.xp ?? 0) + xpToAdd;
@@ -131,7 +114,7 @@ export async function addXP(userId: number, xpToAdd: number): Promise<number> {
 
 export async function addCoins(userId: number, coinsToAdd: number): Promise<number> {
   try {
-    const db = await getDB();
+    const db = await getDBConnection();
     const row = await db.getFirstAsync('SELECT coins FROM users WHERE id = ?', [userId]) as { coins: number } | null;
 
     const currentCoins = (row?.coins ?? 0) + coinsToAdd;
@@ -155,9 +138,7 @@ export async function getUserProgress(userId: number): Promise<{
   streak_best: number;
 } | null> {
   try {
-    const db = await getDB();
-    // Joindre user_streaks pour récupérer le vrai best_streak
-    // (avant : streak as streak_best donnait toujours la valeur courante)
+    const db = await getDBConnection();
     const row = await db.getFirstAsync(
       `SELECT
          u.ipelan_xp as xp,
@@ -204,38 +185,31 @@ export async function submitGradeToMoodle(params: {
   }
 
   try {
-    const result = await moodleFetch('/webservice/rest/server.php', {
+    await moodleFetch('/webservice/rest/server.php', {
       wstoken: token,
       wsfunction: 'core_completion_update_activity_completion_status_manually',
       moodlewsrestformat: 'json',
       cmid: moduleId,
-      completionstate: passed ? 1 : 0,
-      completionnotify: 0,
+      completed: passed ? 1 : 0,
     });
-
-    if (result?.exception) {
-      const errCode = result.errorcode || '';
-      const errMsg = result.message || '';
-
-      if (errCode === 'invalidparameter' || errMsg.includes('Valeur incorrecte')) {
-        console.warn('[Grade] Completion not enabled on cmid:', moduleId);
-        return false;
-      }
-
-      if (errCode === 'invalidtoken' || errMsg.includes('invalid token')) {
-        console.error('[Grade] Invalid token for cmid:', moduleId);
-        return false;
-      }
-
-      console.warn('[Grade] Completion update failed:', errCode || errMsg);
-      return false;
-    }
 
     console.log('[Grade] Completion marked for module:', moduleId, 'passed:', passed);
     return true;
   } catch (err: any) {
-    const errorMsg = err?.message || String(err);
-    console.warn('[Grade] Completion update exception:', errorMsg);
+    const errCode = err?.errorcode || '';
+    const errMsg = err?.message || String(err);
+
+    if (errCode === 'invalidparameter' || errMsg.includes('Valeur incorrecte')) {
+      console.warn('[Grade] Completion not enabled on cmid:', moduleId);
+      return false;
+    }
+
+    if (errCode === 'invalidtoken' || errMsg.includes('invalid token')) {
+      console.error('[Grade] Invalid token for cmid:', moduleId);
+      return false;
+    }
+
+    console.warn('[Grade] Completion update failed:', errCode || errMsg);
     return false;
   }
 }
@@ -259,7 +233,7 @@ export async function addPendingSync(
   payload: Record<string, any>
 ): Promise<boolean> {
   try {
-    const db = await getDB();
+    const db = await getDBConnection();
     await db.runAsync(
       `INSERT INTO pending_sync (activity_type, module_id, course_id, payload, status) VALUES (?, ?, ?, ?, ?)`,
       [activityType, moduleId, courseId, JSON.stringify(payload), 'pending']
@@ -273,7 +247,7 @@ export async function addPendingSync(
 
 export async function getPendingSync(): Promise<PendingSyncRecord[]> {
   try {
-    const db = await getDB();
+    const db = await getDBConnection();
     return await db.getAllAsync('SELECT * FROM pending_sync WHERE status = ? ORDER BY created_at ASC', ['pending']) as PendingSyncRecord[];
   } catch (err: any) {
     console.warn('[pending_sync] Failed to get:', err.message);
@@ -287,7 +261,7 @@ export async function updatePendingSync(
   incrementRetries: boolean = false
 ): Promise<void> {
   try {
-    const db = await getDB();
+    const db = await getDBConnection();
     if (incrementRetries) {
       await db.runAsync(
         'UPDATE pending_sync SET status = ?, retries = retries + 1, last_attempt = ? WHERE id = ?',
@@ -306,7 +280,7 @@ export async function updatePendingSync(
 
 export async function deletePendingSync(id: number): Promise<void> {
   try {
-    const db = await getDB();
+    const db = await getDBConnection();
     await db.runAsync('DELETE FROM pending_sync WHERE id = ?', [id]);
   } catch (err: any) {
     console.warn('[pending_sync] Failed to delete:', err.message);

@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { moodleFetch } from '../services/api/moodleClient';
-import { getAuthToken } from '../services/contentLoader';
 import { categorizeMoodleError, getUserFriendlyError, logActivityFetch } from '../services/utils/moodleErrorHandler';
 import { convertFileUrlForAuth, resolveActivityInstanceId } from '../services/utils/moodleIdResolver';
 import { shuffle } from '../utils/shuffle';
@@ -36,9 +35,11 @@ export function useListeningContent(
   const [error, setError] = useState<string | null>(null);
   const [userError, setUserError] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
+  useEffect(() => () => { isMountedRef.current = false; }, []);
 
 const fetchListeningContent = useCallback(async () => {
-    const authToken = getAuthToken(token);
+    const authToken = token;
     if (!authToken) {
       const err = { type: 'auth' as const, message: 'Token manquant', originalError: null, fallbackUsed: true };
       setUserError(getUserFriendlyError(err));
@@ -98,9 +99,7 @@ const fetchListeningContent = useCallback(async () => {
             choiceid: resolvedModule.instanceId,
           });
 
-          if (choiceOptions?.exception) {
-            logActivityFetch('Listening', 'OPTIONS_ERROR', { error: choiceOptions.message, code: choiceOptions.errorcode });
-          } else if (choiceOptions?.options && Array.isArray(choiceOptions.options)) {
+          if (choiceOptions?.options && Array.isArray(choiceOptions.options)) {
             options = choiceOptions.options
               .filter((o: any) => o.enabled !== false)
               .map((o: any) => stripHtml(o.text || String(o.id)));
@@ -182,11 +181,13 @@ const fetchListeningContent = useCallback(async () => {
       }
 
       // Step 3: Si pas d'options, afficher erreur Moodle
+      if (!isMountedRef.current) return;
+
       if (choiceExercises.length > 0) {
         setExercises(choiceExercises);
         logActivityFetch('Listening', 'SUCCESS', { count: choiceExercises.length });
       } else {
-        const errMsg = resolvedModule?.instanceId 
+        const errMsg = resolvedModule?.instanceId
           ? "Impossible de charger les options du sondage. Permissions insuffisantes."
           : "Module de choix non trouvé.";
         setUserError(errMsg);
@@ -195,12 +196,13 @@ const fetchListeningContent = useCallback(async () => {
       }
 
     } catch (err: any) {
+      if (!isMountedRef.current) return;
       const moodleError = categorizeMoodleError(err, 'fetch_listening');
       logActivityFetch('Listening', 'ERROR', moodleError);
       setError(moodleError.message);
       setUserError(getUserFriendlyError(moodleError));
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) setIsLoading(false);
     }
   }, [token, moduleId, instanceId, courseId]);
 

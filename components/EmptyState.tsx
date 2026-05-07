@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, Pressable } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
 interface EmptyStateProps {
@@ -16,22 +17,22 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   onAction,
 }) => {
   return (
-    <View className="flex-1 items-center justify-center py-12 px-6">
-      <View className="w-20 h-20 rounded-full bg-gray-100 items-center justify-center mb-4">
+    <View style={styles.flex1_itemscenter_justifycente}>
+      <View style={styles.w20_h20_roundedfull_bggray100_}>
         <Feather name="inbox" size={40} color="#D1D5DB" />
       </View>
-      <Text className="text-xl font-bold text-gray-900 mb-2 text-center">
+      <Text style={styles.textxl_fontbold_textgray900_mb}>
         {title}
       </Text>
-      <Text className="text-gray-500 text-center mb-6">
+      <Text style={styles.textgray500_textcenter_mb6}>
         {message}
       </Text>
       {onAction && (
         <Pressable
           onPress={onAction}
-          className="bg-[#002366] rounded-full px-8 py-3"
+          style={styles.bg002366_roundedfull_px8_py3}
         >
-          <Text className="text-white font-bold">{actionLabel}</Text>
+          <Text style={styles.textwhite_fontbold}>{actionLabel}</Text>
         </Pressable>
       )}
     </View>
@@ -39,3 +40,44 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
 };
 
 export default EmptyState;
+
+const styles = StyleSheet.create({
+  bg002366_roundedfull_px8_py3: {
+    backgroundColor: '#002366',
+    borderRadius: 9999,
+    paddingHorizontal: 32,
+    paddingVertical: 12
+  },
+  flex1_itemscenter_justifycente: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 48
+  },
+  textgray500_textcenter_mb6: {
+    color: '#6B7280',
+    marginBottom: 24,
+    textAlign: 'center'
+  },
+  textwhite_fontbold: {
+    color: '#FFFFFF',
+    fontWeight: '700'
+  },
+  textxl_fontbold_textgray900_mb: {
+    color: '#111827',
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center'
+  },
+  w20_h20_roundedfull_bggray100_: {
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 9999,
+    height: 80,
+    justifyContent: 'center',
+    marginBottom: 16,
+    width: 80
+  },
+});

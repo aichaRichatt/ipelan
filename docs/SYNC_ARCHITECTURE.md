@@ -1,215 +1,217 @@
-# Architecture de Synchronisation IPELAN
+# IPELAN — Architecture de Synchronisation
 
-## Vue d'ensemble
+> Dernière mise à jour : reflète l'état réel du code (schema v5, gamification_queue persistée).
 
-L'application utilise une architecture **Offline-First** avec synchronisation bidirectionnelle automatique vers Moodle.
+---
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    APP IPELAN                               │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
-│  │  useUserStats│    │  useSyncStatus│    │  Sync Queue  │  │
-│  │   Hook       │───▶│   Hook        │───▶│   Service    │  │
-│  └──────────────┘    └──────────────┘    └──────────────┘  │
-│         │                       │                  │        │
-│         ▼                       ▼                  ▼        │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
-│  │   SQLite     │    │  UI Indicator│    │    Moodle    │  │
-│  │  (Local DB)  │◀──▶│   (Subtle)   │◀──▶│     API      │  │
-│  └──────────────┘    └──────────────┘    └──────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Composants
-
-### 1. `useUserStats` Hook
-**Fichier**: `hooks/useUserStats.ts`
-
-Gère le chargement et la synchronisation des statistiques utilisateur.
-
-```typescript
-const { stats, isLoading, isSyncing, error, refetch, syncToMoodle } = useUserStats();
-
-// stats contient:
-{
-  xp: number;           // XP total
-  coins: number;        // Pièces
-  streak: number;         // Jours série actuels
-  streakBest: number;     // Meilleur streak
-  badges: number;         // Nombre de badges
-  coursesInProgress: number;
-  coursesCompleted: number;
-  lastActivity: string | null;
-}
-```
-
-**Flux de données**:
-1. Charge depuis SQLite (rapide, offline)
-2. Si online → récupère depuis Moodle
-3. Compare et fusionne (prend les valeurs max)
-4. Si local > Moodle → push vers Moodle
-5. Si Moodle > local → update SQLite
-
-### 2. `syncQueue` Service
-**Fichier**: `services/sync/syncQueue.ts`
-
-Gère la file d'attente de synchronisation avec retry automatique.
-
-**Features**:
-- Queue persistante en mémoire
-- Retry avec backoff exponentiel (1s, 2s, 4s, 8s... max 30s)
-- Max 5 tentatives par job
-- Détection online/offline
-- Fusion des jobs dupliqués
-
-**Types de jobs**:
-- `xp` - Synchronisation XP
-- `streak` - Synchronisation streak
-- `coins` - Synchronisation pièces
-- `course_progress` - Progression des cours
-
-### 3. `useSyncStatus` Hook
-**Fichier**: `hooks/useSyncStatus.ts`
-
-Fournit un indicateur visuel subtil du statut de sync.
-
-```typescript
-const { icon, color, opacity, isSyncing, isSynced } = useSyncStatus();
-
-// Status:
-// - 'synced':  Synchronisé (vert transparent)
-// - 'syncing': En cours (bleu discret)
-// - 'pending': En attente (orange très discret)
-// - 'error':   Erreur (rouge très discret)
-```
-
-## Utilisation
-
-### Dans les composants:
-
-```typescript
-// HomeScreen.tsx
-const { stats, isSyncing } = useUserStats();
-const { isAutoSyncing } = useSyncStatus();
-
-// Affichage des stats
-<Text>{stats.xp} XP</Text>
-<Text>{stats.streak} jours</Text>
-
-// Indicateur subtil (petit point bleu quand sync)
-{isAutoSyncing && (
-  <View className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full bg-blue-400" 
-        style={{ opacity: 0.6 }} />
-)}
-```
-
-### Après une activité:
-
-```typescript
-import { syncQueue } from '@/services/sync/syncQueue';
-
-// Après complétion d'un quiz
-syncQueue.syncXP(userId, newXP, currentStreak, token);
-
-// Après gain de pièces
-syncQueue.syncCoins(userId, newCoins, token);
-
-// Après progression dans un cours
-syncQueue.syncCourseProgress(userId, courseId, {
-  completedActivities: 5,
-  totalActivities: 10,
-  totalXP: 250
-}, token);
-```
-
-## Configuration Moodle Requise
-
-Créer ces champs personnalisés utilisateur dans Moodle:
-
-| Shortname | Type | Nom | Description |
-|-----------|------|-----|-------------|
-| `ipelan_xp` | Texte | IPELAN XP | XP total de l'utilisateur |
-| `ipelan_streak` | Texte | IPELAN Streak | Jours consécutifs |
-| `ipelan_last_activity` | Texte | IPELAN Last Activity | Date dernière activité (YYYY-MM-DD) |
-| `ipelan_coins` | Texte | IPELAN Coins | Pièces accumulées |
-
-### Configuration API Moodle:
-Activer dans **Administration** → **Plugins** → **Web services**:
-- `core_user_update_users` - Pour mettre à jour les champs perso
-- `core_user_get_users` - Pour récupérer les données
-
-## Stratégie de Sync
-
-### Offline-First
-1. **Écriture**: Toujours en local d'abord (SQLite)
-2. **Lecture**: SQLite prioritaire (rapide)
-3. **Sync**: Background quand online disponible
-
-### Conflict Resolution
-```
-Si Local > Moodle:
-  → Push Local vers Moodle
-  
-Si Moodle > Local:
-  → Update Local avec Moodle
-  
-Si Égal:
-  → Pas d'action
-```
-
-### Retry Strategy
-```
-Tentative 1: Immédiate
-Tentative 2: Après 1s
-Tentative 3: Après 2s
-Tentative 4: Après 4s
-Tentative 5: Après 8s
-Max delay: 30s entre tentatives
-```
-
-## Logs et Debugging
-
-En mode développement (`IS_DEV = true`):
+## Vue d'ensemble — Deux systèmes de sync parallèles
 
 ```
-[useUserStats] Local stats loaded: { xp: 150, streak: 5, ... }
-[useUserStats] Moodle data: { moodleXP: 100, badges: 3 }
-[useUserStats] Local > Moodle, pushing to Moodle: { localXP: 150, moodleXP: 100 }
-[useUserStats] Moodle > Local, updating SQLite XP: 200
-[SyncQueue] Job added: xp { xp: 150, streak: 5 }
-[SyncQueue] Job completed: xp
+┌─────────────────────────────────────────────────────────────────────┐
+│                     IPELAN SYNC SYSTEM                              │
+│                                                                     │
+│  ┌──────────────────────────┐   ┌──────────────────────────────┐   │
+│  │   SYSTÈME 1              │   │   SYSTÈME 2                  │   │
+│  │   Gamification Queue     │   │   SQLite Queue (Moodle API)  │   │
+│  │   syncQueue.ts           │   │   sync-queue.ts              │   │
+│  │                          │   │                              │   │
+│  │   XP · Coins · Streak    │   │   Complétions · Notes        │   │
+│  │   Lives · Badges         │   │   core_grades_update_grades  │   │
+│  │                          │   │   core_completion_*          │   │
+│  │   In-memory + SQLite     │   │   SQLite permanent           │   │
+│  │   (gamification_queue)   │   │   (sync_queue)               │   │
+│  └──────────┬───────────────┘   └──────────────┬───────────────┘   │
+│             │                                   │                   │
+│             ▼                                   ▼                   │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │              MOODLE 4.4.3 — moodle.richatt.com               │  │
+│  │     core_user_update_users (customfields)                     │  │
+│  │     core_grades_update_grades                                 │  │
+│  │     core_completion_update_activity_completion_status_manually│  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-## Points Clés
+---
 
-✅ **100% Offline** - L'app fonctionne sans internet  
-✅ **Sync silencieuse** - Pas d'interruption utilisateur  
-✅ **Résiliente** - Retry automatique avec backoff  
-✅ **Rapide** - Chargement immédiat depuis SQLite  
-✅ **Sûre** - Données jamais perdues (SQLite + Moodle)  
+## Système 1 — Gamification Queue (`syncQueue.ts`)
 
-## Fichiers Modifiés/Créés
+### Données synchronisées
+- XP (`ipelan_xp`)
+- Pièces (`ipelan_coins`)
+- Streak (`ipelan_streak`)
+- Vies (`ipelan_lives` + `ipelan_last_lives_update`)
+- Badges (`ipelan_badges`, `ipelan_badges_count`, `ipelan_last_badge`)
+- Date activité (`ipelan_last_activity`)
+
+### Déclencheurs (quand la sync se fait)
+
+| Événement | Fichier | Méthode |
+|-----------|---------|---------|
+| XP ajouté | `hooks/useUserStats.ts:292` | `syncQueue.syncGamification(userId, token)` |
+| Coins ajoutés | `hooks/useUserStats.ts:308` | `syncQueue.syncGamification(userId, token)` |
+| Streak mis à jour | `hooks/useUserStats.ts:308` | `syncQueue.syncGamification(userId, token)` |
+| Badge gagné | `hooks/useUserStats.ts:324` | `syncQueue.syncGamification(userId, token)` |
+| Vie achetée | `hooks/useLives.ts:66` | `syncQueue.syncGamification(userId, token)` |
+| Fin activité (activity-progress) | `services/storage/activity-progress.ts:119` | `syncQueue.syncGamification(userId, token)` |
+| Stats locales > Moodle au login | `hooks/useUserStats.ts:219` | `syncQueue.syncGamification(userId, token)` |
+| Background OS (15 min) | `services/api/backgroundSync.ts:135` | `syncQueue.syncGamification(userId, token)` |
+| Démarrage app (auth restaurée) | `app/_layout.tsx` | `syncQueue.restorePersistedJobs(token)` |
+
+### Persistance SQLite (schema v5)
 
 ```
-hooks/
-  useUserStats.ts        # Hook stats avec sync
-  useSyncStatus.ts       # Hook indicateur visuel
+addJob('gamification', userId, token, {})
+  ├─ Ajoute en mémoire
+  └─ INSERT OR REPLACE INTO gamification_queue  ← survit aux crashes
 
-services/sync/
-  syncQueue.ts           # Service de file d'attente
+processQueue() succès
+  ├─ jobs.shift()
+  └─ DELETE FROM gamification_queue
 
-services/api/
-  userProgressService.ts # Fonctions setXP/setStreak
+processQueue() échec définitif (5 tentatives)
+  ├─ jobs.shift()
+  └─ DELETE FROM gamification_queue
 
-app/(tabs)/(home)/
-  index.tsx              # Utilisation des hooks
+restorePersistedJobs(freshToken)  ← appelé au démarrage
+  ├─ SELECT FROM gamification_queue
+  └─ Reconstruit les jobs en mémoire (token NON stocké en SQLite)
 ```
 
-## Tests Recommandés
+> **Sécurité** : le token n'est jamais persisté dans `gamification_queue`. Il est rechargé depuis Redux au redémarrage.
 
-1. **Nouveau compte**: Vérifier création champs Moodle
-2. **Offline**: Fermer wifi → faire activité → vérifier SQLite
-3. **Sync**: Ouvrir wifi → vérifier données montent
-4. **Conflict**: Modifier sur 2 appareils → vérifier merge
-5. **Retry**: Couper wifi pendant sync → vérifier retry
+### Retry
+
+```
+Tentative 1 : immédiate
+Tentative 2 : 1s
+Tentative 3 : 2s
+Tentative 4 : 4s
+Tentative 5 : 8s (max 30s)
+→ Abandon après 5 échecs + suppression SQLite
+```
+
+### Dédup
+
+Un seul job `gamification` par `(userId, type)` en mémoire et en SQLite.  
+`INSERT OR REPLACE` remplace le précédent → toujours les données les plus récentes.
+
+---
+
+## Système 2 — SQLite Queue (`sync-queue.ts` + `queueProcessor.ts`)
+
+### Données synchronisées
+- Complétions manuelles (`core_completion_update_activity_completion_status_manually`)
+- Notes Moodle (`core_grades_update_grades`)
+
+### Flux après une activité
+
+```
+result.tsx → syncAfterActivity({courseId, cmid, score, maxScore, userId})
+                │
+                ▼
+          progressSync.ts — syncActivityCompletion()
+                │
+                ├── Online ?
+                │     ├── YES → resolveIds(courseId, cmid)
+                │     │          ├── modname = quiz   → markManualCompletion() uniquement
+                │     │          ├── modname = assign → core_grades_update_grades
+                │     │          ├── modname = choice → markManualCompletion()
+                │     │          ├── modname = glossary → markManualCompletion()
+                │     │          └── modname inconnu  → markManualCompletion()
+                │     │
+                │     └── resolveIds échoue
+                │                └── addToSyncQueue('completion', ...) ← retry auto
+                │
+                └── Offline → addToSyncQueue('completion', ...) ← retry auto
+```
+
+### Déclencheurs du queueProcessor
+
+| Déclencheur | Implémentation |
+|-------------|----------------|
+| Démarrage app | `registerQueueProcessor()` → `processQueue()` immédiat |
+| App revient foreground | `AppState.addEventListener('change', active)` |
+| Réseau revient (offline→online) | `NetInfo.addEventListener` + `wasOffline` flag |
+
+### Retry (queueProcessor)
+
+```
+MAX_RETRIES = 3
+BACKOFF_BASE_MS = 2000
+
+Tentative 1 : immédiate
+Tentative 2 : 2s
+Tentative 3 : 4s (2000 × 2^1)
+→ Abandon après 3 échecs (item reste en SQLite mais ignoré)
+```
+
+---
+
+## Schéma global — Offline-First
+
+```mermaid
+flowchart LR
+    ACT[Activité terminée] --> LOCAL[(SQLite local\ntoujours en premier)]
+    LOCAL --> CHK{Online ?}
+
+    CHK -->|Oui| SYNC1[Gamification\nsyncQueue]
+    CHK -->|Oui| SYNC2[Completion\nprogressSync]
+    CHK -->|Non| Q1[(gamification_queue\nSQLite)]
+    CHK -->|Non| Q2[(sync_queue\nSQLite)]
+
+    SYNC1 -->|ok| MOODLE1[Moodle\ncustomfields]
+    SYNC2 -->|ok| MOODLE2[Moodle\ngrades/completion]
+    SYNC1 -->|fail| Q1
+    SYNC2 -->|fail| Q2
+
+    Q1 -->|restart/foreground/online| RESTORE[restorePersistedJobs\n+ processQueue]
+    Q2 -->|foreground/online| QP[queueProcessor]
+
+    RESTORE --> MOODLE1
+    QP --> MOODLE2
+
+    classDef ok fill:#dcfce7,stroke:#166534
+    classDef queue fill:#fef3c7,stroke:#b45309
+    classDef moodle fill:#fee2e2,stroke:#b91c1c
+    class SYNC1,SYNC2,MOODLE1,MOODLE2 ok
+    class Q1,Q2,RESTORE,QP queue
+```
+
+---
+
+## Ce qui N'est PAS synchronisé automatiquement
+
+| Donnée | Situation | Raison |
+|--------|-----------|--------|
+| Profil (nom, email) | Seulement sur action manuelle dans edit-profile | `moodleFetch core_user_update_users` |
+| Progression cours % | Calculée côté app depuis `activity_progress` | Pas de push direct `course_progress` |
+| Mot de passe | Jamais stocké localement | Sécurité |
+
+---
+
+## Indicateur visuel de sync
+
+`hooks/useSyncStatus.ts` — s'abonne à `syncQueue.subscribe()` :
+
+| Status | Affichage |
+|--------|-----------|
+| `synced` | Vert transparent |
+| `syncing` | Bleu discret |
+| `pending` | Orange très discret |
+| `error` | Rouge très discret |
+
+---
+
+## Logs de debug (IS_DEV uniquement)
+
+```
+[SyncQueue] Job added: gamification {}
+[SyncQueue] Job completed: gamification
+[SyncQueue] 2 job(s) restauré(s) depuis SQLite
+[QueueProcessor] ✅ Traité: core_completion_update_activity_completion_status_manually
+[QueueProcessor] ❌ Échec retry 1: ...
+[ProgressSync] Sync assign cmid=123 score=85/100
+[ProgressSync] ✅ Note envoyée assign instance=456 score=85
+[ProgressSync] Offline — completion queued cmid=123
+```

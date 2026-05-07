@@ -88,6 +88,11 @@ export function useQuiz(
   const [score, setScore] = useState<QuizScore | null>(null);
   const [startTime] = useState(Date.now());
 
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    return () => { isMountedRef.current = false; };
+  }, []);
+
   const currentQuestion = questions[currentIndex] ?? null;
 
   // ─── Loader ──────────────────────────────────────────────────────────────
@@ -124,6 +129,7 @@ export function useQuiz(
 
       // 2. Démarrer / reprendre une tentative
       const aId = await getOrCreateAttempt(token, instanceId);
+      if (!isMountedRef.current) return;
       if (!aId) {
         throw new Error(
           "Impossible de démarrer le quiz. Vérifiez que vous êtes inscrit au cours."
@@ -133,6 +139,7 @@ export function useQuiz(
 
       // 3. Charger TOUTES les questions (multi-pages)
       const qs = await fetchAllQuizQuestions(token, aId);
+      if (!isMountedRef.current) return;
       if (qs.length === 0) {
         throw new Error('Aucune question dans ce quiz.');
       }
@@ -143,10 +150,11 @@ export function useQuiz(
         console.log('[useQuiz] Loaded', qs.length, 'questions for attempt', aId);
       }
     } catch (err: any) {
+      if (!isMountedRef.current) return;
       if (IS_DEV) console.warn('[useQuiz] load failed:', err?.message);
       setError(err?.message || 'Erreur de chargement du quiz');
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) setIsLoading(false);
     }
   }, [token, cmid, courseId, fallbackInstanceId]);
 
@@ -287,6 +295,7 @@ export function useQuiz(
   const reset = useCallback(() => {
     setQuestions([]);
     setAttemptId(null);
+    setQuizName('Quiz');
     setCurrentIndex(0);
     answersRef.current = {};
     setAnswers({});

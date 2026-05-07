@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { useSelector } from 'react-redux';
 import { getDBConnection, getCourses, saveCourses } from '../services/storage/db-service';
 import { RootState } from '../services/redux/store';
-import { getUserCourses, getAllCourses } from '../services/api/courseService';
+import { getUserCourses } from '../services/api/courseService';
 
 export function useCourses() {
   const [courses, setCourses] = useState<any[]>([]);
@@ -21,8 +21,6 @@ export function useCourses() {
     setError(null);
 
     try {
-      const { getEnrolledCoursesByTimeline } = await import("../services/api/courseService");
-      
       let apiCourses: any = null;
        try {
         const res = await getUserCourses(token, Number(user.id));
@@ -64,7 +62,7 @@ export function useCourses() {
     } finally {
       setIsLoading(false);
     }
-  }, [token, user]);
+  }, [token, user?.id]);
 
   const loadLocalCourses = useCallback(async () => {
     setIsLoading(true);

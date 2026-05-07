@@ -6,7 +6,7 @@ import { ActivityWithProgress, FilterTab, PaginationState } from "@/types/activi
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
 import { useCourseContent } from "../../../hooks/useCourseContent";
@@ -21,6 +21,136 @@ import { ActivityType, XP_CONFIG } from "../../../utils/xpCalculator";
 const ACTIVITY_TYPES: ActivityType[] = ['quiz', 'dictation', 'listening', 'association', 'wordOrder'];
 const ITEMS_PER_PAGE = 10;
 const IS_DEV = process.env.NODE_ENV === "development";
+
+const styles = StyleSheet.create({
+  // Layout
+  flex1: { flex: 1 },
+  flex1_bgFAF9F6: { flex: 1, backgroundColor: '#FAF9F6' },
+  flexRow: { flexDirection: 'row' },
+  flexRow_itemsCenter: { flexDirection: 'row', alignItems: 'center' },
+  itemsCenter: { alignItems: 'center' },
+  justifyCenter: { justifyContent: 'center' },
+  justifyBetween: { justifyContent: 'space-between' },
+  
+  // Padding
+  p2: { padding: 8 },
+  p3: { padding: 12 },
+  p4: { padding: 16 },
+  p6: { padding: 24 },
+  px2: { paddingHorizontal: 8 },
+  px4: { paddingHorizontal: 16 },
+  px5: { paddingHorizontal: 20 },
+  py3: { paddingVertical: 12 },
+  py4: { paddingVertical: 16 },
+  pb4: { paddingBottom: 16 },
+  
+  // Margin
+  m2: { margin: 8 },
+  mt2: { marginTop: 8 },
+  mt4: { marginTop: 16 },
+  mb1: { marginBottom: 4 },
+  mb2: { marginBottom: 8 },
+  mb3: { marginBottom: 12 },
+  mb4: { marginBottom: 16 },
+  mb6: { marginBottom: 24 },
+  mb8: { marginBottom: 32 },
+  mr2: { marginRight: 8 },
+  mr4: { marginRight: 16 },
+  ml2: { marginLeft: 8 },
+  ml4: { marginLeft: 16 },
+  mlNegative2: { marginLeft: -8 },
+  
+  // Background colors
+  bgFAF9F6: { backgroundColor: '#FAF9F6' },
+  bgWhite: { backgroundColor: '#FFFFFF' },
+  bgGreen500: { backgroundColor: '#22C55E' },
+  bgGreen100: { backgroundColor: '#DCFCE7' },
+  bgGray200: { backgroundColor: '#E5E7EB' },
+  bgGray100: { backgroundColor: '#F3F4F6' },
+  bgPrimary: { backgroundColor: '#002366' },
+  bgBlue: { backgroundColor: '#0961F5' },
+  bgWhite10: { backgroundColor: 'rgba(255,255,255,0.1)' },
+  bgWhite20: { backgroundColor: 'rgba(255,255,255,0.2)' },
+  
+  // Badge styles
+  badgeWhite20: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 9999 },
+  progressBarContainer: { height: 8, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 9999, overflow: 'hidden' },
+  progressBarFill: { height: '100%', borderRadius: 9999, backgroundColor: '#F59E0B' },
+  
+  // Module card styles
+  moduleCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  moduleCardLocked: {
+    opacity: 0.6,
+  },
+  moduleIconContainer: {
+    backgroundColor: 'rgba(0,0,0,0.05)',
+  },
+  typeBadge: {
+    paddingVertical: 2,
+  },
+  completedBadge: {
+    paddingVertical: 2,
+  },
+  
+  // Text colors
+  textWhite: { color: '#FFFFFF' },
+  textWhite80: { color: 'rgba(255,255,255,0.8)' },
+  textWhite60: { color: 'rgba(255,255,255,0.6)' },
+  textGray400: { color: '#9CA3AF' },
+  textGray500: { color: '#6B7280' },
+  textGray600: { color: '#4B5563' },
+  textGray900: { color: '#111827' },
+  textGreen600: { color: '#16A34A' },
+  textPrimary: { color: '#002366' },
+  
+  // Text styles
+  textXs: { fontSize: 12 },
+  textSm: { fontSize: 14 },
+  textBase: { fontSize: 16 },
+  textLg: { fontSize: 18 },
+  textXl: { fontSize: 20 },
+  text2xl: { fontSize: 24, fontWeight: '700' },
+  fontMedium: { fontWeight: '500' },
+  fontBold: { fontWeight: '700' },
+  textCenter: { textAlign: 'center' },
+  leadingRelaxed: { lineHeight: 24 },
+  
+  // Borders
+  roundedXl: { borderRadius: 12 },
+  rounded2xl: { borderRadius: 16 },
+  rounded3xl: { borderRadius: 24 },
+  roundedFull: { borderRadius: 9999 },
+  borderGray200: { borderWidth: 1, borderColor: '#E5E7EB' },
+  
+  // Shadow
+  shadowSm: { elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05 },
+  shadowMd: { elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1 },
+  
+  // Size
+  h2: { height: 8 },
+  hFull: { height: '100%' },
+  w10: { width: 40 },
+  h10: { height: 40 },
+  wFull: { width: '100%' },
+  
+  // Overflow
+  overflowHidden: { overflow: 'hidden' },
+  
+  // Z-index
+  z10: { zIndex: 10 },
+});
 
 interface Lesson {
   id: number;
@@ -404,10 +534,10 @@ export default function ModuleDetailScreen() {
 
   if (isLoading) {
     return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
-        <View className="flex-1 items-center justify-center">
+      <SafeAreaView style={styles.flex1_bgFAF9F6} edges={['top']}>
+        <View style={[styles.flex1, styles.itemsCenter, styles.justifyCenter]}>
           <ActivityIndicator size="large" color="#002366" />
-          <Text className="mt-4 text-gray-500">Chargement du cours...</Text>
+          <Text style={[styles.mt4, styles.textGray500]}>Chargement du cours...</Text>
         </View>
       </SafeAreaView>
     );
@@ -415,17 +545,17 @@ export default function ModuleDetailScreen() {
 
   if (!id || isNaN(parsedCourseId) || parsedCourseId === 0) {
     return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
-        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
-          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+      <SafeAreaView style={styles.flex1_bgFAF9F6} edges={['top']}>
+        <View style={[styles.px5, styles.py4, styles.flexRow, styles.itemsCenter, styles.bgFAF9F6]}>
+          <Pressable onPress={() => router.back()} style={[styles.mr4, styles.p2, styles.mlNegative2]}>
             <Feather name="arrow-left" size={24} color="black" />
           </Pressable>
-          <Text className="text-lg font-bold text-gray-900 flex-1">Cours</Text>
+          <Text style={[styles.textLg, styles.fontBold, styles.textGray900, styles.flex1]}>Cours</Text>
         </View>
-        <View className="flex-1 items-center justify-center px-5">
+        <View style={[styles.flex1, styles.itemsCenter, styles.justifyCenter, styles.px5]}>
           <Feather name="alert-circle" size={48} color="#D1D5DB" />
-          <Text className="text-gray-500 mt-4 text-center">Route non trouvée: {id}</Text>
-          <Text className="text-gray-400 text-sm mt-2 text-center">Cette page n&apos;existe pas</Text>
+          <Text style={[styles.textGray500, styles.mt4, styles.textCenter]}>Route non trouvée: {id}</Text>
+          <Text style={[styles.textGray400, styles.textSm, styles.mt2, styles.textCenter]}>Cette page n&apos;existe pas</Text>
         </View>
       </SafeAreaView>
     );
@@ -433,19 +563,19 @@ export default function ModuleDetailScreen() {
 
   if (error || !courseContent || sections.length === 0) {
     return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
-        <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
-          <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+      <SafeAreaView style={styles.flex1_bgFAF9F6} edges={['top']}>
+        <View style={[styles.px5, styles.py4, styles.flexRow, styles.itemsCenter, styles.bgFAF9F6]}>
+          <Pressable onPress={() => router.back()} style={[styles.mr4, styles.p2, styles.mlNegative2]}>
             <Feather name="arrow-left" size={24} color="black" />
           </Pressable>
-          <Text className="text-lg font-bold text-gray-900 flex-1">Cours</Text>
+          <Text style={[styles.textLg, styles.fontBold, styles.textGray900, styles.flex1]}>Cours</Text>
         </View>
-        <View className="flex-1 items-center justify-center px-5">
+        <View style={[styles.flex1, styles.itemsCenter, styles.justifyCenter, styles.px5]}>
           <Feather name="alert-circle" size={48} color="#D1D5DB" />
-          <Text className="text-gray-500 mt-4 text-center">
+          <Text style={[styles.textGray500, styles.mt4, styles.textCenter]}>
             {error || "Impossible de charger le contenu du cours"}
           </Text>
-          <Text className="text-gray-400 text-sm mt-2 text-center">
+          <Text style={[styles.textGray400, styles.textSm, styles.mt2, styles.textCenter]}>
             Vérifiez votre connexion ou réessayez plus tard
           </Text>
         </View>
@@ -592,22 +722,22 @@ export default function ModuleDetailScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
-      <View className="px-5 py-4 flex-row items-center bg-[#FAF9F6]">
-        <Pressable onPress={() => router.back()} className="mr-4 p-2 -ml-2">
+    <SafeAreaView style={styles.flex1_bgFAF9F6} edges={['top']}>
+      <View style={[styles.px5, styles.py4, styles.flexRow, styles.itemsCenter, styles.bgFAF9F6]}>
+        <Pressable onPress={() => router.back()} style={[styles.mr4, styles.p2, styles.mlNegative2]}>
           <Feather name="arrow-left" size={24} color="black" />
         </Pressable>
-        <Text className="text-lg font-bold text-gray-900 flex-1" numberOfLines={1}>
+        <Text style={[styles.textLg, styles.fontBold, styles.textGray900, styles.flex1]} numberOfLines={1}>
           {courseTitle}
         </Text>
       </View>
 
       {/* Search Bar */}
-      <View className="px-5 pb-4 bg-[#FAF9F6]">
-        <View className="flex-row items-center bg-white rounded-xl px-4 py-3 shadow-sm">
+      <View style={[styles.px5, styles.pb4, styles.bgFAF9F6]}>
+        <View style={[styles.flexRow, styles.itemsCenter, styles.bgWhite, styles.roundedXl, styles.px4, styles.py3, styles.shadowSm]}>
           <Ionicons name="search" size={20} color="#9CA3AF" />
           <TextInput
-            className="flex-1 ml-3 text-gray-700"
+            style={[styles.flex1, styles.ml2, { color: "#374151" }]}
             placeholder="Rechercher une leçon ou activité..."
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -622,56 +752,52 @@ export default function ModuleDetailScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
-        <View className="px-5 mb-6">
+        <View style={[styles.px5, styles.mb6]}>
           <View
-            className="rounded-3xl p-6"
-            style={{ backgroundColor: '#002366' }}
+            style={[styles.rounded3xl, styles.p6, { backgroundColor: '#002366' }]}
           >
-            <Text className="text-white text-2xl font-bold mb-2">{courseTitle}</Text>
-            <View className="flex-row items-center mb-3">
-              <View className="bg-white/20 px-3 py-1 rounded-full mr-2">
-                <Text className="text-white text-xs font-medium">
+            <Text style={[styles.textWhite, { fontSize: 24, fontWeight: "700" }, styles.mb2]}>{courseTitle}</Text>
+            <View style={[styles.flexRow, styles.itemsCenter, styles.mb3]}>
+              <View style={[styles.badgeWhite20, styles.mr2]}>
+                <Text style={[styles.textWhite, styles.textXs, styles.fontMedium]}>
                   {courseContent.totalLessons} Leçons
                 </Text>
               </View>
-              <View className="bg-white/20 px-3 py-1 rounded-full">
-                <Text className="text-white text-xs font-medium">
+              <View style={styles.badgeWhite20}>
+                <Text style={[styles.textWhite, styles.textXs, styles.fontMedium]}>
                   {courseContent.totalActivities} Activités
                 </Text>
               </View>
             </View>
-            <Text className="text-white/80 text-sm mb-4 leading-relaxed">
+            <Text style={[styles.textWhite80, styles.textSm, styles.mb4, styles.leadingRelaxed]}>
               {courseDescription || "Apprends les langues nationales mauritaniennes"}
             </Text>
 
-            <View className="bg-white/10 rounded-xl p-4">
-              <View className="flex-row justify-between items-center mb-2">
-                <Text className="text-white text-sm font-medium">Progression</Text>
-                <Text className="text-white font-bold">{progressPercent}%</Text>
+            <View style={[styles.bgWhite10, styles.roundedXl, styles.p4]}>
+              <View style={[styles.flexRow, styles.justifyBetween, styles.itemsCenter, styles.mb2]}>
+                <Text style={[styles.textWhite, styles.textSm, styles.fontMedium]}>Progression</Text>
+                <Text style={[styles.textWhite, styles.fontBold]}>{progressPercent}%</Text>
               </View>
-              <View className="h-2 bg-white/20 rounded-full overflow-hidden">
-                <View
-                  className="h-full rounded-full"
-                  style={{ width: `${progressPercent}%`, backgroundColor: '#F59E0B' }}
-                />
+              <View style={styles.progressBarContainer}>
+                <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
               </View>
-              <Text className="text-white/60 text-xs mt-2">
+              <Text style={[styles.textWhite60, styles.textXs, styles.mt2]}>
                 {completedCount}/{allLessons.length} activités complétées
               </Text>
             </View>
 
             <Pressable
               onPress={handleViewTimeline}
-              className="mt-4 bg-white/10 rounded-xl p-3 flex-row items-center justify-center"
+              style={[styles.mt4, styles.bgWhite10, styles.roundedXl, styles.p3, styles.flexRow, styles.itemsCenter, styles.justifyCenter]}
             >
-              <Feather name="git-branch" size={18} color="white" className="mr-2" />
-              <Text className="text-white font-medium">Voir le parcours d&apos;apprentissage</Text>
+              <Feather name="git-branch" size={18} color="white" style={styles.mr2} />
+              <Text style={[styles.textWhite, styles.fontMedium]}>Voir le parcours d&apos;apprentissage</Text>
             </Pressable>
           </View>
         </View>
 
-        <View className="px-5 mb-4">
-          <Text className="text-lg font-bold text-gray-900 mb-3">Activités</Text>
+        <View style={[styles.px5, styles.mb4]}>
+          <Text style={[styles.textLg, styles.fontBold, styles.textGray900, styles.mb3]}>Activités</Text>
           
           <ActivityTabs
             activeTab={activeTab}
@@ -680,56 +806,59 @@ export default function ModuleDetailScreen() {
           />
         </View>
 
-        <View className="px-5 mb-4">
-          {activities.length === 0 ? (
-            <EmptyState
-              title="Aucune activité trouvée"
-              message="Ce cours ne contient pas d'activités de type quiz, dictée, listening, association ou ordre des mots."
-              actionLabel="Retour"
-              onAction={() => router.back()}
-            />
-          ) : (
-            <>
-              {paginatedActivities.map((activity) => (
-                <ActivityCard
-                  key={activity.id}
-                  activity={activity}
-                  onPress={() => handleActivityPress(activity)}
-                />
-              ))}
-              
-              {pagination.hasMore && (
-                <Pressable
-                  onPress={loadMore}
-                  className="bg-white border border-gray-200 rounded-xl py-3 items-center mt-2"
-                >
-                  <Text className="text-[#002366] font-medium">Charger plus</Text>
-                </Pressable>
-              )}
-              
-              {!pagination.hasMore && activities.length > pagination.itemsPerPage && (
-                <Text className="text-center text-gray-400 text-sm mt-2">
-                  Fin des activités
-                </Text>
-              )}
-            </>
-          )}
-        </View>
+        {/* Tab spécifique (quiz, dictation, etc.) -> ActivityCards */}
+        {activeTab !== 'all' && (
+          <View style={[styles.px5, styles.mb4]}>
+            {activities.length === 0 ? (
+              <EmptyState
+                title="Aucune activité trouvée"
+                message={`Ce cours ne contient pas d'activités de type ${activeTab}.`}
+                actionLabel="Retour"
+                onAction={() => router.back()}
+              />
+            ) : (
+              <>
+                {paginatedActivities.map((activity) => (
+                  <ActivityCard
+                    key={activity.id}
+                    activity={activity}
+                    onPress={() => handleActivityPress(activity)}
+                  />
+                ))}
+                
+                {pagination.hasMore && (
+                  <Pressable
+                    onPress={loadMore}
+                    style={[styles.bgWhite, styles.borderGray200, styles.roundedXl, styles.py3, styles.itemsCenter, styles.mt2]}
+                  >
+                    <Text style={[styles.textPrimary, styles.fontMedium]}>Charger plus</Text>
+                  </Pressable>
+                )}
+                
+                {!pagination.hasMore && activities.length > pagination.itemsPerPage && (
+                  <Text style={[styles.textCenter, styles.textGray400, styles.textSm, styles.mt2]}>
+                    Fin des activités
+                  </Text>
+                )}
+              </>
+            )}
+          </View>
+        )}
 
-        {/* Use filtered sections when searching */}
-        {(searchQuery.trim() ? filteredSections : sections).map((section) => (
-          <View key={section.id} className="px-5 mb-4">
-            <View className="flex-row items-center mb-3">
-              <Text className="text-lg font-bold text-gray-900">{section.title}</Text>
+        {/* Tab "Tous" ou Recherche -> Sections complètes */}
+        {(activeTab === 'all' || searchQuery.trim()) && (searchQuery.trim() ? filteredSections : sections).map((section) => (
+          <View key={section.id} style={[styles.px5, styles.mb4]}>
+            <View style={[styles.flexRow, styles.itemsCenter, styles.mb3]}>
+              <Text style={[styles.textLg, styles.fontBold, styles.textGray900]}>{section.title}</Text>
               {section.status !== 'available' && (
-                <View className={`ml-2 px-2 py-0.5 rounded-full ${
-                  section.status === 'completed' ? 'bg-green-100' :
-                  section.status === 'locked' ? 'bg-gray-100' : 'bg-amber-100'
-                }`}>
-                  <Text className={`text-xs font-medium ${
-                    section.status === 'completed' ? 'text-green-600' :
-                    section.status === 'locked' ? 'text-gray-600' : 'text-amber-600'
-                  }`}>
+                <View style={[styles.ml2, styles.px2, { paddingVertical: 2 }, styles.roundedFull, { backgroundColor: 
+                  section.status === 'completed' ? '#DCFCE7' :
+                  section.status === 'locked' ? '#F3F4F6' : '#FEF3C7'
+                }]}>
+                  <Text style={[styles.textXs, styles.fontMedium, { color:
+                    section.status === 'completed' ? '#16A34A' :
+                    section.status === 'locked' ? '#6B7280' : '#D97706'
+                  }]}>
                     {section.status === 'completed' ? 'Terminé' :
                      section.status === 'locked' ? 'Verrouillé' : 'En cours'}
                   </Text>
@@ -768,61 +897,50 @@ export default function ModuleDetailScreen() {
                       handleLessonPress(lesson);
                     }
                   }}
-                  className={`bg-white rounded-2xl p-4 mb-2 border border-gray-200 ${
-                    isLocked ? 'opacity-60' : ''
-                  }`}
-                  style={{
-                    shadowColor: "#000",
-                    shadowOffset: { width: 0, height: 1 },
-                    shadowOpacity: 0.05,
-                    shadowRadius: 2,
-                    elevation: 1,
-                  }}
+                  style={[styles.moduleCard, isLocked && styles.moduleCardLocked]}
                 >
-                  <View className="flex-row items-center">
-                    <View className="w-10 h-10 rounded-full items-center justify-center mr-4">
+                  <View style={[styles.flexRow, styles.itemsCenter]}>
+                    <View style={[styles.w10, styles.h10, styles.roundedFull, styles.itemsCenter, styles.justifyCenter, styles.mr4]}>
                       {isCompleted ? (
-                        <View className="w-10 h-10 rounded-full bg-green-500 items-center justify-center">
+                        <View style={[styles.w10, styles.h10, styles.roundedFull, styles.bgGreen500, styles.itemsCenter, styles.justifyCenter]}>
                           <AntDesign name="check" size={20} color="white" />
                         </View>
                       ) : isLocked ? (
-                        <View className="w-10 h-10 rounded-full bg-gray-200 items-center justify-center">
+                        <View style={[styles.w10, styles.h10, styles.roundedFull, styles.bgGray200, styles.itemsCenter, styles.justifyCenter]}>
                           <Feather name="lock" size={18} color="#9CA3AF" />
                         </View>
                       ) : (
                         <View
-                          className="w-10 h-10 rounded-full items-center justify-center"
-                          style={{ backgroundColor: `${color}20` }}
+                          style={[styles.w10, styles.h10, styles.roundedFull, styles.itemsCenter, styles.justifyCenter, styles.moduleIconContainer, { backgroundColor: `${color}20` }]}
                         >
                           <Feather name={icon as any} size={18} color={color} />
                         </View>
                       )}
                     </View>
 
-                    <View className="flex-1">
-                      <View className="flex-row items-center mb-1">
-                        <Text className="font-bold text-gray-900 text-sm flex-1">
+                    <View style={styles.flex1}>
+                      <View style={[styles.flexRow, styles.itemsCenter, styles.mb1]}>
+                        <Text style={[styles.fontBold, styles.textGray900, styles.textSm, { flex: 1 }]}>
                           {mod.name}
                         </Text>
                         {isCompleted && (
-                          <View className="bg-green-100 px-2 py-0.5 rounded-full">
-                            <Text className="text-green-600 text-xs font-medium">✓ Terminé</Text>
+                          <View style={[styles.bgGreen100, styles.px2, styles.completedBadge, styles.roundedFull]}>
+                            <Text style={[styles.textGreen600, styles.textXs, styles.fontMedium]}>✓ Terminé</Text>
                           </View>
                         )}
                       </View>
-                      <View className="flex-row items-center">
+                      <View style={[styles.flexRow, styles.itemsCenter]}>
                         <View
-                          className="px-2 py-0.5 rounded-full mr-2"
-                          style={{ backgroundColor: `${color}15` }}
+                          style={[styles.px2, styles.typeBadge, styles.roundedFull, styles.mr2, { backgroundColor: `${color}15` }]}
                         >
-                          <Text className="text-xs" style={{ color }}>{typeLabel}</Text>
+                          <Text style={[styles.textXs, { color }]}>{typeLabel}</Text>
                         </View>
-                        <Text className="text-gray-400 text-xs">{10} XP</Text>
+                        <Text style={[styles.textGray400, styles.textXs]}>{10} XP</Text>
                       </View>
                     </View>
 
                     {!isLocked && !isCompleted && (
-                      <Feather name="chevron-right" size={20} color="#9CA3AF" className="ml-2" />
+                      <Feather name="chevron-right" size={20} color="#9CA3AF" style={styles.ml2} />
                     )}
                   </View>
                 </Pressable>
@@ -831,22 +949,33 @@ export default function ModuleDetailScreen() {
           </View>
         ))}
 
-        <View className="px-5 mt-6 mb-8">
+        <View style={[styles.px5, { marginTop: 24 }, styles.mb8]}>
           <Pressable
             onPress={() => {
               const nextLesson = allLessons.find(l => !l.isCompleted && !l.isLocked);
               if (nextLesson) handleLessonPress(nextLesson);
             }}
-            className="bg-[#0961F5] rounded-2xl py-4 items-center"
-            style={{
-              shadowColor: "#F59E0B",
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.3,
-              shadowRadius: 8,
-              elevation: 4,
-            }}
+            style={[
+              styles.bgBlue,
+              styles.rounded2xl,
+              styles.py4,
+              styles.itemsCenter,
+              {
+                shadowColor: "#F59E0B",
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.3,
+                shadowRadius: 4,
+                elevation: 4,
+              },
+            ]}
           >
-            <Text className="text-white font-bold text-lg">
+            <Text
+              style={[
+                styles.textWhite,
+                styles.fontBold,
+                styles.textLg,
+              ]}
+            >
               {completedCount === 0 ? "Commencer" : "Continuer"}
             </Text>
           </Pressable>

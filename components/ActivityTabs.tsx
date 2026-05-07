@@ -1,7 +1,6 @@
-import React from 'react';
-import { ScrollView, Pressable, Text, View } from 'react-native';
-import { ActivityType } from '@/utils/xpCalculator';
 import { FilterTab } from '@/types/activity';
+import React from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 interface ActivityTabsProps {
   activeTab: FilterTab;
@@ -35,11 +34,11 @@ export const ActivityTabs: React.FC<ActivityTabsProps> = ({
   counts,
 }) => {
   return (
-    <View className="bg-white border-b border-gray-200">
+    <View style={styles.bgwhite_borderb_bordergray200}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 8 }}
+        contentContainerStyle={styles.scrollContent}
       >
         {TABS.map((tab) => {
           const isActive = activeTab === tab.key;
@@ -50,28 +49,32 @@ export const ActivityTabs: React.FC<ActivityTabsProps> = ({
             <Pressable
               key={tab.key}
               onPress={() => onTabChange(tab.key)}
-              className={`px-4 py-2 mr-2 rounded-full ${
-                isActive ? 'bg-[#002366]' : 'bg-gray-100'
-              }`}
+              style={[
+                styles.tabBase,
+                isActive ? styles.tabActive : styles.tabInactive,
+              ]}
             >
-              <View className="flex-row items-center">
+              <View style={styles.flexrow_itemscenter}>
                 <Text
-                  className={`font-medium text-sm ${
-                    isActive ? 'text-white' : 'text-gray-600'
-                  }`}
+                  style={[
+                    styles.tabTextBase,
+                    isActive ? styles.tabTextActive : styles.tabTextInactive,
+                  ]}
                 >
                   {tab.label}
                 </Text>
                 {count > 0 && (
                   <View
-                    className={`ml-2 px-2 py-0.5 rounded-full ${
-                      isActive ? 'bg-white/20' : 'bg-gray-200'
-                    }`}
+                    style={[
+                      styles.countBadgeBase,
+                      isActive ? styles.countBadgeActive : styles.countBadgeInactive,
+                    ]}
                   >
                     <Text
-                      className={`text-xs font-bold ${
-                        isActive ? 'text-white' : 'text-gray-600'
-                      }`}
+                      style={[
+                        styles.countTextBase,
+                        isActive ? styles.countTextActive : styles.countTextInactive,
+                      ]}
                     >
                       {count}
                     </Text>
@@ -87,3 +90,66 @@ export const ActivityTabs: React.FC<ActivityTabsProps> = ({
 };
 
 export default ActivityTabs;
+
+const styles = StyleSheet.create({
+  bgwhite_borderb_bordergray200: {
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderColor: '#E5E7EB'
+  },
+  flexrow_itemscenter: {
+    alignItems: 'center',
+    flexDirection: 'row'
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  // Tab styles
+  tabBase: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginRight: 8,
+    borderRadius: 9999,
+  },
+  tabActive: {
+    backgroundColor: '#002366',
+  },
+  tabInactive: {
+    backgroundColor: '#F3F4F6',
+  },
+  // Text styles
+  tabTextBase: {
+    fontWeight: '500',
+    fontSize: 14,
+  },
+  tabTextActive: {
+    color: '#FFFFFF',
+  },
+  tabTextInactive: {
+    color: '#6B7280',
+  },
+  // Count badge styles
+  countBadgeBase: {
+    marginLeft: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 9999,
+  },
+  countBadgeActive: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  countBadgeInactive: {
+    backgroundColor: '#E5E7EB',
+  },
+  countTextBase: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  countTextActive: {
+    color: '#FFFFFF',
+  },
+  countTextInactive: {
+    color: '#6B7280',
+  },
+});

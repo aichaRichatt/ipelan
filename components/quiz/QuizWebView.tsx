@@ -71,16 +71,202 @@ function makeLoginForm(user: string, pass: string, dest: string): string {
 </body></html>`;
 }
 
-/**
- * QuizWebView - Component to display Moodle quizzes in a WebView
- * 
- * Features:
- * - Auto-authentication using Moodle token
- * - Custom CSS to hide Moodle UI and make it mobile-friendly
- * - JavaScript injection for auto-starting quiz and tracking progress
- * - Loading and error states
- * - Quiz completion detection
- */
+ 
+const styles = StyleSheet.create({
+  bg4a90e2_px6_py3_roundedxl_mb3: {
+    backgroundColor: '#4a90e2',
+    borderRadius: 12,
+    marginBottom: 12,
+    paddingHorizontal: 24,
+    paddingVertical: 12
+  },
+  flex1_bgFAF9F6: {
+    backgroundColor: '#FAF9F6',
+    flex: 1
+  },
+  flex1_itemscenter_justifycente: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 24
+  },
+  flexrow_itemscenter_justifybet: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderColor: '#F3F4F6',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12
+  },
+  h1_bggray200: {
+    backgroundColor: '#E5E7EB',
+    height: 4
+  },
+  hfull_bg58CC02: {
+    backgroundColor: '#58CC02',
+    height: '100%'
+  },
+  mt2_textgray400_textsm_textcen: {
+    color: '#9CA3AF',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center'
+  },
+  mt3_px6_py3: {
+    marginTop: 12,
+    paddingHorizontal: 24,
+    paddingVertical: 12
+  },
+  mt4_textgray500_textcenter: {
+    color: '#6B7280',
+    marginTop: 16,
+    textAlign: 'center'
+  },
+  mt6_bggray200_px6_py3_roundedx: {
+    backgroundColor: '#E5E7EB',
+    borderRadius: 12,
+    marginTop: 24,
+    paddingHorizontal: 24,
+    paddingVertical: 12
+  },
+  p2_ml2: {
+    marginLeft: -8,
+    padding: 8
+  },
+  px6_py3: {
+    paddingHorizontal: 24,
+    paddingVertical: 12
+  },
+  px6_py3_mb2: {
+    marginBottom: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 12
+  },
+  style_1: {
+    width: 40
+  },
+  style_10: {
+    marginLeft: -8,
+    padding: 8
+  },
+  style_11: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderColor: '#F3F4F6',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12
+  },
+  style_12: {
+    backgroundColor: '#FAF9F6',
+    flex: 1
+  },
+  style_2: {
+    color: '#002366',
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  style_3: {
+    marginLeft: -8,
+    padding: 8
+  },
+  style_4: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderColor: '#F3F4F6',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12
+  },
+  style_5: {
+    backgroundColor: '#FAF9F6',
+    flex: 1
+  },
+  style_6: {
+    color: '#6B7280'
+  },
+  style_7: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 24
+  },
+  style_8: {
+    width: 40
+  },
+  style_9: {
+    color: '#002366',
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  textgray400_textsm_textcenter_: {
+    color: '#9CA3AF',
+    fontSize: 14,
+    marginBottom: 24,
+    textAlign: 'center'
+  },
+  textgray500: {
+    color: '#6B7280'
+  },
+  textgray500_fontmedium: {
+    color: '#6B7280',
+    fontWeight: '500'
+  },
+  textgray500_textcenter_mb2: {
+    color: '#6B7280',
+    marginBottom: 8,
+    textAlign: 'center'
+  },
+  textgray700_fontbold: {
+    color: '#374151',
+    fontWeight: '700'
+  },
+  textlg_fontbold_text002366: {
+    color: '#002366',
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  textwhite_fontbold: {
+    color: '#FFFFFF',
+    fontWeight: '700'
+  },
+  textxl_fontbold_textgray900_mb: {
+    color: '#111827',
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center'
+  },
+  w10: {
+    width: 40
+  },
+  w16_h16_roundedfull_bgamber100: {
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    borderRadius: 9999,
+    height: 64,
+    justifyContent: 'center',
+    marginBottom: 16,
+    width: 64
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FAF9F6',
+  },
+});
+
 export default function QuizWebView({
   quizId,
   courseId,
@@ -750,24 +936,24 @@ export default function QuizWebView({
   // Loading screen with timeout message - also wait for source to be ready
   if ((isLoading || !source) && !error) {
     return (
-      <View className="flex-1 bg-[#FAF9F6]">
+      <View style={styles.style_12}>
         {/* Header */}
-        <View className="flex-row items-center justify-between px-4 py-3 bg-white border-b border-gray-100">
-          <Pressable onPress={handleBack} className="p-2 -ml-2">
+        <View style={styles.style_11}>
+          <Pressable onPress={handleBack} style={styles.style_10}>
             <Feather name="arrow-left" size={24} color="#374151" />
           </Pressable>
-          <Text className="text-lg font-bold text-[#002366]">Quiz</Text>
-          <View className="w-10" />
+          <Text style={styles.style_9}>Quiz</Text>
+          <View style={styles.style_8} />
         </View>
         
         {/* Loading indicator */}
-        <View className="flex-1 items-center justify-center px-6">
+        <View style={styles.style_7}>
           <ActivityIndicator size="large" color="#4a90e2" />
-          <Text className="mt-4 text-gray-500 text-center">
+          <Text style={styles.mt4_textgray500_textcenter}>
             {!source ? 'Préparation de l\'authentification...' : 'Chargement du quiz...'}
           </Text>
           {!source && (
-            <Text className="mt-2 text-gray-400 text-sm text-center">
+            <Text style={styles.mt2_textgray400_textsm_textcen}>
               Vérification de votre accès au cours...
             </Text>
           )}
@@ -778,17 +964,17 @@ export default function QuizWebView({
               onPress={() => {
                 webViewRef.current?.reload();
               }}
-              className="mt-6 bg-gray-200 px-6 py-3 rounded-xl"
+              style={styles.mt6_bggray200_px6_py3_roundedx}
             >
-              <Text className="text-gray-700 font-bold">Forcer le rechargement</Text>
+              <Text style={styles.textgray700_fontbold}>Forcer le rechargement</Text>
             </Pressable>
           )}
           
           <Pressable
             onPress={handleBack}
-            className="mt-3 px-6 py-3"
+            style={styles.mt3_px6_py3}
           >
-            <Text className="text-gray-500">Annuler</Text>
+            <Text style={styles.style_6}>Annuler</Text>
           </Pressable>
         </View>
       </View>
@@ -798,28 +984,28 @@ export default function QuizWebView({
   // Error screen
   if (error) {
     return (
-      <View className="flex-1 bg-[#FAF9F6]">
+      <View style={styles.style_5}>
         {/* Header */}
-        <View className="flex-row items-center justify-between px-4 py-3 bg-white border-b border-gray-100">
-          <Pressable onPress={handleBack} className="p-2 -ml-2">
+        <View style={styles.style_4}>
+          <Pressable onPress={handleBack} style={styles.style_3}>
             <Feather name="arrow-left" size={24} color="#374151" />
           </Pressable>
-          <Text className="text-lg font-bold text-[#002366]">Quiz</Text>
-          <View className="w-10" />
+          <Text style={styles.style_2}>Quiz</Text>
+          <View style={styles.style_1} />
         </View>
         
         {/* Error message */}
-        <View className="flex-1 items-center justify-center px-6">
-          <View className="w-16 h-16 rounded-full bg-amber-100 items-center justify-center mb-4">
+        <View style={styles.flex1_itemscenter_justifycente}>
+          <View style={styles.w16_h16_roundedfull_bgamber100}>
             <Feather name="lock" size={32} color="#F59E0B" />
           </View>
-          <Text className="text-xl font-bold text-gray-900 mb-2 text-center">
+          <Text style={styles.textxl_fontbold_textgray900_mb}>
             Accès au quiz
           </Text>
-          <Text className="text-gray-500 text-center mb-2">
+          <Text style={styles.textgray500_textcenter_mb2}>
             {error}
           </Text>
-          <Text className="text-gray-400 text-sm text-center mb-6">
+          <Text style={styles.textgray400_textsm_textcenter_}>
             L&apos;authentification automatique ne fonctionne pas. Vous pouvez ouvrir le quiz dans votre navigateur en vous connectant avec vos identifiants.
           </Text>
           <Pressable
@@ -827,9 +1013,9 @@ export default function QuizWebView({
               const quizUrl = `${MOODLE_BASE_URL}/mod/quiz/view.php?id=${quizId}`;
               Linking.openURL(quizUrl);
             }}
-            className="bg-[#4a90e2] px-6 py-3 rounded-xl mb-3"
+            style={styles.bg4a90e2_px6_py3_roundedxl_mb3}
           >
-            <Text className="text-white font-bold">Ouvrir dans le navigateur</Text>
+            <Text style={styles.textwhite_fontbold}>Ouvrir dans le navigateur</Text>
           </Pressable>
           <Pressable
             onPress={() => {
@@ -837,15 +1023,15 @@ export default function QuizWebView({
               setIsLoading(true);
               webViewRef.current?.reload();
             }}
-            className="px-6 py-3 mb-2"
+            style={styles.px6_py3_mb2}
           >
-            <Text className="text-gray-500 font-medium">Réessayer</Text>
+            <Text style={styles.textgray500_fontmedium}>Réessayer</Text>
           </Pressable>
           <Pressable
             onPress={() => router.back()}
-            className="px-6 py-3"
+            style={styles.px6_py3}
           >
-            <Text className="text-gray-500">Retour au cours</Text>
+            <Text style={styles.textgray500}>Retour au cours</Text>
           </Pressable>
         </View>
       </View>
@@ -853,22 +1039,22 @@ export default function QuizWebView({
   }
 
   return (
-    <View className="flex-1 bg-[#FAF9F6]">
+    <View style={styles.flex1_bgFAF9F6}>
       {/* Header */}
-      <View className="flex-row items-center justify-between px-4 py-3 bg-white border-b border-gray-100">
-        <Pressable onPress={handleBack} className="p-2 -ml-2">
+      <View style={styles.flexrow_itemscenter_justifybet}>
+        <Pressable onPress={handleBack} style={styles.p2_ml2}>
           <Feather name="arrow-left" size={24} color="#374151" />
         </Pressable>
-        <Text className="text-lg font-bold text-[#002366]">
+        <Text style={styles.textlg_fontbold_text002366}>
           {quizState === 'finished' ? 'Résultats' : 'Quiz'}
         </Text>
-        <View className="w-10" />
+        <View style={styles.w10} />
       </View>
       
       {/* Progress indicator */}
       {quizState === 'inprogress' && (
-        <View className="h-1 bg-gray-200">
-          <View className="h-full bg-[#58CC02]" style={{ width: '50%' }} />
+        <View style={styles.h1_bggray200}>
+ <View style={[styles.hfull_bg58CC02, { width: '50%' }]} />
         </View>
       )}
       
@@ -928,16 +1114,3 @@ export default function QuizWebView({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  loadingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#FAF9F6',
-  },
-});

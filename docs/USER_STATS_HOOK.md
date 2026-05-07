@@ -1,296 +1,187 @@
-# useUserStats Hook - Documentation Complète
+# useUserStats — Documentation
 
-## Vue d'ensemble
+> Hook principal pour toutes les statistiques utilisateur.  
+> Fichier : `hooks/useUserStats.ts`
 
-Le hook `useUserStats` est le **point central** pour gérer toutes les statistiques utilisateur :
-- XP (points d'expérience)
-- Streak (jours consécutifs)
-- Badges IPELAN
-- Coins (pièces)
-- Progression des cours
+---
 
-## Architecture de données
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                    DONNÉES UTILISATEUR                        │
-├──────────────────────────────────────────────────────────────┤
-│                                                               │
-│  ┌──────────────┐        ┌──────────────┐        ┌─────────┐  │
-│  │   SQLite     │◀──────▶│  useUserStats │◀──────▶│ Moodle  │  │
-│  │   (Local)    │        │    Hook       │        │  (API)  │  │
-│  └──────────────┘        └──────────────┘        └─────────┘  │
-│         ▲                                              ▲        │
-│         │                                              │        │
-│         └──────────── Sync Bidirectionnel ───────────┘        │
-│                                                               │
-└──────────────────────────────────────────────────────────────┘
-```
-
-## Interface
+## API du hook
 
 ```typescript
-const { 
-  stats,           // Toutes les stats actuelles
-  isLoading,       // Chargement initial
-  isSyncing,       // Sync en cours
-  error,           // Erreur éventuelle
-  refetch,         // Recharger les données
-  syncToMoodle,    // Forcer la sync
-  addXP,           // Ajouter XP
-  updateStreak,    // Mettre à jour streak
-  addBadge,        // Ajouter un badge
-  addCoins,        // Ajouter des coins
+const {
+  stats,          // Toutes les statistiques actuelles
+  isLoading,      // Chargement initial en cours
+  isSyncing,      // Sync Moodle en cours
+  error,          // Message d'erreur éventuel
+  refetch,        // Recharger depuis SQLite + Moodle
+  syncToMoodle,   // Forcer une sync manuelle vers Moodle
+  addXP,          // Ajouter de l'XP
+  updateStreak,   // Mettre à jour le streak du jour
+  addBadge,       // Ajouter un badge (vérifie les doublons)
+  addCoins,       // Ajouter des pièces
 } = useUserStats();
 ```
 
-## Structure des données
+---
 
-### `stats` object
+## Structure de `stats`
 
 ```typescript
-{
-  xp: number;                    // XP total
-  coins: number;                 // Pièces
-  streak: number;                // Jours consécutifs actuels
-  streakBest: number;            // Meilleur streak
-  badges: number;              // Nombre de badges
-  coursesInProgress: number;   // Cours en cours
-  coursesCompleted: number;      // Cours terminés
-  lastActivity: string | null;  // Dernière activité (ISO date)
+interface UserStats {
+  xp: number;             // XP total
+  coins: number;          // Pièces
+  streak: number;         // Jours consécutifs actuels
+  streakBest: number;     // Meilleur streak historique
+  badges: number;         // Nombre de badges gagnés
+  lives: number;          // Vies restantes (0–6)
+  nextHeartTime: string | null; // ISO datetime prochaine regen vie (null si max)
+  coursesInProgress: number;    // Cours en cours (toujours 0 — non implémenté)
+  coursesCompleted: number;     // Cours terminés (toujours 0 — non implémenté)
+  lastActivity: string | null;  // ISO date dernière activité
 }
 ```
 
-## Flux de données
+> `coursesInProgress` et `coursesCompleted` dans `stats` ne sont pas calculés.  
+> Utiliser `useMoodleCourses` pour la progression par cours.
 
-### 1. Chargement initial (loadStats)
+---
 
-```
-1. Charge depuis SQLite (rapide, offline)
-   - XP, coins, streak, badges
-   - Progression des cours
-
-2. Si ONLINE :
-   - Récupère depuis Moodle API
-   - Fusionne les données (max des deux)
-   - Si local > Moodle → push vers Moodle
-   - Si Moodle > local → update SQLite
-
-3. Met à jour le state React
-```
-
-### 2. Modification locale (addXP, addBadge, etc.)
+## Flux de chargement — `loadStats()`
 
 ```
-1. Update SQLite immédiatement
-2. Update state React (UI réactive)
-3. Queue sync vers Moodle (background)
-4. Retry automatique si échec
+1. Lit depuis SQLite (users, user_badges, user_streaks) — instantané, offline
+2. dispatch(updateUser) → Redux immédiat pour l'UI
+
+3. Si online :
+   a. getUserGamificationProfile(token, userId) → Moodle customfields
+   b. Fusion : xp_merged = max(local.xp, moodle.xp)
+               coins_merged = max(local.coins, moodle.coins)
+               streak_merged = max(local.streak, moodle.streak)
+               lives → recalcul via checkAndRegenerateLives(serverLastLivesUpdate)
+   c. Si local > Moodle → syncQueue.syncGamification() → push vers Moodle
+   d. Si Moodle > local → saveUser() → update SQLite
+   e. dispatch(updateUser) → UI mise à jour
+
+4. Si offline : utilise uniquement SQLite
 ```
 
-### 3. Sync manuelle (syncToMoodle)
+---
 
+## Actions disponibles
+
+### `addXP(amount: number)`
+```typescript
+const { addXP } = useUserStats();
+await addXP(50);
+// → SQLite users.ipelan_xp += 50
+// → dispatch(updateUser)
+// → syncQueue.syncGamification()  ← sync Moodle auto
 ```
-1. Sync XP + streak
-2. Sync badges
-3. Retourne succès/échec
+
+### `addCoins(amount: number)`
+```typescript
+await addCoins(10);
+// → SQLite users.coins += 10
+// → dispatch(updateUser)
+// → syncQueue.syncGamification()
 ```
 
-## Utilisation dans les composants
+### `updateStreak()`
+```typescript
+await updateStreak();
+// → Calcule si nouvelle journée (compare last_activity_date)
+// → SQLite user_streaks.current_streak++
+// → dispatch(updateUser)
+// → syncQueue.syncGamification()
+```
 
-### Afficher les stats
+### `addBadge(badgeId: string)`
+```typescript
+await addBadge('learner');
+// → Vérifie hasBadge() → ignore si déjà gagné
+// → saveBadge(userId, badgeId) → SQLite user_badges
+// → dispatch(updateUser)
+// → syncQueue.syncGamification()
+```
 
+### `syncToMoodle()` — sync manuelle
+```typescript
+const success = await syncToMoodle();
+// → verifyUserIdentityBeforeSync(token) — vérification sécurité
+// → syncQueue.syncGamification(userId, token)
+// → retourne true/false
+```
+
+---
+
+## Utilisation dans les écrans
+
+### Afficher les stats (home, progress)
 ```tsx
 function HomeScreen() {
   const { stats, isLoading } = useUserStats();
-  
-  if (isLoading) return <Loading />;
-  
+
   return (
     <View>
-      <Text>XP: {stats.xp}</Text>
-      <Text>Streak: {stats.streak} jours</Text>
-      <Text>Badges: {stats.badges}</Text>
+      <Text>{stats.xp} XP</Text>
+      <Text>{stats.streak} jours 🔥</Text>
+      <Text>{stats.lives}/6 ❤️</Text>
+      <Text>{stats.coins} 🪙</Text>
     </View>
   );
 }
 ```
 
-### Ajouter XP après une activité
-
+### Après une activité (result.tsx)
 ```tsx
-function QuizScreen() {
-  const { addXP } = useUserStats();
-  
-  const handleQuizComplete = async (score: number) => {
-    const xpEarned = score * 10;
-    await addXP(xpEarned);
-    // La sync Moodle se fait automatiquement en background !
-  };
-}
+// result.tsx utilise directement saveActivityScore() + syncAfterActivity()
+// et ne passe pas par useUserStats pour le push de notes.
+// useUserStats est utilisé pour afficher les stats mises à jour.
+
+const { refetch } = useUserStats();
+useFocusEffect(useCallback(() => { refetch(); }, [refetch]));
 ```
 
-### Ajouter un badge
-
+### Pull-to-refresh
 ```tsx
-function ActivityScreen() {
-  const { addBadge } = useUserStats();
-  
-  const checkAndAwardBadges = async () => {
-    // Vérifier si conditions remplies
-    if (completedLessons >= 5) {
-      await addBadge('learner'); // ID du badge
-    }
-  };
-}
+const { refetch, isLoading } = useUserStats();
+<RefreshControl refreshing={isLoading} onRefresh={refetch} />
 ```
 
-### Forcer la sync (pull-to-refresh)
+---
 
-```tsx
-function ProfileScreen() {
-  const { syncToMoodle, isSyncing } = useUserStats();
-  
-  const handleRefresh = async () => {
-    const success = await syncToMoodle();
-    if (success) {
-      Alert.alert('Sync réussie !');
-    }
-  };
-}
+## Sources de données par stat
+
+| Stat | Source SQLite | Source Moodle |
+|------|--------------|---------------|
+| `xp` | `users.ipelan_xp` | `ipelan_xp` customfield |
+| `coins` | `users.coins` | `ipelan_coins` customfield |
+| `streak` | `user_streaks.current_streak` | `ipelan_streak` customfield |
+| `streakBest` | `user_streaks.best_streak` | — |
+| `lives` | `users.lives` (regen calculée) | `ipelan_lives` + `ipelan_last_lives_update` |
+| `nextHeartTime` | Calculé depuis `last_lives_update` | — |
+| `badges` | `COUNT(user_badges WHERE user_id=?)` | `ipelan_badges_count` customfield |
+| `lastActivity` | `users.last_activity` | `ipelan_last_activity` customfield |
+
+---
+
+## Triggers automatiques de refetch
+
+| Événement | Mécanisme |
+|-----------|-----------|
+| Tab progress focus | `useFocusEffect` → `refetchUserStats()` |
+| XP change | `useEffect([userStats.xp])` dans progress/index.tsx |
+| App foreground | `handleForeground()` dans useUserStats → recalcul vies |
+
+---
+
+## Logs de debug
+
 ```
-
-## Stockage SQLite
-
-### Tables utilisées
-
-```sql
--- Stats utilisateur
-CREATE TABLE user_progress (
-  user_id INTEGER PRIMARY KEY,
-  xp INTEGER DEFAULT 0,
-  coins INTEGER DEFAULT 0,
-  streak_current INTEGER DEFAULT 0,
-  streak_best INTEGER DEFAULT 0,
-  last_activity TEXT
-);
-
--- Badges
-CREATE TABLE user_badges (
-  id TEXT PRIMARY KEY,  -- "userId_badgeId"
-  user_id INTEGER,
-  badge_id TEXT,
-  earned_at TEXT,
-  synced_at TEXT
-);
-
--- Progression des cours
-CREATE TABLE course_progress (
-  course_id TEXT PRIMARY KEY,
-  completedActivities INTEGER,
-  totalActivities INTEGER,
-  totalXP INTEGER
-);
+[useUserStats] Local stats loaded: { xp: 150, streak: 5, lives: 4 }
+[useUserStats] Moodle data: { moodleXP: 100, ... }
+[useUserStats] Local > Moodle, pushing to Moodle
+[useUserStats] Moodle > Local, updating SQLite XP: 200
+[useUserStats] Offline mode - using local data
+[useUserStats] App came to foreground, recalculating lives...
 ```
-
-## Sync Moodle
-
-### Champs personnalisés requis
-
-Dans **Administration → Utilisateurs → Champs personnalisés** :
-
-| Shortname | Type | Description |
-|-----------|------|-------------|
-| `ipelan_xp` | Texte | XP total |
-| `ipelan_streak` | Texte | Streak actuel |
-| `ipelan_badges` | Texte | IDs badges (séparés par virgule) |
-| `ipelan_badges_count` | Texte | Nombre de badges |
-| `ipelan_coins` | Texte | Pièces |
-| `ipelan_last_activity` | Texte | Date dernière activité |
-
-### API Moodle utilisées
-
-- `core_user_get_users` - Récupérer les champs perso
-- `core_user_update_users` - Mettre à jour les champs perso
-
-## Gestion des erreurs
-
-### Offline
-- Toutes les modifications sont sauvegardées localement
-- Sync automatique quand la connexion revient
-- Queue avec retry (5 tentatives max)
-
-### Conflict Resolution
-```
-Si Local > Moodle :
-  → Push local vers Moodle
-  
-Si Moodle > Local :
-  → Update SQLite avec Moodle
-  
-Si Égal :
-  → Pas d'action
-```
-
-## Performance
-
-- **Chargement initial** : Depuis SQLite (instantané)
-- **Sync background** : Async, ne bloque pas l'UI
-- **Optimistic updates** : UI mise à jour immédiatement
-
-## Exemple complet
-
-```tsx
-import { useUserStats } from '@/hooks/useUserStats';
-import { calculateNewBadges } from '@/constants/badges';
-
-function GameScreen() {
-  const { 
-    stats, 
-    addXP, 
-    updateStreak, 
-    addBadge,
-    addCoins 
-  } = useUserStats();
-  
-  const handleGameComplete = async (score: number) => {
-    // 1. Calculer les récompenses
-    const xp = score * 10;
-    const coins = Math.floor(score / 2);
-    
-    // 2. Mettre à jour les stats (local + sync auto)
-    await addXP(xp);
-    await addCoins(coins);
-    await updateStreak();
-    
-    // 3. Vérifier les nouveaux badges
-    const progressData = {
-      completedLessons: stats.coursesCompleted,
-      currentStreak: stats.streak,
-      totalXP: stats.xp + xp,
-      quizPassed: 1,
-      perfectScores: score === 100 ? 1 : 0,
-      daysActive: 1
-    };
-    
-    const newBadges = calculateNewBadges(
-      progressData, 
-      [] // badges existants
-    );
-    
-    for (const badge of newBadges) {
-      await addBadge(badge.id);
-    }
-    
-    // 4. Tout est sync automatiquement vers Moodle !
-  };
-}
-```
-
-## Points clés
-
-✅ **Offline-first** - Fonctionne sans internet  
-✅ **Sync automatique** - Background, sans interruption  
-✅ **Réactif** - UI se met à jour immédiatement  
-✅ **Résilient** - Retry automatique, pas de perte de données  
-✅ **Simple** - API propre et facile à utiliser  

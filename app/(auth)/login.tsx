@@ -1,47 +1,55 @@
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
-import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useSelector } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
+import { clearError } from "../../services/redux/slices/authSlice";
 import { useLogin } from "../../hooks/useLogin";
 import { useLoginValidation } from "../../hooks/useLoginValidation";
 import { RootState } from "../../services/redux/store";
 
 export default function Login() {
   const router = useRouter();
+  const dispatch = useDispatch();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  
+
   const { errors, validateAll } = useLoginValidation();
   const { login } = useLogin();
-  const { isLoading, error: reduxError } = useSelector((state: RootState) => state.auth);
+  const { isLoading, error: reduxError } = useSelector(
+    (state: RootState) => state.auth
+  );
 
   const handleLogin = async () => {
     if (validateAll(username, password)) {
       try {
-         await login(username, password);
+        await login(username, password);
       } catch (err: any) {
         const errMsg = err.message || "";
         const errMsgLower = errMsg.toLowerCase();
-        // Check for both English and Arabic error messages
-        const isInvalidLogin = 
-          errMsgLower.includes("invalid") || 
-          errMsgLower.includes("incorrect") ||
-          errMsgLower.includes("wrong") ||
-          errMsgLower.includes("failed") ||
-          errMsgLower.includes("error") ||
-          errMsgLower.includes("incorrect login") ||
-           errMsg.includes("خطأ") ||
+        const isInvalidLogin =
+          errMsg === "invalidlogin" ||
+          errMsgLower.includes("identifiants incorrects") ||
+          errMsgLower.includes("aucun compte trouvé") ||
           errMsg.includes("اسم المستخدم") ||
           errMsg.includes("كلمة المرور");
-        
+
         if (isInvalidLogin) {
           Alert.alert(
             "Identifiants incorrects",
             "Email ou mot de passe incorrect. Veuillez réessayer.",
             [
               { text: "S'inscrire", onPress: () => router.replace("/(auth)/signup") },
-              { text: "Réessayer", style: "cancel" }
+              { text: "Réessayer", style: "cancel" },
             ]
           );
         } else {
@@ -51,90 +59,197 @@ export default function Login() {
     }
   };
 
-  const goToSignup = () => {
-    router.replace("/(auth)/signup");
-  };
-
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
-        <View className="mb-8 items-center">
-          <Text className="text-3xl font-bold text-primary">Connexion</Text>
-          <Text className="text-gray-500 mt-2">Bienvenue sur Ipelan</Text>
+
+        {/* En-tête */}
+        <View style={styles.headerContainer}>
+          <Text style={styles.title}>Connexion</Text>
+          <Text style={styles.subtitle}>Bienvenue sur Ipelan</Text>
         </View>
 
+        {/* Message d'erreur */}
         {(reduxError || errors.username || errors.password) && (
-          <View className="bg-red-100 p-3 rounded-lg mb-4 w-full">
-            <Text className="text-red-600 text-center">
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>
               {reduxError || errors.username || errors.password}
             </Text>
           </View>
         )}
 
-        <View className="flex-row justify-center items-center bg-gray-50 border border-gray-200 h-14 rounded-xl my-2 px-3 w-full">
+        {/* Champ email */}
+        <View style={styles.inputRow}>
           <Image
-            source={require('../../assets/images/email.png')}
-            className="p-3 m-1 h-5 w-5"
-            style={{ resizeMode: 'contain' }}
+            source={require("../../assets/images/email.png")}
+            style={styles.inputIcon}
+            resizeMode="contain"
           />
           <TextInput
             value={username}
             autoCapitalize="none"
             keyboardType="email-address"
-            className="flex-1 h-full ml-2"
+            style={styles.textInput}
             placeholder="Email"
+            placeholderTextColor="#9CA3AF"
             underlineColorAndroid="transparent"
-            onChangeText={setUsername}
+            onChangeText={(text) => {
+              setUsername(text);
+              dispatch(clearError());
+            }}
           />
         </View>
 
-        <View className="flex-row justify-center items-center bg-gray-50 border border-gray-200 h-14 rounded-xl my-2 px-3 w-full">
+        {/* Champ mot de passe */}
+        <View style={styles.inputRow}>
           <Image
-            source={require('../../assets/images/lock.png')}
-            className="p-3 m-1 h-5 w-5"
-            style={{ resizeMode: 'contain' }}
+            source={require("../../assets/images/lock.png")}
+            style={styles.inputIcon}
+            resizeMode="contain"
           />
           <TextInput
-            style={{ flex: 1 }}
-            className="ml-2 h-full"
+            style={styles.textInput}
             placeholder="Mot de passe"
+            placeholderTextColor="#9CA3AF"
             secureTextEntry
             underlineColorAndroid="transparent"
             value={password}
-            onChangeText={setPassword}
+            onChangeText={(text) => {
+              setPassword(text);
+              dispatch(clearError());
+            }}
           />
         </View>
 
-        <Pressable onPress={() => router.push("/(auth)/resetpassword")} style={{ width: '100%', marginBottom: 15 }}>
-          <Text style={{ color: '#0062FF', textAlign: 'right', fontWeight: '500' }}>Mot de passe oublié ?</Text>
+        {/* Mot de passe oublié */}
+        <Pressable
+          onPress={() => router.push("/(auth)/resetpassword" as any)}
+          style={styles.forgotPasswordContainer}
+        >
+          <Text style={styles.forgotPasswordText}>Mot de passe oublié ?</Text>
         </Pressable>
 
-        <View className="w-full mt-4">
+        {/* Bouton connexion */}
+        <View style={styles.loginButtonContainer}>
           {isLoading ? (
-            <ActivityIndicator size="large" color="#0000ff" />
+            <ActivityIndicator size="large" color="#0062FF" />
           ) : (
-            <Pressable 
-              onPress={handleLogin}
-              className="bg-blue-600 p-4 rounded-xl items-center"
-            >
-              <Text className="text-white font-bold text-lg">Se connecter</Text>
+            <Pressable onPress={handleLogin} style={styles.loginButton}>
+              <Text style={styles.loginButtonText}>Se connecter</Text>
             </Pressable>
           )}
         </View>
 
-        <Pressable onPress={goToSignup} className="mt-6">
-          <Text className="text-blue-600">Vous n`avez pas de compte ? S`inscrire</Text>
+        {/* Lien inscription */}
+        <Pressable
+          onPress={() => router.replace("/(auth)/signup")}
+          style={styles.signupLink}
+        >
+          <Text style={styles.signupLinkText}>
+            {"Vous n'avez pas de compte ? "}
+            <Text style={styles.signupLinkBold}>S'inscrire</Text>
+          </Text>
         </Pressable>
+
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    padding: 20,
+  safeArea: {
     flex: 1,
+    backgroundColor: '#ffffff',
+  },
+  container: {
+    flex: 1,
+    paddingHorizontal: 24,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  headerContainer: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  title: {
+    fontSize: 30,
+    fontWeight: 'bold',
+    color: '#002366',
+  },
+  subtitle: {
+    fontSize: 15,
+    color: '#6B7280',
+    marginTop: 8,
+  },
+  errorContainer: {
+    backgroundColor: '#FEE2E2',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 16,
+    width: '100%',
+  },
+  errorText: {
+    color: '#DC2626',
+    textAlign: 'center',
+    fontSize: 14,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    height: 56,
+    marginVertical: 8,
+    paddingHorizontal: 12,
+    width: '100%',
+  },
+  inputIcon: {
+    width: 20,
+    height: 20,
+    marginRight: 10,
+  },
+  textInput: {
+    flex: 1,
+    fontSize: 15,
+    color: '#111827',
+  },
+  forgotPasswordContainer: {
+    width: '100%',
+    marginTop: 4,
+    marginBottom: 16,
+    alignItems: 'flex-end',
+  },
+  forgotPasswordText: {
+    color: '#0062FF',
+    fontWeight: '500',
+    fontSize: 14,
+  },
+  loginButtonContainer: {
+    width: '100%',
+    marginTop: 8,
+  },
+  loginButton: {
+    backgroundColor: '#0062FF',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  loginButtonText: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 17,
+  },
+  signupLink: {
+    marginTop: 24,
+  },
+  signupLinkText: {
+    color: '#6B7280',
+    fontSize: 14,
+  },
+  signupLinkBold: {
+    color: '#0062FF',
+    fontWeight: '600',
   },
 });

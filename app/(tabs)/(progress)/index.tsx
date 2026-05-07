@@ -1,7 +1,7 @@
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
 import { useLives } from "../../../hooks/useLives";
@@ -43,7 +43,7 @@ export default function ProgressScreen() {
       try {
         const response = await getEnrolledCoursesByTimeline(token);
         if (response?.courses) {
-          const visible = response.courses.filter((c: any) => c.visible !== false);
+          const visible = response.courses.filter((c: any) => c.visible !== false && c.id > 0);
           setCourseInputs(visible.map((c: any) => ({ id: c.id, name: c.fullname || c.shortname })));
         }
       } catch (err) {
@@ -53,24 +53,32 @@ export default function ProgressScreen() {
     fetchCourses();
   }, [token]);
 
-  const { 
-    progressList, 
-    loading, 
-    totalXP, 
-    totalCompleted, 
-    currentStreak, 
+  const {
+    progressList,
+    loading,
+    totalXP,
+    totalCompleted,
+    currentStreak,
     badgesWithStatus,
     reload
   } = useMoodleCourses(courseInputs, user?.id || null);
 
-  // ✅ Recharger les données quand XP change (après une activité)
+  // Reload stats and course data every time this screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      refetchUserStats();
+      reload();
+    }, [refetchUserStats, reload])
+  );
+
+  //  Recharger les données quand XP change (après une activité)
   useEffect(() => {
     if (userStats.xp > 0) {
       reload();
     }
   }, [userStats.xp, reload]);
 
-  // ✅ Utiliser ?? pour ne pas masquer les 0 légitimes (ex. 0 vies, 0 pièces)
+  //  Utiliser ?? pour ne pas masquer les 0 légitimes (ex. 0 vies, 0 pièces)
   const displayXP = userStats.xp ?? totalXP;
   const displayCoins = userStats.coins ?? coins;
   const displayLives = userStats.lives ?? lives;
@@ -87,132 +95,138 @@ export default function ProgressScreen() {
     : 0;
 
   return (
-    <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top']}>
-      <View className="px-5 py-4 flex-row justify-between items-center">
-        <Text className="text-lg font-black tracking-wider uppercase text-gray-800">PROGRESSION</Text>
-        <Pressable className="p-2" onPress={() => router.push("/(settings)/index")}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>PROGRESSION</Text>
+        <Pressable style={styles.settingsButton} onPress={() => router.push("/(settings)/index")}>
           <Feather name="settings" size={22} color="#374151" />
         </Pressable>
       </View>
 
-      <ScrollView 
+      <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl refreshing={loading && progressList.length > 0} onRefresh={reload} />
         }
       >
-        <View className="px-5 mb-6">
-          <View className="bg-white rounded-3xl p-6 border border-gray-200" style={{
-            shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2,
-          }}>
-            <View className="flex-row items-center mb-6 justify-between">
-              <View className="flex-row items-center">
-                <View className="w-16 h-16 rounded-full bg-[#002366] items-center justify-center mr-4">
-                  <Text className="text-white text-2xl font-bold">
+        {/* Profile card */}
+        <View style={styles.section}>
+          <View style={styles.card}>
+            <View style={styles.profileRow}>
+              <View style={styles.profileLeft}>
+                <View style={styles.avatarCircle}>
+                  <Text style={styles.avatarText}>
                     {user?.firstname?.charAt(0) || user?.username?.charAt(0) || 'U'}
                   </Text>
                 </View>
                 <View>
-                  <Text className="text-xl font-bold text-gray-900">{user?.fullname || user?.username || "Utilisateur"}</Text>
-                  <Text className="text-gray-500 text-sm">Niveau {level} - {title}</Text>
+                  <Text style={styles.profileName}>{user?.fullname || user?.username || "Utilisateur"}</Text>
+                  <Text style={styles.profileLevel}>Niveau {level} - {title}</Text>
                 </View>
               </View>
-              
-              <View className="items-end">
-                <View className="flex-row items-center mb-1 bg-red-50 px-3 py-1 rounded-full">
-                  <Text className="text-red-500 font-bold mr-1">{displayLives}/{maxLives}</Text>
-                  <Text className="text-lg">❤️</Text>
+
+              <View style={styles.profileRight}>
+                <View style={styles.livesTag}>
+                  <Text style={styles.livesText}>{displayLives}/{maxLives}</Text>
+                  <Text style={styles.heartEmoji}>❤️</Text>
                 </View>
                 {heartCountdown && (
-                  <View className="flex-row items-center mb-1 bg-red-50 px-3 py-1 rounded-full">
+                  <View style={styles.countdownTag}>
                     <Feather name="clock" size={11} color="#EF4444" />
-                    <Text className="text-red-400 font-semibold text-[10px] ml-1">+1 dans {heartCountdown}</Text>
+                    <Text style={styles.countdownText}>+1 dans {heartCountdown}</Text>
                   </View>
                 )}
-                <View className="flex-row items-center bg-yellow-50 px-3 py-1 rounded-full">
-                  <Text className="text-yellow-600 font-bold mr-1">{displayCoins}</Text>
-                  <Text className="text-lg">🪙</Text>
+                <View style={styles.coinsTag}>
+                  <Text style={styles.coinsText}>{displayCoins}</Text>
+                  <Text style={styles.coinEmoji}>🪙</Text>
                 </View>
               </View>
             </View>
 
             {canBuyLife && (
-              <Pressable 
+              <Pressable
                 onPress={buyLife}
                 disabled={isBuying}
-                className={`flex-row items-center justify-center py-2 rounded-xl mb-4 ${isBuying ? 'bg-gray-300' : 'bg-[#002366]'}`}
+                style={[styles.buyLifeButton, isBuying && styles.buyLifeButtonDisabled]}
               >
-                <Text className="text-white font-bold mr-2">Acheter 1 vie ({lifeCost} 🪙)</Text>
+                <Text style={styles.buyLifeButtonText}>Acheter 1 vie ({lifeCost} 🪙)</Text>
                 <Text>❤️</Text>
               </Pressable>
             )}
-            
-            {error && <Text className="text-red-500 text-center mb-4 text-sm font-bold">{error}</Text>}
 
-            <View className="flex-row justify-between pt-2 border-t border-gray-100">
-              <View className="items-center flex-1">
-                <View className="w-12 h-12 rounded-full bg-yellow-100 items-center justify-center mb-2">
+            {error && <Text style={styles.errorText}>{error}</Text>}
+
+            <View style={styles.statsRow}>
+              <View style={styles.statItem}>
+                <View style={styles.statIconYellow}>
                   <Feather name="star" size={24} color="#F59E0B" />
                 </View>
-                <Text className="text-xl font-bold text-gray-900">{displayXP}</Text>
-                <Text className="text-xs text-gray-500">XP Total</Text>
+                <Text style={styles.statValue}>{displayXP}</Text>
+                <Text style={styles.statLabel}>XP Total</Text>
               </View>
-              <View className="w-px bg-gray-200" />
-              <View className="items-center flex-1">
-                <View className="w-12 h-12 rounded-full bg-green-100 items-center justify-center mb-2">
+              <View style={styles.statDivider} />
+              <View style={styles.statItem}>
+                <View style={styles.statIconGreen}>
                   <AntDesign name="trophy" size={24} color="#10B981" />
                 </View>
-                <Text className="text-xl font-bold text-gray-900">{level}</Text>
-                <Text className="text-xs text-gray-500">Niveau</Text>
+                <Text style={styles.statValue}>{level}</Text>
+                <Text style={styles.statLabel}>Niveau</Text>
               </View>
-              <View className="w-px bg-gray-200" />
-              <View className="items-center flex-1">
-                <View className="w-12 h-12 rounded-full bg-orange-100 items-center justify-center mb-2">
-                  <Text className="text-xl">🔥</Text>
+              <View style={styles.statDivider} />
+              <View style={styles.statItem}>
+                <View style={styles.statIconOrange}>
+                  <Text style={styles.fireEmoji}>🔥</Text>
                 </View>
-                <Text className="text-xl font-bold text-gray-900">{displayStreak}</Text>
-                <Text className="text-xs text-gray-500">Jours</Text>
+                <Text style={styles.statValue}>{displayStreak}</Text>
+                <Text style={styles.statLabel}>Jours</Text>
               </View>
             </View>
           </View>
         </View>
 
-        <View className="px-5 mb-6">
-          <Text className="text-lg font-bold text-gray-900 mb-4">Statistiques des Cours</Text>
-          <View className="bg-white rounded-3xl p-4 border border-gray-200">
+        {/* Course stats */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Statistiques des Cours</Text>
+          <View style={styles.card}>
             {loading && progressList.length === 0 ? (
-              <View className="items-center py-4"><ActivityIndicator size="small" color="#002366" /></View>
+              <View style={styles.loadingContainer}><ActivityIndicator size="small" color="#002366" /></View>
             ) : (
               <>
-                <View className="flex-row justify-center items-end mb-4 pb-2">
-                  <View className="items-center mx-2">
-                    <View className="w-12 h-12 rounded-full bg-gray-200 items-center justify-center mb-2"><Feather name="book" size={20} color="#6B7280" /></View>
-                    <Text className="text-xs font-bold text-gray-700">Total</Text>
-                    <Text className="text-lg font-bold text-gray-900">{progressList.length}</Text>
-                    <Text className="text-xs text-gray-500">cours</Text>
-                    <View className="w-12 h-8 bg-gray-300 rounded-t-md" />
+                <View style={styles.barsRow}>
+                  <View style={styles.barItem}>
+                    <View style={styles.barIconGray}>
+                      <Feather name="book" size={20} color="#6B7280" />
+                    </View>
+                    <Text style={styles.barLabel}>Total</Text>
+                    <Text style={styles.barValue}>{progressList.length}</Text>
+                    <Text style={styles.barSubLabel}>cours</Text>
+                    <View style={styles.barGray} />
                   </View>
-                  <View className="items-center mx-2 z-10">
-                    <Text className="text-lg mb-1">✨</Text>
-                    <View className="w-14 h-14 rounded-full bg-green-100 items-center justify-center mb-2"><AntDesign name="check" size={24} color="#10B981" /></View>
-                    <Text className="text-xs font-bold text-gray-900">Terminé</Text>
-                    <Text className="text-lg font-bold text-green-600">{completedCourses}</Text>
-                    <View className="w-14 h-10 bg-green-300 rounded-t-md" />
+                  <View style={[styles.barItem, { zIndex: 10 }]}>
+                    <Text style={styles.sparkle}>✨</Text>
+                    <View style={styles.barIconGreen}>
+                      <AntDesign name="check" size={24} color="#10B981" />
+                    </View>
+                    <Text style={[styles.barLabel, { fontWeight: 'bold', color: '#111827' }]}>Terminé</Text>
+                    <Text style={[styles.barValue, { color: '#10B981' }]}>{completedCourses}</Text>
+                    <View style={styles.barGreen} />
                   </View>
-                  <View className="items-center mx-2">
-                    <View className="w-12 h-12 rounded-full bg-blue-100 items-center justify-center mb-2"><Ionicons name="play" size={20} color="#4a90e2" /></View>
-                    <Text className="text-xs font-bold text-gray-700">En cours</Text>
-                    <Text className="text-lg font-bold text-blue-600">{inProgressCourses}</Text>
-                    <View className="w-12 h-6 bg-blue-200 rounded-t-md" />
+                  <View style={styles.barItem}>
+                    <View style={styles.barIconBlue}>
+                      <Ionicons name="play" size={20} color="#4a90e2" />
+                    </View>
+                    <Text style={styles.barLabel}>En cours</Text>
+                    <Text style={[styles.barValue, { color: '#4a90e2' }]}>{inProgressCourses}</Text>
+                    <View style={styles.barBlue} />
                   </View>
                 </View>
-                <View className="border-t border-gray-100 pt-4 mt-2">
-                  <View className="flex-row justify-between items-center mb-2">
-                    <Text className="text-sm font-medium text-gray-700">Progression globale</Text>
-                    <Text className="text-sm font-bold text-gray-900">{globalProgress}%</Text>
+                <View style={styles.progressSection}>
+                  <View style={styles.progressLabelRow}>
+                    <Text style={styles.progressLabel}>Progression globale</Text>
+                    <Text style={styles.progressValue}>{globalProgress}%</Text>
                   </View>
-                  <View className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                    <View className="h-full bg-[#4a90e2] rounded-full" style={{ width: `${globalProgress}%` }} />
+                  <View style={styles.progressBarBg}>
+                    <View style={[styles.progressBarFill, { width: `${globalProgress}%` }]} />
                   </View>
                 </View>
               </>
@@ -220,65 +234,70 @@ export default function ProgressScreen() {
           </View>
         </View>
 
-        <View className="px-5 mb-6">
-          <Text className="text-lg font-bold text-gray-900 mb-4">Badges & Récompenses</Text>
+        {/* Badges */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Badges & Récompenses</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View className="flex-row">
+            <View style={styles.badgesRow}>
               {badgesWithStatus.map(badge => (
-                <View key={badge.id} className={`rounded-2xl p-4 mr-3 items-center w-24 ${badge.earned ? 'bg-white border border-gray-200' : 'bg-gray-100 opacity-50'}`} style={{ shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 }}>
-                  <Text className="text-3xl mb-2">{badge.icon}</Text>
-                  <Text className="text-xs font-bold text-gray-900 text-center" numberOfLines={2}>{badge.name}</Text>
-                  {badge.earned ? <View className="mt-1"><Feather name="check-circle" size={12} color="#10B981" /></View> : <Feather name="lock" size={12} color="#9CA3AF" className="mt-1" />}
+                <View key={badge.id} style={[styles.badgeCard, !badge.earned && styles.badgeCardLocked]}>
+                  <Text style={styles.badgeIcon}>{badge.icon}</Text>
+                  <Text style={styles.badgeName} numberOfLines={2}>{badge.name}</Text>
+                  {badge.earned
+                    ? <View style={styles.badgeCheck}><Feather name="check-circle" size={12} color="#10B981" /></View>
+                    : <Feather name="lock" size={12} color="#9CA3AF" style={styles.badgeCheck} />
+                  }
                 </View>
               ))}
             </View>
           </ScrollView>
         </View>
 
-        <View className="px-5 mb-6">
-          <Text className="text-lg font-bold text-gray-900 mb-4">Aperçu</Text>
-          <View className="bg-white rounded-2xl p-4 border border-gray-200 mb-3">
+        {/* Overview */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Aperçu</Text>
+          <View style={styles.overviewCard}>
             {(() => {
               const lessonsTarget = Math.max(25, Math.ceil((totalCompleted + 1) / 25) * 25);
               return (
                 <>
-                  <View className="flex-row justify-between items-center mb-2">
-                    <Text className="text-sm font-medium text-gray-700">Leçons complétées</Text>
-                    <Text className="text-sm font-bold text-gray-900">{totalCompleted}</Text>
+                  <View style={styles.progressLabelRow}>
+                    <Text style={styles.progressLabel}>Leçons complétées</Text>
+                    <Text style={styles.progressValue}>{totalCompleted}</Text>
                   </View>
-                  <View className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                    <View className="h-full bg-[#4a90e2] rounded-full" style={{ width: `${Math.min((totalCompleted / lessonsTarget) * 100, 100)}%` }} />
+                  <View style={styles.progressBarBg}>
+                    <View style={[styles.progressBarFill, { width: `${Math.min((totalCompleted / lessonsTarget) * 100, 100)}%` }]} />
                   </View>
-                  <Text className="text-[10px] text-gray-400 mt-1">Prochain objectif : {lessonsTarget} leçons</Text>
+                  <Text style={styles.overviewHint}>Prochain objectif : {lessonsTarget} leçons</Text>
                 </>
               );
             })()}
           </View>
-          <View className="bg-white rounded-2xl p-4 border border-gray-200 mb-3">
-            <View className="flex-row justify-between items-center mb-2">
-              <Text className="text-sm font-medium text-gray-700">Cours terminés</Text>
-              <Text className="text-sm font-bold text-gray-900">{completedCourses}/{progressList.length || 0}</Text>
+          <View style={styles.overviewCard}>
+            <View style={styles.progressLabelRow}>
+              <Text style={styles.progressLabel}>Cours terminés</Text>
+              <Text style={styles.progressValue}>{completedCourses}/{progressList.length || 0}</Text>
             </View>
-            <View className="h-2 bg-gray-200 rounded-full overflow-hidden">
-              <View className="h-full bg-[#10B981] rounded-full" style={{ width: `${progressList.length > 0 ? (completedCourses / progressList.length) * 100 : 0}%` }} />
+            <View style={styles.progressBarBg}>
+              <View style={[styles.progressBarGreen, { width: `${progressList.length > 0 ? (completedCourses / progressList.length) * 100 : 0}%` }]} />
             </View>
           </View>
-          <View className="bg-white rounded-2xl p-4 border border-gray-200">
+          <View style={styles.overviewCard}>
             {(() => {
               const coinsTarget = Math.max(100, Math.ceil((displayCoins + 1) / 100) * 100);
               return (
                 <>
-                  <View className="flex-row justify-between items-center mb-2">
-                    <View className="flex-row items-center">
-                      <Text className="text-sm font-medium text-gray-700">Pièces d&apos;or</Text>
-                      <Text className="ml-1">🪙</Text>
+                  <View style={styles.progressLabelRow}>
+                    <View style={styles.coinsLabelRow}>
+                      <Text style={styles.progressLabel}>Pièces d&apos;or</Text>
+                      <Text style={styles.coinEmojiSmall}>🪙</Text>
                     </View>
-                    <Text className="text-sm font-bold text-yellow-600">{displayCoins}</Text>
+                    <Text style={styles.coinsValueText}>{displayCoins}</Text>
                   </View>
-                  <View className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                    <View className="h-full bg-yellow-400 rounded-full" style={{ width: `${Math.min((displayCoins / coinsTarget) * 100, 100)}%` }} />
+                  <View style={styles.progressBarBg}>
+                    <View style={[styles.progressBarYellow, { width: `${Math.min((displayCoins / coinsTarget) * 100, 100)}%` }]} />
                   </View>
-                  <Text className="text-[10px] text-gray-400 mt-1">Prochain objectif : {coinsTarget} pièces</Text>
+                  <Text style={styles.overviewHint}>Prochain objectif : {coinsTarget} pièces</Text>
                 </>
               );
             })()}
@@ -288,3 +307,395 @@ export default function ProgressScreen() {
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#FAF9F6',
+  },
+  header: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    color: '#1f2937',
+  },
+  settingsButton: {
+    padding: 8,
+  },
+  section: {
+    paddingHorizontal: 20,
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#111827',
+    marginBottom: 16,
+  },
+  card: {
+    backgroundColor: '#ffffff',
+    borderRadius: 24,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  profileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 24,
+    justifyContent: 'space-between',
+  },
+  profileLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatarCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#002366',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
+  avatarText: {
+    color: '#ffffff',
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  profileName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#111827',
+  },
+  profileLevel: {
+    color: '#6b7280',
+    fontSize: 14,
+  },
+  profileRight: {
+    alignItems: 'flex-end',
+  },
+  livesTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    backgroundColor: '#fef2f2',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  livesText: {
+    color: '#ef4444',
+    fontWeight: 'bold',
+    marginRight: 4,
+  },
+  heartEmoji: {
+    fontSize: 18,
+  },
+  countdownTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    backgroundColor: '#fef2f2',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  countdownText: {
+    color: '#f87171',
+    fontWeight: '600',
+    fontSize: 10,
+    marginLeft: 4,
+  },
+  coinsTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fefce8',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  coinsText: {
+    color: '#ca8a04',
+    fontWeight: 'bold',
+    marginRight: 4,
+  },
+  coinEmoji: {
+    fontSize: 18,
+  },
+  buyLifeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: 12,
+    marginBottom: 16,
+    backgroundColor: '#002366',
+  },
+  buyLifeButtonDisabled: {
+    backgroundColor: '#d1d5db',
+  },
+  buyLifeButtonText: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    marginRight: 8,
+  },
+  errorText: {
+    color: '#ef4444',
+    textAlign: 'center',
+    marginBottom: 16,
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f3f4f6',
+  },
+  statItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statIconYellow: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#fef3c7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  statIconGreen: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#d1fae5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  statIconOrange: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#ffedd5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  fireEmoji: {
+    fontSize: 20,
+  },
+  statValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#111827',
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+  },
+  statDivider: {
+    width: 1,
+    backgroundColor: '#e5e7eb',
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  barsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    marginBottom: 16,
+    paddingBottom: 8,
+  },
+  barItem: {
+    alignItems: 'center',
+    marginHorizontal: 8,
+  },
+  barIconGray: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#e5e7eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  barIconGreen: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#d1fae5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  barIconBlue: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#dbeafe',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  sparkle: {
+    fontSize: 18,
+    marginBottom: 4,
+  },
+  barLabel: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#374151',
+  },
+  barValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#111827',
+  },
+  barSubLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+  },
+  barGray: {
+    width: 48,
+    height: 32,
+    backgroundColor: '#d1d5db',
+    borderTopLeftRadius: 4,
+    borderTopRightRadius: 4,
+  },
+  barGreen: {
+    width: 56,
+    height: 40,
+    backgroundColor: '#6ee7b7',
+    borderTopLeftRadius: 4,
+    borderTopRightRadius: 4,
+  },
+  barBlue: {
+    width: 48,
+    height: 24,
+    backgroundColor: '#bfdbfe',
+    borderTopLeftRadius: 4,
+    borderTopRightRadius: 4,
+  },
+  progressSection: {
+    borderTopWidth: 1,
+    borderTopColor: '#f3f4f6',
+    paddingTop: 16,
+    marginTop: 8,
+  },
+  progressLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  progressLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#374151',
+  },
+  progressValue: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#111827',
+  },
+  progressBarBg: {
+    height: 8,
+    backgroundColor: '#e5e7eb',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#4a90e2',
+    borderRadius: 4,
+  },
+  progressBarGreen: {
+    height: '100%',
+    backgroundColor: '#10B981',
+    borderRadius: 4,
+  },
+  progressBarYellow: {
+    height: '100%',
+    backgroundColor: '#facc15',
+    borderRadius: 4,
+  },
+  badgesRow: {
+    flexDirection: 'row',
+  },
+  badgeCard: {
+    borderRadius: 16,
+    padding: 16,
+    marginRight: 12,
+    alignItems: 'center',
+    width: 96,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  badgeCardLocked: {
+    backgroundColor: '#f3f4f6',
+    opacity: 0.5,
+  },
+  badgeIcon: {
+    fontSize: 28,
+    marginBottom: 8,
+  },
+  badgeName: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#111827',
+    textAlign: 'center',
+  },
+  badgeCheck: {
+    marginTop: 4,
+  },
+  overviewCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    marginBottom: 12,
+  },
+  overviewHint: {
+    fontSize: 10,
+    color: '#9ca3af',
+    marginTop: 4,
+  },
+  coinsLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  coinEmojiSmall: {
+    marginLeft: 4,
+  },
+  coinsValueText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#ca8a04',
+  },
+});

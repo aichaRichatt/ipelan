@@ -10,19 +10,8 @@ export function useSyncStatus() {
   const [status, setStatus] = useState<SyncStatus>('synced');
 
   useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
-
-    const setup = async () => {
-      unsubscribe = syncQueue.subscribe(setStatus);
-    };
-
-    setup();
-
-    return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
-    };
+    const unsubscribe = syncQueue.subscribe(setStatus);
+    return () => { unsubscribe(); };
   }, []);
 
   // Retourne un objet avec l'icône et la couleur appropriées

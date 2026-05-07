@@ -4,12 +4,11 @@ import { agreeToSitePolicy, enrolUserInCourse, getMoodleProfile, getMoodleSiteIn
 import { loginFailure, loginStart, loginSuccess, logout } from '../services/redux/slices/authSlice';
 import { RootState } from '../services/redux/store';
 import { createTables, getDBConnection, saveUser } from '../services/storage/db-service';
-import { removeCredentials, removeToken, removeUserData, saveCredentials, saveToken, saveUserData } from '../services/storage/tokenStorage';
+import { removeCredentials, removeToken, removeUserData, saveToken, saveUserData } from '../services/storage/tokenStorage';
+import { syncQueue } from '../services/sync/syncQueue';
 import { IPELANUser } from '../types';
 
 const IS_DEV = process.env.NODE_ENV === "development";
-
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export function useLogin() {
   const dispatch = useDispatch();
@@ -17,7 +16,7 @@ export function useLogin() {
   const user = useSelector((state: RootState) => state.auth.user);
   const token = useSelector((state: RootState) => state.auth.token);
 
-  const login = async (username: string, password: string, email?: string, firstName?: string, lastName?: string, city?: string) => {
+  const login = async (username: string, password: string, email?: string, firstName?: string, lastName?: string) => {
     dispatch(loginStart());
 
     try {
@@ -25,31 +24,28 @@ export function useLogin() {
 
       const tokenData = await moodleLogin(username, password);
       const authToken = tokenData.token;
+      const resolvedUsername = (tokenData as any).resolvedUsername || username;
 
       if (!authToken) {
         throw new Error("Identifiants incorrects");
       }
 
-      if (IS_DEV) console.log("[useLogin] Token received, fetching site info...");
+      if (IS_DEV) console.log("[useLogin] Token received, fetching site info + profile in parallel...");
 
-      const siteInfo = await getMoodleSiteInfo(authToken);
+      // ✅ OPTIMISATION : siteInfo et profile en parallèle — économise ~500ms
+      const [siteInfo, profileData] = await Promise.all([
+        getMoodleSiteInfo(authToken),
+        getMoodleProfile(authToken, resolvedUsername, "username").catch(() => null),
+      ]);
 
       if (!siteInfo || !siteInfo.userid) {
         throw new Error("Compte utilisateur introuvable");
       }
 
-      if (IS_DEV) console.log("[useLogin] Site info received, userid:", siteInfo.userid);
-
       const moodleId = siteInfo.userid;
-      let moodleUser: any = null;
+      let moodleUser: any = profileData?.[0] || (profileData as any)?.users?.[0] || null;
 
-      try {
-        const profileData = await getMoodleProfile(authToken, moodleId, "id");
-        moodleUser = profileData?.[0] || profileData?.users?.[0] || null;
-        if (IS_DEV) console.log("[useLogin] Profile fetched:", moodleUser ? "found" : "not found");
-      } catch (profileErr) {
-        if (IS_DEV) console.warn("[useLogin] Profile fetch failed:", profileErr);
-      }
+      if (IS_DEV) console.log("[useLogin] Site info + profile received. userId:", moodleId, "profile:", moodleUser ? "found" : "not found");
 
       let finalFirstName = "";
       let finalLastName = "";
@@ -85,65 +81,51 @@ export function useLogin() {
         }
       }
 
-      if (IS_DEV) console.log("[useLogin] Final name:", finalFirstName, finalLastName, "| firstName:", firstName, "| lastName:", lastName);
+      if (IS_DEV) console.log("[useLogin] Final name:", finalFirstName, finalLastName);
 
       const needProfileUpdate = !moodleUser?.firstname || !moodleUser?.lastname;
 
       if (needProfileUpdate && finalFirstName && finalLastName) {
-        try {
-          if (IS_DEV) console.log("[useLogin] Updating profile...");
-          await updateUserProfile(moodleId, finalFirstName, finalLastName);
-          await sleep(1000);
-
-          const updatedProfile = await getMoodleProfile(authToken, moodleId, "id");
-          const updatedUser = updatedProfile?.[0] || updatedProfile?.users?.[0] || null;
-
-          if (updatedUser?.firstname) finalFirstName = updatedUser.firstname.trim();
-          if (updatedUser?.lastname) finalLastName = updatedUser.lastname.trim();
-
-          if (IS_DEV) console.log("[useLogin] Profile updated:", finalFirstName, finalLastName);
-        } catch (updateErr) {
+        // ✅ OPTIMISATION : fire-and-forget — pas besoin d'attendre ni de re-fetcher
+        updateUserProfile(moodleId, finalFirstName, finalLastName).catch((updateErr) => {
           if (IS_DEV) console.warn("[useLogin] Profile update failed:", updateErr);
-        }
+        });
       }
 
+      // ✅ OPTIMISATION : fire-and-forget — pas besoin d'attendre l'accord de politique
       if (siteInfo?.policyagreed === 0) {
-        try {
-          await agreeToSitePolicy(authToken, moodleId);
-          await sleep(500);
-        } catch (policyErr) {
+        agreeToSitePolicy(authToken).catch((policyErr) => {
           if (IS_DEV) console.warn("[useLogin] Policy agree failed:", policyErr);
-        }
+        });
       }
 
-      // L'inscription au cours est désormais déclenchée à la sélection
-      // langue+grade (voir hooks/useMoodleCourses.ts) — plus de courseId
-      // codé en dur ici. Si les préférences sont déjà présentes, on tente
-      // une inscription dans le premier cours adapté.
-      try {
-        const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
-        const prefsStr = await AsyncStorage.getItem('@ipelan_preferences');
-        if (prefsStr) {
-          const { language, grade } = JSON.parse(prefsStr);
-          if (language && grade && authToken) {
-            const { getFirstCourseFromLanguageAndGrade } = await import('../services/api/courseService');
-            const targetCourse = await getFirstCourseFromLanguageAndGrade(authToken, language, Number(grade));
-            if (targetCourse?.id) {
-              await enrolUserInCourse(moodleId, targetCourse.id);
+      // ✅ OPTIMISATION : fire-and-forget — l'enrôlement n'a pas besoin de bloquer la navigation
+      (async () => {
+        try {
+          const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+          const prefsStr = await AsyncStorage.getItem('@ipelan_preferences');
+          if (prefsStr) {
+            const { language, grade } = JSON.parse(prefsStr);
+            if (language && grade && authToken) {
+              const { getFirstCourseFromLanguageAndGrade } = await import('../services/api/courseService');
+              const targetCourse = await getFirstCourseFromLanguageAndGrade(authToken, language, Number(grade));
+              if (targetCourse?.id) {
+                await enrolUserInCourse(moodleId, targetCourse.id);
+              }
             }
           }
+        } catch (enrolErr) {
+          if (IS_DEV) console.warn("[useLogin] Course enrollment skipped/failed:", enrolErr);
         }
-      } catch (enrolErr) {
-        if (IS_DEV) console.warn("[useLogin] Course enrollment skipped/failed:", enrolErr);
-      }
+      })();
 
       const finalEmail = moodleUser?.email || siteInfo?.email || email || username;
       const finalUsername = moodleUser?.username || siteInfo?.username || username;
       const finalFullName = `${finalFirstName} ${finalLastName}`.trim() || finalUsername;
       const finalAvatar = moodleUser?.profileimageurl || siteInfo?.userpictureurl || "";
 
-      const getCustomField = (user: any, shortname: string) => {
-        return user?.customfields?.find((f: any) => f.shortname === shortname)?.value;
+      const getCustomField = (u: any, shortname: string) => {
+        return u?.customfields?.find((f: any) => f.shortname === shortname)?.value;
       };
 
       const parsedXp = parseInt(getCustomField(moodleUser, 'ipelan_xp') || '0', 10);
@@ -152,7 +134,6 @@ export function useLogin() {
       const parsedStreak = parseInt(getCustomField(moodleUser, 'ipelan_streak') || '0', 10);
       const parsedLastActivity = getCustomField(moodleUser, 'ipelan_last_activity') || '';
       const parsedBadge = getCustomField(moodleUser, 'ipelan_badges');
-      const parsedBadgeCount = parseInt(getCustomField(moodleUser, 'ipelan_badges_count') || '0', 10);
 
       const userData: IPELANUser = {
         id: moodleId,
@@ -167,14 +148,10 @@ export function useLogin() {
         streak: parsedStreak,
         badges: parsedBadge ? [parsedBadge] : [],
         avatar: finalAvatar,
-        token: authToken
       };
-
-      if (IS_DEV) console.log("[useLogin] Saving user data:", JSON.stringify(userData));
 
       await saveToken(authToken);
       await saveUserData(userData);
-      await saveCredentials(username, password);
 
       try {
         const db = await getDBConnection();
@@ -195,7 +172,6 @@ export function useLogin() {
             token: authToken
           });
 
-          // Save badges from Moodle to SQLite
           if (parsedBadge) {
             const { saveBadge, initBadgeTable } = await import('../services/storage/badge-storage');
             await initBadgeTable();
@@ -213,7 +189,6 @@ export function useLogin() {
 
       dispatch(loginSuccess({ user: userData, token: authToken }));
 
-      await sleep(300);
       router.replace("/(tabs)/(home)" as any);
 
       return { user: userData, token: authToken };
@@ -227,6 +202,7 @@ export function useLogin() {
 
   const logoutUser = async () => {
     try {
+      if (user?.id) syncQueue.clearJobs(user.id);
       await removeToken();
       await removeUserData();
       await removeCredentials();

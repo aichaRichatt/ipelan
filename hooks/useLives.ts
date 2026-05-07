@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { buyLife as buyLifeService, getGlobalGamificationStats, LIFE_COST, MAX_LIVES } from '../services/gamification/gamificationService';
 import { updateUser } from '../services/redux/slices/authSlice';
@@ -10,19 +10,26 @@ export const useLives = (onPurchaseSuccess?: () => void) => {
   const user = useSelector((state: RootState) => state.auth.user);
   const token = useSelector((state: RootState) => state.auth.token);
 
+  const onPurchaseSuccessRef = useRef(onPurchaseSuccess);
+  useEffect(() => {
+    onPurchaseSuccessRef.current = onPurchaseSuccess;
+  });
+
   const [isBuying, setIsBuying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // ✅ Recharger automatiquement quand le profil Redux est modifie (apres une activite)
   useEffect(() => {
     if (!user?.id) return;
-    // Petit delai pour laisser SQLite se mettre a jour d'abord
+    const capturedLives = user.lives;
+    const capturedCoins = user.coins;
     const timer = setTimeout(() => {
       getGlobalGamificationStats(user.id).then(stats => {
-        dispatch(updateUser({
-          lives: stats.lives,
-          coins: stats.coins,
-        }));
+        if (stats.lives !== capturedLives || stats.coins !== capturedCoins) {
+          dispatch(updateUser({
+            lives: stats.lives,
+            coins: stats.coins,
+          }));
+        }
       }).catch(() => { });
     }, 100);
     return () => clearTimeout(timer);
@@ -52,10 +59,7 @@ export const useLives = (onPurchaseSuccess?: () => void) => {
           coins: result.newCoins
         }));
 
-        // ✅ Recharger les stats pour mettre a jour toutes les pages
-        if (onPurchaseSuccess) {
-          onPurchaseSuccess();
-        }
+        onPurchaseSuccessRef.current?.();
 
         // Déclencher la synchro Moodle
         if (token) {

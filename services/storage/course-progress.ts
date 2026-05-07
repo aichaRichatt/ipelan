@@ -23,7 +23,8 @@ export const saveCourseProgress = async (
   completedActivities: number,
   totalActivities: number,
   totalXP: number,
-  bestScore: number = 0
+  bestScore: number = 0,
+  userId: number = 0
 ): Promise<void> => {
   const maxRetries = 3;
   let lastError: any = null;
@@ -34,16 +35,17 @@ export const saveCourseProgress = async (
       const now = new Date().toISOString();
 
       await db.runAsync(
-        `INSERT INTO course_progress (course_id, completed_activities, total_activities, total_xp, best_score, last_activity_at, synced_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(course_id) DO UPDATE SET
+        `INSERT INTO course_progress (user_id, course_id, completed_activities, total_activities, total_xp, best_score, last_activity_at, synced_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, course_id) DO UPDATE SET
            completed_activities = MAX(excluded.completed_activities, completed_activities),
-           total_activities = MAX(excluded.total_activities, total_activities),
+           total_activities = CASE WHEN excluded.total_activities > 0 THEN excluded.total_activities ELSE total_activities END,
            total_xp = MAX(excluded.total_xp, total_xp),
            best_score = MAX(excluded.best_score, best_score),
            last_activity_at = excluded.last_activity_at,
            synced_at = excluded.synced_at`,
         [
+          userId,
           courseId,
           completedActivities,
           totalActivities,
@@ -73,7 +75,8 @@ export const saveCourseProgress = async (
 };
 
 export const getCourseProgress = async (
-  courseId: number
+  courseId: number,
+  userId?: number
 ): Promise<CourseProgressData | null> => {
   try {
     const db = await getDBConnection();
@@ -86,8 +89,10 @@ export const getCourseProgress = async (
       last_activity_at: string;
       synced_at: string;
     }>(
-      'SELECT * FROM course_progress WHERE course_id = ?',
-      [courseId]
+      userId != null
+        ? 'SELECT * FROM course_progress WHERE course_id = ? AND user_id = ?'
+        : 'SELECT * FROM course_progress WHERE course_id = ?',
+      userId != null ? [courseId, userId] : [courseId]
     );
 
     if (!result) return null;
@@ -109,7 +114,8 @@ export const getCourseProgress = async (
 
 // Get progress percentage for completion check
 export const getCourseProgressForCompletion = async (
-  courseId: number
+  courseId: number,
+  userId?: number
 ): Promise<{ progress: number; completed: number; total: number } | null> => {
   try {
     const db = await getDBConnection();
@@ -117,15 +123,17 @@ export const getCourseProgressForCompletion = async (
       completed_activities: number;
       total_activities: number;
     }>(
-      'SELECT completed_activities, total_activities FROM course_progress WHERE course_id = ?',
-      [courseId]
+      userId != null
+        ? 'SELECT completed_activities, total_activities FROM course_progress WHERE course_id = ? AND user_id = ?'
+        : 'SELECT completed_activities, total_activities FROM course_progress WHERE course_id = ?',
+      userId != null ? [courseId, userId] : [courseId]
     );
 
     if (!result) return null;
 
     const completed = result.completed_activities || 0;
     const total = result.total_activities || 0;
-    // ✅ Progression capée à 100% maximum
+    //  Progression capée à 100% maximum
     const progress = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
 
     return { progress, completed, total };
@@ -135,7 +143,7 @@ export const getCourseProgressForCompletion = async (
   }
 };
 
-export const getAllCourseProgress = async (): Promise<CourseProgressData[]> => {
+export const getAllCourseProgress = async (userId?: number): Promise<CourseProgressData[]> => {
   try {
     const db = await getDBConnection();
     const results = await db.getAllAsync<{
@@ -146,7 +154,12 @@ export const getAllCourseProgress = async (): Promise<CourseProgressData[]> => {
       best_score: number;
       last_activity_at: string;
       synced_at: string;
-    }>('SELECT * FROM course_progress ORDER BY last_activity_at DESC');
+    }>(
+      userId != null
+        ? 'SELECT * FROM course_progress WHERE user_id = ? ORDER BY last_activity_at DESC'
+        : 'SELECT * FROM course_progress ORDER BY last_activity_at DESC',
+      userId != null ? [userId] : []
+    );
 
     return results.map((r) => ({
       courseId: r.course_id,
@@ -165,7 +178,8 @@ export const getAllCourseProgress = async (): Promise<CourseProgressData[]> => {
 
 export const updateCourseProgressFromActivities = async (
   courseId: number,
-  totalActivities: number
+  totalActivities: number,
+  userId?: number
 ): Promise<CourseProgressStats> => {
   try {
     const db = await getDBConnection();
@@ -174,21 +188,26 @@ export const updateCourseProgressFromActivities = async (
       total_xp: number;
       best_score: number;
     }>(
-      `SELECT 
-        SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed,
-        SUM(xp_earned) as total_xp,
-        MAX(best_score) as best_score
-       FROM activity_progress WHERE course_id = ?`,
-      [courseId]
+      userId != null
+        ? `SELECT
+            SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed,
+            SUM(xp_earned) as total_xp,
+            MAX(best_score) as best_score
+           FROM activity_progress WHERE course_id = ? AND user_id = ?`
+        : `SELECT
+            SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed,
+            SUM(xp_earned) as total_xp,
+            MAX(best_score) as best_score
+           FROM activity_progress WHERE course_id = ?`,
+      userId != null ? [courseId, userId] : [courseId]
     );
 
     const completed = result?.completed || 0;
     const totalXP = result?.total_xp || 0;
     const bestScore = result?.best_score || 0;
-    // ✅ Progression capée à 100% maximum
     const progressPercent = totalActivities > 0 ? Math.min(100, Math.round((completed / totalActivities) * 100)) : 0;
 
-    await saveCourseProgress(courseId, completed, totalActivities, totalXP, bestScore);
+    await saveCourseProgress(courseId, completed, totalActivities, totalXP, bestScore, userId ?? 0);
 
     return {
       progressPercent,
@@ -271,7 +290,8 @@ export function getCompletableModules(sections: any[]): CompletableModule[] {
 export async function calculateCourseProgress(
   courseId: number,
   sections: any[],
-  moodleCompletionStatuses?: { cmid: number; completionstate: number }[]
+  moodleCompletionStatuses?: { cmid: number; completionstate: number }[],
+  userId?: number
 ): Promise<{
   completed: number;
   total: number;
@@ -297,8 +317,10 @@ export async function calculateCourseProgress(
   try {
     const db = await getDBConnection();
     const rows = await db.getAllAsync<{ module_id: number; is_completed: number }>(
-      `SELECT module_id, is_completed FROM activity_progress WHERE course_id = ? AND is_completed = 1`,
-      [courseId]
+      userId != null
+        ? `SELECT module_id, is_completed FROM activity_progress WHERE course_id = ? AND user_id = ? AND is_completed = 1`
+        : `SELECT module_id, is_completed FROM activity_progress WHERE course_id = ? AND is_completed = 1`,
+      userId != null ? [courseId, userId] : [courseId]
     );
     rows.forEach(r => localMap.set(r.module_id, true));
   } catch {

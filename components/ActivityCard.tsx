@@ -1,8 +1,8 @@
-import React from 'react';
-import { Pressable, Text, View } from 'react-native';
-import { Feather } from '@expo/vector-icons';
 import { ActivityWithProgress } from '@/types/activity';
 import { ActivityType } from '@/utils/xpCalculator';
+import { Feather } from '@expo/vector-icons';
+import React from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 interface ActivityCardProps {
   activity: ActivityWithProgress;
@@ -72,59 +72,58 @@ export const ActivityCard: React.FC<ActivityCardProps> = ({
   return (
     <Pressable
       onPress={onPress}
-      className="bg-white rounded-2xl p-4 mb-3 border border-gray-200"
-      style={{
+      style={[styles.bgwhite_rounded2xl_p4_mb3_bord,{
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.05,
         shadowRadius: 4,
         elevation: 2,
-      }}
+      }]}
+      
     >
-      <View className="flex-row items-center">
+      <View style={styles.style_4}>
         <View
-          className="w-12 h-12 rounded-xl items-center justify-center"
-          style={{ backgroundColor: `${color}15` }}
-        >
+          style={[styles.w12_h12_roundedxl_itemscenter_ ,{ backgroundColor: `${color}15` }]}
+         >
           <Feather name={icon as any} size={24} color={color} />
         </View>
         
-        <View className="flex-1 ml-3">
-          <View className="flex-row items-center">
-            <Text className="text-gray-900 font-semibold flex-1" numberOfLines={1}>
+        <View style={styles.flex1_ml3}>
+          <View style={styles.flexrow_itemscenter}>
+            <Text style={styles.textgray900_fontsemibold_flex1} numberOfLines={1}>
               {title}
             </Text>
             {isCompleted && (
-              <View className="ml-2 bg-green-100 px-2 py-0.5 rounded-full">
-                <Text className="text-green-700 text-xs font-medium">Terminé</Text>
+              <View style={styles.style_3}>
+                <Text style={styles.style_2}>Terminé</Text>
               </View>
             )}
           </View>
           
-          <View className="flex-row items-center mt-1">
-            <View className="bg-gray-100 px-2 py-0.5 rounded-md">
-              <Text className="text-gray-600 text-xs">{label}</Text>
+          <View style={styles.flexrow_itemscenter_mt1}>
+            <View style={styles.bggray100_px2_py05_roundedmd}>
+              <Text style={styles.textgray600_textxs}>{label}</Text>
             </View>
-            <View className="flex-row items-center ml-2">
+            <View style={styles.flexrow_itemscenter_ml2}>
               <Feather name="star" size={12} color="#F59E0B" />
-              <Text className="text-yellow-700 text-xs font-medium ml-1">{xp} XP</Text>
+              <Text style={styles.textyellow700_textxs_fontmediu}>{xp} XP</Text>
             </View>
             {scoreDisplay && (
-        <View className="ml-2 bg-green-100 px-2 py-0.5 rounded-md">
-          <Text className="text-green-700 text-xs font-medium">★ {scoreDisplay}</Text>
+        <View style={styles.ml2_bggreen100_px2_py05_rounde}>
+          <Text style={styles.textgreen700_textxs_fontmedium}>★ {scoreDisplay}</Text>
         </View>
       )}
           </View>
         </View>
         
-        <View className="items-end">
+        <View style={styles.itemsend}>
           {mastery ? (
-            <View className="items-center">
-              <Text className="text-lg">{mastery.emoji}</Text>
-              <Text className="text-xs font-medium" style={{ color: mastery.color }}>
+            <View style={styles.itemscenter}>
+              <Text style={styles.textlg}>{mastery.emoji}</Text>
+              <Text style={[styles.textxs_fontmedium,{ color: mastery.color }]} >
                 {mastery.label}
               </Text>
-              <Text className="text-gray-400 text-xs">{scorePercent}%</Text>
+              <Text style={styles.textgray400_textxs}>{scorePercent}%</Text>
             </View>
           ) : (
             <Feather name="chevron-right" size={20} color="#9CA3AF" />
@@ -133,16 +132,15 @@ export const ActivityCard: React.FC<ActivityCardProps> = ({
       </View>
       
       {progress && progress.totalScore > 0 && (
-        <View className="mt-3 pt-3 border-t border-gray-100">
-          <View className="flex-row items-center justify-between mb-1">
-            <Text className="text-gray-500 text-xs">Progression</Text>
-            <Text className="text-gray-500 text-xs">{progress.bestScore}/{progress.totalScore}</Text>
+        <View style={styles.mt3_pt3_bordert_bordergray100}>
+          <View style={styles.flexrow_itemscenter_justifybet}>
+            <Text style={styles.style_1}>Progression</Text>
+            <Text style={styles.textgray500_textxs}>{progress.bestScore}/{progress.totalScore}</Text>
           </View>
-          <View className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+          <View style={styles.h15_bggray100_roundedfull_over}>
             <View
-              className="h-full rounded-full"
-              style={{ width: `${scorePercent}%`, backgroundColor: color }}
-            />
+              style={[styles.hfull_roundedfull,{ width: `${scorePercent}%`, backgroundColor: color }]}
+             />
           </View>
         </View>
       )}
@@ -151,3 +149,131 @@ export const ActivityCard: React.FC<ActivityCardProps> = ({
 };
 
 export default ActivityCard;
+
+const styles = StyleSheet.create({
+  bggray100_px2_py05_roundedmd: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 6,
+    paddingHorizontal: 8
+  },
+  bgwhite_rounded2xl_p4_mb3_bord: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 16
+  },
+  flex1_ml3: {
+    flex: 1,
+    marginLeft: 12
+  },
+  flexrow_itemscenter: {
+    alignItems: 'center',
+    flexDirection: 'row'
+  },
+  flexrow_itemscenter_justifybet: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4
+  },
+  flexrow_itemscenter_ml2: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    marginLeft: 8
+  },
+  flexrow_itemscenter_mt1: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    marginTop: 4
+  },
+  h15_bggray100_roundedfull_over: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 9999,
+    overflow: 'hidden'
+  },
+  hfull_roundedfull: {
+    borderRadius: 9999,
+    height: '100%'
+  },
+  itemscenter: {
+    alignItems: 'center'
+  },
+  itemsend: {
+    alignItems: 'flex-end'
+  },
+  ml2_bggreen100_px2_py05_rounde: {
+    backgroundColor: '#DCFCE7',
+    borderRadius: 6,
+    marginLeft: 8,
+    paddingHorizontal: 8
+  },
+  mt3_pt3_bordert_bordergray100: {
+    borderColor: '#F3F4F6',
+    borderTopWidth: 1,
+    marginTop: 12,
+    paddingTop: 12
+  },
+  style_1: {
+    color: '#6B7280',
+    fontSize: 12
+  },
+  style_2: {
+    color: '#15803D',
+    fontSize: 12,
+    fontWeight: '500'
+  },
+  style_3: {
+    backgroundColor: '#DCFCE7',
+    borderRadius: 9999,
+    marginLeft: 8,
+    paddingHorizontal: 8
+  },
+  style_4: {
+    alignItems: 'center',
+    flexDirection: 'row'
+  },
+  textgray400_textxs: {
+    color: '#9CA3AF',
+    fontSize: 12
+  },
+  textgray500_textxs: {
+    color: '#6B7280',
+    fontSize: 12
+  },
+  textgray600_textxs: {
+    color: '#4B5563',
+    fontSize: 12
+  },
+  textgray900_fontsemibold_flex1: {
+    color: '#111827',
+    flex: 1,
+    fontWeight: '600'
+  },
+  textgreen700_textxs_fontmedium: {
+    color: '#15803D',
+    fontSize: 12,
+    fontWeight: '500'
+  },
+  textlg: {
+    fontSize: 18
+  },
+  textxs_fontmedium: {
+    fontSize: 12,
+    fontWeight: '500'
+  },
+  textyellow700_textxs_fontmediu: {
+    color: '#A16207',
+    fontSize: 12,
+    fontWeight: '500',
+    marginLeft: 4
+  },
+  w12_h12_roundedxl_itemscenter_: {
+    alignItems: 'center',
+    borderRadius: 12,
+    height: 48,
+    justifyContent: 'center',
+    width: 48
+  },
+});

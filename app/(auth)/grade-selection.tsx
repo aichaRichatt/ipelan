@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Grade } from "../../types";
 
@@ -29,6 +29,129 @@ const GRADES: GradeOption[] = [
   { value: 5, label: "5ème année", description: "Maîtriser", icon: "award" },
   { value: 6, label: "6ème année", description: "Expert", icon: "award" },
 ];
+
+const styles = StyleSheet.create({
+  absolute_top2_right2_w6_h6_rou: {
+    alignItems: 'center',
+    backgroundColor: '#002366',
+    borderRadius: 9999,
+    height: 24,
+    justifyContent: 'center',
+    position: 'absolute',
+    width: 24
+  },
+  flex1: {
+    flex: 1
+  },
+  flex1_bgFAF9F6: {
+    backgroundColor: '#FAF9F6',
+    flex: 1
+  },
+  flex1_itemscenter_mr10: {
+    alignItems: 'center',
+    flex: 1
+  },
+  flex1_px6_pt4: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 16
+  },
+  flexrow_flexwrap_justifybetwee: {
+    flexDirection: 'row',
+    justifyContent: 'space-between'
+  },
+  flexrow_itemscenter_mb8: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    marginBottom: 32
+  },
+  mb6: {
+    marginBottom: 24
+  },
+  p2_ml2: {
+    marginLeft: -8,
+    padding: 8
+  },
+  text3xl_fontbold_textgray900_m: {
+    color: '#111827',
+    fontSize: 30,
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center'
+  },
+  textcenter_textgray500_textsm_: {
+    color: '#6B7280',
+    fontSize: 14,
+    marginTop: 12,
+    textAlign: 'center'
+  },
+  textgray500_textbase_mb8_textc: {
+    color: '#6B7280',
+    fontSize: 16,
+    marginBottom: 32,
+    textAlign: 'center'
+  },
+  textwhite_fontbold_textlg: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  textxl_fontbold_textgray900: {
+    color: '#111827',
+    fontSize: 20,
+    fontWeight: '700'
+  },
+  textxs_textgray500_textcenter: {
+    color: '#6B7280',
+    fontSize: 12,
+    textAlign: 'center'
+  },
+  buttonBase: {
+    alignItems: 'center',
+    borderRadius: 16,
+    paddingVertical: 16
+  },
+  buttonActive: {
+    backgroundColor: '#002366'
+  },
+  buttonDisabled: {
+    backgroundColor: '#D1D5DB'
+  },
+  gradeCard: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 16,
+    borderWidth: 2,
+    padding: 20,
+    width: '48%'
+  },
+  gradeCardSelected: {
+    backgroundColor: '#EFF6FF',
+    borderColor: '#002366'
+  },
+  iconContainer: {
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 9999,
+    height: 56,
+    justifyContent: 'center',
+    marginBottom: 12,
+    width: 56
+  },
+  iconContainerSelected: {
+    backgroundColor: '#002366'
+  },
+  gradeLabel: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 4
+  },
+  gradeLabelSelected: {
+    color: '#002366'
+  },
+});
 
 export default function GradeSelectionScreen() {
   const router = useRouter();
@@ -67,26 +190,26 @@ export default function GradeSelectionScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-[#FAF9F6]">
-      <View className="flex-1 px-6 pt-4">
-        <View className="flex-row items-center mb-8">
-          <Pressable onPress={handleBack} className="p-2 -ml-2">
+    <SafeAreaView style={styles.flex1_bgFAF9F6}>
+      <View style={styles.flex1_px6_pt4}>
+        <View style={styles.flexrow_itemscenter_mb8}>
+          <Pressable onPress={handleBack} style={styles.p2_ml2}>
             <Feather name="arrow-left" size={24} color="#1F2937" />
           </Pressable>
-          <View className="flex-1 items-center mr-10">
-            <Text className="text-xl font-bold text-gray-900">Ton niveau</Text>
+          <View style={styles.flex1_itemscenter_mr10}>
+            <Text style={styles.textxl_fontbold_textgray900}>Ton niveau</Text>
           </View>
         </View>
 
-        <Text className="text-3xl font-bold text-gray-900 mb-2 text-center">
+        <Text style={styles.text3xl_fontbold_textgray900_m}>
           Quelle est ta classe ?
         </Text>
-        <Text className="text-gray-500 text-base mb-8 text-center">
+        <Text style={styles.textgray500_textbase_mb8_textc}>
           Choisis ton année scolaire pour adapter les contenus
         </Text>
 
-        <View className="flex-1">
-          <View className="flex-row flex-wrap justify-between">
+        <View style={styles.flex1}>
+          <View style={styles.flexrow_flexwrap_justifybetwee}>
             {GRADES.map((grade, index) => (
               <GradeCard
                 key={grade.value}
@@ -99,21 +222,22 @@ export default function GradeSelectionScreen() {
           </View>
         </View>
 
-        <View className="mb-6">
+        <View style={styles.mb6}>
           <Pressable
             onPress={handleContinue}
             disabled={!selectedGrade || isLoading}
-            className={`rounded-2xl py-4 items-center ${
-              selectedGrade && !isLoading ? 'bg-[#002366]' : 'bg-gray-300'
-            }`}
+            style={[
+              styles.buttonBase,
+              (selectedGrade && !isLoading) ? styles.buttonActive : styles.buttonDisabled
+            ]}
           >
-            <Text className="text-white font-bold text-lg">
+            <Text style={styles.textwhite_fontbold_textlg}>
               {isLoading ? 'Chargement...' : 'Continuer'}
             </Text>
           </Pressable>
           
           {selectedGrade && (
-            <Text className="text-center text-gray-500 text-sm mt-3">
+            <Text style={styles.textcenter_textgray500_textsm_}>
               Tu as choisi : {GRADES.find(g => g.value === selectedGrade)?.label}
             </Text>
           )}
@@ -134,10 +258,9 @@ function GradeCard({ grade, isSelected, onPress, style }: GradeCardProps) {
   return (
     <Pressable
       onPress={onPress}
-      className={`w-[48%] rounded-2xl p-5 items-center border-2 ${
-        isSelected ? 'border-[#002366] bg-blue-50' : 'border-gray-200 bg-white'
-      }`}
       style={[
+        styles.gradeCard,
+        isSelected && styles.gradeCardSelected,
         {
           shadowColor: '#000',
           shadowOffset: { width: 0, height: 2 },
@@ -149,9 +272,10 @@ function GradeCard({ grade, isSelected, onPress, style }: GradeCardProps) {
       ]}
     >
       <View
-        className={`w-14 h-14 rounded-full items-center justify-center mb-3 ${
-          isSelected ? 'bg-[#002366]' : 'bg-gray-100'
-        }`}
+        style={[
+          styles.iconContainer,
+          isSelected && styles.iconContainerSelected
+        ]}
       >
         <Feather
           name={grade.icon as any}
@@ -160,17 +284,18 @@ function GradeCard({ grade, isSelected, onPress, style }: GradeCardProps) {
         />
       </View>
       <Text
-        className={`text-base font-bold mb-1 ${
-          isSelected ? 'text-[#002366]' : 'text-gray-900'
-        }`}
+        style={[
+          styles.gradeLabel,
+          isSelected && styles.gradeLabelSelected
+        ]}
       >
         {grade.label}
       </Text>
-      <Text className="text-xs text-gray-500 text-center">
+      <Text style={styles.textxs_textgray500_textcenter}>
         {grade.description}
       </Text>
       {isSelected && (
-        <View className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#002366] items-center justify-center">
+        <View style={styles.absolute_top2_right2_w6_h6_rou}>
           <Feather name="check" size={14} color="#FFFFFF" />
         </View>
       )}

@@ -25,34 +25,51 @@ export const REGEN_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 h
  *
  * Le reliquat de temps (ex. 18h écoulées → +1 vie + 6h en banque) est
  * conservé pour le prochain cycle via `last_lives_update`.
+ *
+ *  VERSION MULTI-DEVICE : Prend en compte le timestamp serveur si plus récent
  */
-export const checkAndRegenerateLives = async (userId: number): Promise<{ newLives: number; regenerated: boolean }> => {
+export const checkAndRegenerateLives = async (
+  userId: number,
+  serverLastLivesUpdate?: string | null
+): Promise<{ newLives: number; regenerated: boolean; livesAdded: number }> => {
   const db = await getDBConnection();
   const user = await db.getFirstAsync<{ lives: number; last_lives_update: string | null }>(
     `SELECT lives, last_lives_update FROM users WHERE id = ?`,
     [userId]
   );
 
-  if (!user) return { newLives: 0, regenerated: false };
-  if (user.lives >= MAX_LIVES) return { newLives: MAX_LIVES, regenerated: false };
+  if (!user) return { newLives: 0, regenerated: false, livesAdded: 0 };
+  if (user.lives >= MAX_LIVES) return { newLives: MAX_LIVES, regenerated: false, livesAdded: 0 };
 
   const now = Date.now();
 
-  // Si last_lives_update n'a jamais été initialisé, on l'initialise maintenant
-  // sans rendre de vie (le compteur de 12h démarre).
-  if (!user.last_lives_update) {
+  //   DETERMINER LE TIMESTAMP LE PLUS RÉCENT (local vs serveur)
+  const localTimestamp = user.last_lives_update;
+  const serverTimestamp = serverLastLivesUpdate;
+
+  let mostRecentTimestamp = localTimestamp;
+  if (serverTimestamp && localTimestamp) {
+    const serverTime = new Date(serverTimestamp).getTime();
+    const localTime = new Date(localTimestamp).getTime();
+    mostRecentTimestamp = serverTime > localTime ? serverTimestamp : localTimestamp;
+  } else if (serverTimestamp) {
+    mostRecentTimestamp = serverTimestamp;
+  }
+
+  // Si aucun timestamp, initialiser maintenant
+  if (!mostRecentTimestamp) {
     await db.runAsync(
       `UPDATE users SET last_lives_update = ? WHERE id = ?`,
       [new Date(now).toISOString(), userId]
     );
-    return { newLives: user.lives, regenerated: false };
+    return { newLives: user.lives, regenerated: false, livesAdded: 0 };
   }
 
-  const lastUpdate = new Date(user.last_lives_update).getTime();
+  const lastUpdate = new Date(mostRecentTimestamp).getTime();
   const diffMs = now - lastUpdate;
 
   if (diffMs <= 0) {
-    return { newLives: user.lives, regenerated: false };
+    return { newLives: user.lives, regenerated: false, livesAdded: 0 };
   }
 
   const livesToAdd = Math.floor(diffMs / REGEN_INTERVAL_MS);
@@ -71,10 +88,10 @@ export const checkAndRegenerateLives = async (userId: number): Promise<{ newLive
       [newLives, newUpdateDate, userId]
     );
 
-    return { newLives, regenerated: true };
+    return { newLives, regenerated: true, livesAdded: livesToAdd };
   }
 
-  return { newLives: user.lives, regenerated: false };
+  return { newLives: user.lives, regenerated: false, livesAdded: 0 };
 };
 
 /**
@@ -93,28 +110,29 @@ export const getGlobalGamificationStats = async (userId: number): Promise<{
 }> => {
   const db = await getDBConnection();
 
-  // ✅ Régénérer les vies si nécessaire (1/6h)
+  //  Régénérer les vies si nécessaire (1/6h)
   await checkAndRegenerateLives(userId);
 
-  // Stats globales d'activités
+  // Stats globales d'activités — filtrées par user_id
   const activityStats = await db.getFirstAsync<{
     total_xp: number;
     completed_activities: number;
     perfect_scores: number;
   }>(`
-    SELECT 
+    SELECT
       SUM(xp_earned) as total_xp,
       SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed_activities,
       SUM(CASE WHEN best_score = total_score AND total_score > 0 THEN 1 ELSE 0 END) as perfect_scores
     FROM activity_progress
-  `);
+    WHERE user_id = ? OR user_id IS NULL
+  `, [userId]);
 
   const userInfo = await db.getFirstAsync<{ coins: number; lives: number; streak: number; ipelan_xp: number; last_lives_update: string }>(
     `SELECT coins, lives, streak, ipelan_xp, last_lives_update FROM users WHERE id = ?`,
     [userId]
   );
 
-  // ✅ Source de vérité pour XP: activity_progress (calculé dynamiquement)
+  // c Source de vérité pour XP: activity_progress (calculé dynamiquement)
   // ipelan_xp n'est utilisé que pour la synchro Moodle
   const calculatedXP = activityStats?.total_xp || 0;
   const moodleXP = userInfo?.ipelan_xp || 0;
@@ -122,19 +140,19 @@ export const getGlobalGamificationStats = async (userId: number): Promise<{
   const stats = {
     completedLessons: activityStats?.completed_activities || 0,
     currentStreak: userInfo?.streak || 0,
-    // ✅ Utiliser le max des deux pour ne pas perdre de données, mais privilégier le calculé
+    //  Utiliser le max des deux pour ne pas perdre de données, mais privilégier le calculé
     totalXP: Math.max(calculatedXP, moodleXP),
     quizPassed: 0,
     perfectScores: activityStats?.perfect_scores || 0,
     daysActive: userInfo?.streak || 0,
   };
 
-  const latestBadge = evaluateLatestBadge(stats);
-
-  // Fetch all earned badge IDs
+  // Fetch all earned badge IDs before evaluating the latest badge
   const { getUserBadges } = await import('../storage/badge-storage');
   const userBadges = await getUserBadges(userId);
   const allBadgeIds = userBadges.map(b => b.badgeId);
+
+  const latestBadge = evaluateLatestBadge(stats);
 
   // Calcul du temps restant pour le prochain cœur
   let nextHeartTime = null;
@@ -159,7 +177,7 @@ export const getGlobalGamificationStats = async (userId: number): Promise<{
 
 export const syncUserGamificationToMoodle = async (
   userId: number,
-  stats: { totalXp: number; coins: number; lives: number; streak: number; allBadgeIds?: string[]; latestBadge?: string | null },
+  stats: { totalXp: number; coins: number; lives: number; streak: number; allBadgeIds?: string[]; latestBadge?: string | null; lastLivesUpdate?: string | null; lastSync?: string | null; courseProgress?: Record<string, { c: number; t: number }> | null },
   userToken?: string
 ): Promise<boolean> => {
   const trySync = async (token: string): Promise<{ success: boolean; permissionError: boolean }> => {
@@ -187,36 +205,49 @@ export const syncUserGamificationToMoodle = async (
       }
 
       if (stats.latestBadge) {
-        params["users[0][customfields][6][type]"] = "ipelan_last_badge";
+        params["users[0][customfields][6][type]"] = "ipelan_last_badge"; // Dernier badge obtenu
         params["users[0][customfields][6][value]"] = stats.latestBadge;
       }
 
-      const result = await moodleFetch("/webservice/rest/server.php", params, "POST");
-
-      if (result && result.exception) {
-        const errorMsg = result.message || result.exception || 'Unknown error';
-        const isPermError = errorMsg.toLowerCase().includes('permission') ||
-          errorMsg.toLowerCase().includes('droits') ||
-          errorMsg.toLowerCase().includes('requis');
-
-        if (isPermError) {
-          if (IS_DEV) console.warn("[Gamification] Permission denied (expected for user token):", errorMsg);
-        } else {
-          console.error("[Gamification] Moodle error:", errorMsg);
-        }
-        return { success: false, permissionError: isPermError };
+      //  Synchroniser le timestamp de dernière régénération de vies (multi-device)
+      if (stats.lastLivesUpdate) {
+        params["users[0][customfields][7][type]"] = "ipelan_last_lives_update";
+        params["users[0][customfields][7][value]"] = stats.lastLivesUpdate;
       }
+
+      // ✅ Toujours écrire ipelan_last_sync — permet la détection de conflits multi-device
+      params["users[0][customfields][8][type]"] = "ipelan_last_sync";
+      params["users[0][customfields][8][value]"] = stats.lastSync || new Date().toISOString();
+
+      // ✅ Progression des cours — permet à Device B de voir la progression immédiatement
+      if (stats.courseProgress && Object.keys(stats.courseProgress).length > 0) {
+        params["users[0][customfields][9][type]"] = "ipelan_course_progress";
+        params["users[0][customfields][9][value]"] = JSON.stringify(stats.courseProgress);
+      }
+
+      await moodleFetch("/webservice/rest/server.php", params, "POST");
       if (IS_DEV) console.log("[Gamification] Sync successful to Moodle");
       return { success: true, permissionError: false };
     } catch (error: any) {
-      if (IS_DEV) console.warn("[Gamification] Request failed:", error?.message || error);
-      return { success: false, permissionError: false };
+      const errorMsg = (error?.message || '').toLowerCase();
+      const isPermError =
+        errorMsg.includes('permission') ||
+        errorMsg.includes('droits') ||
+        errorMsg.includes('requis') ||
+        error?.errorcode === 'nopermissions' ||
+        error?.errorcode === 'accessdenied';
+
+      if (isPermError) {
+        if (IS_DEV) console.warn("[Gamification] Permission denied (expected for user token):", error?.message);
+      } else {
+        if (IS_DEV) console.warn("[Gamification] Request failed:", error?.message || error);
+      }
+      return { success: false, permissionError: isPermError };
     }
   };
 
   // 1. Try with user token first
   if (userToken) {
-    if (IS_DEV) console.log(`[Gamification] Trying with USER token: ${userToken.substring(0, 10)}...`);
     const res = await trySync(userToken);
     if (res.success) {
       if (IS_DEV) console.log("[Gamification] User token sync SUCCESS");
@@ -329,13 +360,35 @@ export const buyLife = async (userId: number): Promise<{ success: boolean; messa
 export const triggerGamificationSync = async (userId: number, userToken?: string): Promise<boolean> => {
   try {
     const stats = await getGlobalGamificationStats(userId);
+
+    // ✅ Récupérer le timestamp de dernière régénération de vies depuis SQLite
+    const db = await getDBConnection();
+    const userRow = await db.getFirstAsync<{ last_lives_update: string }>(
+      'SELECT last_lives_update FROM users WHERE id = ?',
+      [userId]
+    );
+    const lastLivesUpdate = userRow?.last_lives_update || null;
+
+    // ✅ Récupérer la progression des cours pour la synchronisation multi-device
+    const { getAllCourseProgress } = await import('../storage/course-progress');
+    const allProgress = await getAllCourseProgress(userId);
+    const courseProgressMap: Record<string, { c: number; t: number }> = {};
+    for (const cp of allProgress) {
+      if (cp.totalActivities > 0) {
+        courseProgressMap[String(cp.courseId)] = { c: cp.completedActivities, t: cp.totalActivities };
+      }
+    }
+
     const success = await syncUserGamificationToMoodle(userId, {
       totalXp: stats.totalXp,
       coins: stats.coins,
       lives: stats.lives,
       streak: stats.streak,
       allBadgeIds: stats.allBadgeIds,
-      latestBadge: stats.latestBadge
+      latestBadge: stats.latestBadge,
+      lastLivesUpdate,                    // ✅ Synchroniser pour multi-device
+      lastSync: new Date().toISOString(), // ✅ Horodatage de cette sync
+      courseProgress: Object.keys(courseProgressMap).length > 0 ? courseProgressMap : null,
     }, userToken);
 
     // Marquer les badges comme synchronisés en cas de succès

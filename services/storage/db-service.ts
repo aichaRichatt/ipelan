@@ -1,7 +1,7 @@
 import { openDatabaseAsync, SQLiteDatabase } from 'expo-sqlite';
 import { CourseCategory, CourseModule, CourseSection, IPELANUser, ModuleContent } from '../../types';
 
-export type UserDB = Pick<IPELANUser, 'id' | 'username' | 'email' | 'firstname' | 'lastname' | 'fullname' | 'ipelan_xp' | 'coins' | 'streak' | 'lives'> & { token: string; badges?: string; last_activity?: string };
+export type UserDB = Pick<IPELANUser, 'id' | 'username' | 'email' | 'firstname' | 'lastname' | 'fullname' | 'ipelan_xp' | 'coins' | 'streak' | 'lives'> & { token?: string; badges?: string; last_activity?: string };
 
 export interface CourseDB {
   id: number;
@@ -24,6 +24,25 @@ let dbInstance: SQLiteDatabase | null = null;
 let dbInitPromise: Promise<SQLiteDatabase> | null = null;
 let dbQueue: (() => void)[] = [];
 let isProcessing = false;
+
+/**
+ * Wraps multiple db operations in a single SQLite transaction.
+ * Rolls back automatically on any error.
+ */
+export async function withTransaction<T>(
+  db: SQLiteDatabase,
+  fn: () => Promise<T>
+): Promise<T> {
+  await db.runAsync('BEGIN TRANSACTION');
+  try {
+    const result = await fn();
+    await db.runAsync('COMMIT');
+    return result;
+  } catch (e) {
+    try { await db.runAsync('ROLLBACK'); } catch { /* ignore rollback errors */ }
+    throw e;
+  }
+}
 
 async function processQueue() {
   if (isProcessing || dbQueue.length === 0) return;
@@ -90,8 +109,11 @@ export const getDBConnection = async () => {
  * Version de schéma actuelle. Incrémenter à chaque ajout de migration.
  *  v1 : initial (lives, last_activity, last_lives_update sur users)
  *  v2 : table user_badges + index (centralisée depuis badge-storage.ts)
+ *  v3 : user_id dans sync_queue ; course_progress recréé avec UNIQUE(user_id, course_id)
+ *  v4 : token_expiry sur users (détection session expirée)
+ *  v5 : gamification_queue (persistance des jobs in-memory entre restarts)
  */
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 5;
 
 async function getUserSchemaVersion(db: SQLiteDatabase): Promise<number> {
   try {
@@ -139,6 +161,80 @@ async function runMigrations(db: SQLiteDatabase): Promise<void> {
   // v2 : la création de user_badges est idempotente (CREATE IF NOT EXISTS
   //      dans la SQL ci-dessous). Aucune migration impérative à effectuer.
 
+  // v3 : user_id dans sync_queue + course_progress recréé avec UNIQUE(user_id, course_id)
+  if (fromVersion < 3) {
+    // sync_queue : ajouter user_id (nullable, rétro-compatible)
+    try {
+      await db.execAsync('ALTER TABLE sync_queue ADD COLUMN user_id INTEGER;');
+      console.log('[DB] v3: sync_queue.user_id ajouté');
+    } catch {
+      // Colonne déjà présente
+    }
+
+    // course_progress : recréer pour inclure user_id dans la contrainte UNIQUE
+    try {
+      const tableExists = await db.getFirstAsync<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='course_progress'"
+      );
+      if (tableExists) {
+        await db.execAsync(`
+          CREATE TABLE course_progress_v3 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 0,
+            course_id INTEGER NOT NULL,
+            completed_activities INTEGER DEFAULT 0,
+            total_activities INTEGER DEFAULT 0,
+            total_xp INTEGER DEFAULT 0,
+            best_score INTEGER DEFAULT 0,
+            last_activity_at TEXT,
+            synced_at TEXT,
+            UNIQUE(user_id, course_id)
+          );
+        `);
+        await db.execAsync(`
+          INSERT OR IGNORE INTO course_progress_v3
+            SELECT id, 0, course_id, completed_activities, total_activities, total_xp, best_score, last_activity_at, synced_at
+            FROM course_progress;
+        `);
+        await db.execAsync('DROP TABLE course_progress;');
+        await db.execAsync('ALTER TABLE course_progress_v3 RENAME TO course_progress;');
+        console.log('[DB] v3: course_progress recréé avec UNIQUE(user_id, course_id)');
+      }
+    } catch (e) {
+      console.warn('[DB] v3: course_progress migration error:', e);
+    }
+  }
+
+  // v4 : token_expiry sur users
+  if (fromVersion < 4) {
+    try {
+      await db.execAsync('ALTER TABLE users ADD COLUMN token_expiry INTEGER;');
+      console.log('[DB] v4: users.token_expiry ajouté');
+    } catch {
+      // Colonne déjà présente
+    }
+  }
+
+  // v5 : table gamification_queue (survie des jobs in-memory entre restarts/crashes)
+  if (fromVersion < 5) {
+    try {
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS gamification_queue (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id    INTEGER NOT NULL,
+          job_type   TEXT NOT NULL,
+          job_data   TEXT DEFAULT '{}',
+          created_at TEXT DEFAULT (datetime('now')),
+          attempts   INTEGER DEFAULT 0,
+          UNIQUE(user_id, job_type)
+        );
+      `);
+      console.log('[DB] v5: gamification_queue créé');
+    } catch (e) {
+      console.warn('[DB] v5: gamification_queue migration error:', e);
+    }
+  }
+
   await setUserSchemaVersion(db, CURRENT_SCHEMA_VERSION);
   console.log(`[DB] Schema migré vers v${CURRENT_SCHEMA_VERSION}`);
 }
@@ -164,7 +260,8 @@ export const createTables = async (db: SQLiteDatabase) => {
         last_activity TEXT,
         badges TEXT DEFAULT '[]',
         token TEXT NOT NULL,
-        last_lives_update TEXT DEFAULT (datetime('now'))
+        last_lives_update TEXT DEFAULT (datetime('now')),
+        token_expiry INTEGER
     );
     CREATE TABLE IF NOT EXISTS courses(
         id INTEGER PRIMARY KEY,
@@ -280,13 +377,15 @@ export const createTables = async (db: SQLiteDatabase) => {
     );
     CREATE TABLE IF NOT EXISTS course_progress(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        course_id INTEGER NOT NULL UNIQUE,
+        user_id INTEGER NOT NULL DEFAULT 0,
+        course_id INTEGER NOT NULL,
         completed_activities INTEGER DEFAULT 0,
         total_activities INTEGER DEFAULT 0,
         total_xp INTEGER DEFAULT 0,
         best_score INTEGER DEFAULT 0,
         last_activity_at TEXT,
-        synced_at TEXT
+        synced_at TEXT,
+        UNIQUE(user_id, course_id)
     );
     CREATE TABLE IF NOT EXISTS pending_sync(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -312,6 +411,7 @@ export const createTables = async (db: SQLiteDatabase) => {
         type        TEXT NOT NULL,
         wsfunction  TEXT NOT NULL,
         payload     TEXT NOT NULL,
+        user_id     INTEGER,
         created_at  TEXT DEFAULT (datetime('now')),
         retries     INTEGER DEFAULT 0,
         last_error  TEXT
@@ -325,6 +425,15 @@ export const createTables = async (db: SQLiteDatabase) => {
         UNIQUE(user_id, badge_id)
     );
     CREATE INDEX IF NOT EXISTS idx_user_badges_user_id ON user_badges(user_id);
+    CREATE TABLE IF NOT EXISTS gamification_queue (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id    INTEGER NOT NULL,
+        job_type   TEXT NOT NULL,
+        job_data   TEXT DEFAULT '{}',
+        created_at TEXT DEFAULT (datetime('now')),
+        attempts   INTEGER DEFAULT 0,
+        UNIQUE(user_id, job_type)
+    );
   `);
 
   try {
@@ -364,25 +473,27 @@ export const saveEPUBBook = async (db: SQLiteDatabase, book: {
   total_chapters: number;
   chapters: Array<{ index: number; title?: string; content: string }>;
 }): Promise<number> => {
-  await db.runAsync(`DELETE FROM epub_chapters WHERE book_id IN (SELECT id FROM epub_books WHERE source_url = ?)`, [book.source_url]);
-  await db.runAsync(`DELETE FROM epub_books WHERE source_url = ?`, [book.source_url]);
+  return withTransaction(db, async () => {
+    await db.runAsync(`DELETE FROM epub_chapters WHERE book_id IN (SELECT id FROM epub_books WHERE source_url = ?)`, [book.source_url]);
+    await db.runAsync(`DELETE FROM epub_books WHERE source_url = ?`, [book.source_url]);
 
-  const now = Date.now();
-  const result = await db.runAsync(
-    `INSERT INTO epub_books(title, author, source_url, local_path, total_chapters, downloaded_at, last_chapter, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [book.title, book.author || null, book.source_url, book.local_path || null, book.total_chapters, now, 0, book.size || 0]
-  );
-
-  const bookId = typeof result.lastInsertRowId === 'number' ? result.lastInsertRowId : 0;
-
-  for (const chapter of book.chapters) {
-    await db.runAsync(
-      `INSERT INTO epub_chapters(book_id, chapter_index, chapter_title, content) VALUES (?, ?, ?, ?)`,
-      [bookId, chapter.index, chapter.title || null, chapter.content]
+    const now = Date.now();
+    const result = await db.runAsync(
+      `INSERT INTO epub_books(title, author, source_url, local_path, total_chapters, downloaded_at, last_chapter, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [book.title, book.author || null, book.source_url, book.local_path || null, book.total_chapters, now, 0, book.size || 0]
     );
-  }
 
-  return bookId;
+    const bookId = typeof result.lastInsertRowId === 'number' ? result.lastInsertRowId : 0;
+
+    for (const chapter of book.chapters) {
+      await db.runAsync(
+        `INSERT INTO epub_chapters(book_id, chapter_index, chapter_title, content) VALUES (?, ?, ?, ?)`,
+        [bookId, chapter.index, chapter.title || null, chapter.content]
+      );
+    }
+
+    return bookId;
+  });
 };
 
 export const getEPUBBook = async (db: SQLiteDatabase, sourceUrl: string): Promise<EPUBBookDB | null> => {
@@ -422,7 +533,9 @@ export const getAllEPUBBooks = async (db: SQLiteDatabase): Promise<EPUBBookDB[]>
 export const saveUser = async (db: SQLiteDatabase, user: UserDB) => {
   await db.runAsync(`DELETE FROM users`);
 
-  const query = `INSERT OR REPLACE INTO users(id, username, email, firstname, lastname, fullname, ipelan_xp, coins, lives, streak, last_activity, badges, token) 
+  // token colonne conservée pour compatibilité schéma mais jamais peuplée avec
+  // le vrai token — celui-ci est stocké exclusivement dans expo-secure-store.
+  const query = `INSERT OR REPLACE INTO users(id, username, email, firstname, lastname, fullname, ipelan_xp, coins, lives, streak, last_activity, badges, token)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   await db.runAsync(query, [
     user.id,
@@ -437,7 +550,7 @@ export const saveUser = async (db: SQLiteDatabase, user: UserDB) => {
     user.streak,
     user.last_activity || null,
     user.badges || '[]',
-    user.token
+    '',
   ]);
 };
 

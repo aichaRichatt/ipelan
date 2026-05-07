@@ -1,9 +1,8 @@
-import React, { useState } from "react";
-import { View, Text, Pressable} from "react-native";
-import { useRouter } from "expo-router";
-import Animated, { FadeInRight } from "react-native-reanimated";
 import { Feather } from "@expo/vector-icons";
-
+import { useRouter } from "expo-router";
+import React, { useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import Animated, { FadeInRight } from "react-native-reanimated";
 
 interface OnboardingSlide {
   id: number;
@@ -37,6 +36,81 @@ const SLIDES: OnboardingSlide[] = [
   },
 ];
 
+const styles = StyleSheet.create({
+  flex1_bgwhite: {
+    backgroundColor: '#FFFFFF',
+    flex: 1
+  },
+  flex1_itemscenter_justifycente: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 32
+  },
+  flexrow_justifycenter_mb8: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 32
+  },
+  itemscenter: {
+    alignItems: 'center'
+  },
+  itemsend_p5: {
+    alignItems: 'flex-end',
+    padding: 20
+  },
+  mt4_py3: {
+    marginTop: 16,
+    paddingVertical: 12
+  },
+  px4_py2: {
+    paddingHorizontal: 16,
+    paddingVertical: 8
+  },
+  px5_pb10: {
+    paddingHorizontal: 20
+  },
+  rounded2xl_py4_itemscenter: {
+    alignItems: 'center',
+    borderRadius: 16,
+    paddingVertical: 16
+  },
+  text3xl_fontbold_textcenter_mb: {
+    fontSize: 30,
+    fontWeight: '700',
+    marginBottom: 16,
+    textAlign: 'center'
+  },
+  textgray400_textcenter_fontmed: {
+    color: '#9CA3AF',
+    fontWeight: '500',
+    textAlign: 'center'
+  },
+  textgray500_fontmedium: {
+    color: '#6B7280',
+    fontWeight: '500'
+  },
+  textgray500_textcenter_textlg_: {
+    color: '#6B7280',
+    fontSize: 18,
+    paddingHorizontal: 16,
+    textAlign: 'center'
+  },
+  textwhite_fontbold_textlg: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  w40_h40_roundedfull_itemscente: {
+    alignItems: 'center',
+    borderRadius: 9999,
+    height: 160,
+    justifyContent: 'center',
+    marginBottom: 32,
+    width: 160
+  },
+});
+
 export default function OnboardingScreen() {
   const router = useRouter();
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -60,68 +134,69 @@ export default function OnboardingScreen() {
   const slide = SLIDES[currentSlide];
 
   return (
-    <View className="flex-1 bg-white">
+    <View style={styles.flex1_bgwhite}>
       {/* Skip Button */}
-      <View className="items-end p-5">
-        <Pressable onPress={handleSkip} className="px-4 py-2">
-          <Text className="text-gray-500 font-medium">Passer</Text>
+      <View style={styles.itemsend_p5}>
+        <Pressable onPress={handleSkip} style={styles.px4_py2}>
+          <Text style={styles.textgray500_fontmedium}>Passer</Text>
         </Pressable>
       </View>
 
       {/* Slide Content */}
-      <View className="flex-1 items-center justify-center px-8">
+      <View style={styles.flex1_itemscenter_justifycente}>
         <Animated.View
           key={slide.id}
           entering={FadeInRight.duration(500)}
-          className="items-center"
+          style={styles.itemscenter}
         >
           <View 
-            className="w-40 h-40 rounded-full items-center justify-center mb-8"
-            style={{ backgroundColor: `${slide.color}15` }}
+            style={[styles.w40_h40_roundedfull_itemscente, { backgroundColor: `${slide.color}15` }]}
           >
             <Feather name={slide.icon as any} size={80} color={slide.color} />
           </View>
           
           <Text 
-            className="text-3xl font-bold text-center mb-4"
-            style={{ color: slide.color }}
+            style={[styles.text3xl_fontbold_textcenter_mb, { color: slide.color }]}
           >
             {slide.title}
           </Text>
           
-          <Text className="text-gray-500 text-center text-lg leading-relaxed px-4">
+          <Text style={styles.textgray500_textcenter_textlg_}>
             {slide.subtitle}
           </Text>
         </Animated.View>
       </View>
 
       {/* Dots Indicator */}
-      <View className="flex-row justify-center mb-8">
+      <View style={styles.flexrow_justifycenter_mb8}>
         {SLIDES.map((_, index) => (
           <View
             key={index}
-            className={`w-3 h-3 rounded-full mx-2 ${
-              index === currentSlide ? 'bg-[#002366]' : 'bg-gray-300'
-            }`}
+            style={{
+              width: 12,
+              height: 12,
+              borderRadius: 9999,
+              marginHorizontal: 8,
+              backgroundColor: index === currentSlide ? '#002366' : '#D1D5DB'
+            }}
           />
         ))}
       </View>
 
       {/* Navigation Buttons */}
-      <View className="px-5 pb-10">
+      <View style={styles.px5_pb10}>
         <Pressable
           onPress={handleNext}
-          className="rounded-2xl py-4 items-center"
-          style={{ backgroundColor: slide.color }}
+          style={[styles.rounded2xl_py4_itemscenter, { backgroundColor: slide.color }]}
         >
-          <Text className="text-white font-bold text-lg">
+          <Text style={styles.textwhite_fontbold_textlg}>
             {currentSlide < SLIDES.length - 1 ? "Suivant" : "Commencer"}
           </Text>
         </Pressable>
         
         {currentSlide < SLIDES.length - 1 && (
-          <Pressable onPress={handleFinish} className="mt-4 py-3">
-            <Text className="text-gray-400 text-center font-medium">
+          <Pressable onPress={handleFinish} style={styles.mt4_py3}>
+            <Text style={styles.textgray400_textcenter_fontmed}>
               Je n&apos;ai pas besoin d&apos;aide
             </Text>
           </Pressable>
@@ -129,4 +204,4 @@ export default function OnboardingScreen() {
       </View>
     </View>
   );
-}
+}

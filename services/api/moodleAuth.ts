@@ -30,6 +30,8 @@ export async function login(username: string, password: string) {
         } else {
           throw new Error("Aucun compte trouvé avec cette adresse email");
         }
+      } else {
+        throw new Error("Aucun compte trouvé avec cette adresse email");
       }
     } catch (emailErr: any) {
       if (IS_DEV) console.warn("[moodleAuth.login] Email lookup failed:", emailErr.message);
@@ -48,7 +50,8 @@ export async function login(username: string, password: string) {
   }
 
   if (IS_DEV) console.log("[moodleAuth.login] Login successful");
-  return result;
+  // Retourner aussi le username résolu (utile pour paralléliser les appels suivants)
+  return { ...result, resolvedUsername: loginUsername };
 }
 
 export async function getMoodleSiteInfo(token: string) {
@@ -86,7 +89,6 @@ export async function signUp(user: any) {
     throw new Error("Configuration serveur invalide: token administrateur manquant");
   }
 
-  // Champs de base attendus par auth_email_signup_user
   const params: Record<string, any> = {
     wstoken: ADMIN_TOKEN,
     wsfunction: "auth_email_signup_user",
@@ -98,12 +100,12 @@ export async function signUp(user: any) {
     moodlewsrestformat: "json",
   };
 
-  const result = await moodleFetch("/webservice/rest/server.php", params, "POST");
-
-  return result;
+  return moodleFetch("/webservice/rest/server.php", params, "POST");
 }
 
 export async function updateUserProfile(id: number, firstname: string, lastname: string, email?: string, city?: string) {
+  if (!ADMIN_TOKEN) throw new Error("Admin token manquant");
+
   const userUpdate: any = { id: Number(id) };
 
   if (firstname) userUpdate.firstname = firstname;
@@ -119,28 +121,17 @@ export async function updateUserProfile(id: number, firstname: string, lastname:
   }, "POST");
 }
 
-/**
- * Demande une réinitialisation de mot de passe via l'API Moodle
- * Utilise la fonction core_auth_request_password_reset
- * 
- * @param email Email de l'utilisateur
- * @returns Résultat de la demande
- */
 export async function requestPasswordReset(email: string) {
-  const IS_DEV = process.env.NODE_ENV === "development";
-
   if (!email || !email.trim()) {
     throw new Error("Veuillez entrer votre adresse email");
   }
 
-  // Nettoyer l'email
   const cleanEmail = email.trim().toLowerCase();
 
   if (IS_DEV) {
     console.log('[moodleAuth.requestPasswordReset] Requesting reset for:', cleanEmail);
   }
 
-  // Utiliser l'API Moodle pour demander la réinitialisation
   const result = await moodleFetch("/webservice/rest/server.php", {
     wstoken: ADMIN_TOKEN,
     wsfunction: "core_auth_request_password_reset",
@@ -152,76 +143,88 @@ export async function requestPasswordReset(email: string) {
     console.log('[moodleAuth.requestPasswordReset] Result:', result);
   }
 
-  // Vérifier les erreurs retournées par Moodle
-  if (result?.exception) {
-    throw new Error(result.message || 'Erreur lors de la demande de réinitialisation');
-  }
-
-  if (result?.error) {
-    throw new Error(result.error);
-  }
-
-  // Moodle retourne généralement: { status: "success", notice: "..." }
-  // ou { warning: "..." } si l'email n'existe pas (pour des raisons de sécurité)
   return result;
 }
 
-export async function agreeToSitePolicy(token: string, userId?: number) {
-
-  try {
-    return await moodleFetch("/webservice/rest/server.php", {
-      wstoken: token,
-      wsfunction: "core_user_agree_site_policy",
-      moodlewsrestformat: "json"
-    }, "POST");
-  } catch (e: any) {
-    if (userId && ADMIN_TOKEN) {
-      return moodleFetch("/webservice/rest/server.php", {
-        wstoken: ADMIN_TOKEN,
-        wsfunction: "core_user_agree_site_policy",
-        userid: userId,
-        moodlewsrestformat: "json"
-      }, "POST");
-    }
-    throw e;
-  }
+export async function agreeToSitePolicy(token: string) {
+  return moodleFetch("/webservice/rest/server.php", {
+    wstoken: token,
+    wsfunction: "core_user_agree_site_policy",
+    moodlewsrestformat: "json"
+  }, "POST");
 }
 
-/**
- * Inscrit un utilisateur dans un cours Moodle (rôle élève = 5).
- *
- * @param userId   ID Moodle de l'utilisateur
- * @param courseId ID Moodle du cours (obligatoire — aucun fallback codé en dur)
- *
- * Le courseId doit être déterminé par l'appelant en fonction de la langue
- * et du niveau choisis par l'élève (cf. courseService.getCoursesForLanguageAndGrade).
- */
 export async function enrolUserInCourse(userId: number, courseId: number) {
-  const IS_DEV = process.env.NODE_ENV === "development";
+  const numericCourseId = Number(courseId);
+  const numericUserId = Number(userId);
 
-  if (!Number.isFinite(courseId) || courseId <= 0) {
+  if (!Number.isFinite(numericCourseId) || numericCourseId <= 0) {
     throw new Error(
       "courseId invalide: utilisez courseService.getCoursesForLanguageAndGrade pour le déterminer"
     );
   }
 
   if (IS_DEV) {
-    console.log(`[enrolUserInCourse] Enrolling user ${userId} in course ${courseId}`);
+    console.log(`[enrolUserInCourse] Enrolling user ${numericUserId} in course ${numericCourseId}`);
   }
 
   if (!ADMIN_TOKEN) {
     throw new Error("Configuration serveur invalide: token administrateur manquant");
   }
 
-  // Format for Moodle REST API - enrolments array with indexed keys
   const params: any = {
     wstoken: ADMIN_TOKEN,
     wsfunction: "enrol_manual_enrol_users",
     moodlewsrestformat: "json",
-    'enrolments[0][roleid]': 5,  // 5 = Student role
-    'enrolments[0][userid]': userId,
-    'enrolments[0][courseid]': courseId,
+    'enrolments[0][roleid]': 5,
+    'enrolments[0][userid]': numericUserId,
+    'enrolments[0][courseid]': numericCourseId,
   };
 
-  return moodleFetch("/webservice/rest/server.php", params, "POST");
+  try {
+    return await moodleFetch("/webservice/rest/server.php", params, "POST");
+  } catch (error: any) {
+    if (error.message?.includes("Valeur incorrecte de paramètre") || error.errorcode === "invalidparameter") {
+      if (IS_DEV) {
+        console.log(`[enrolUserInCourse] User ${numericUserId} may already be enrolled in course ${numericCourseId} or parameters invalid`);
+      }
+      return { status: "already_enrolled_or_error", courseId: numericCourseId, userId: numericUserId };
+    }
+    throw error;
+  }
+}
+
+export async function enrolUsersInCourses(userId: number, courseIds: number[]) {
+  if (!ADMIN_TOKEN) throw new Error("Admin token manquant");
+
+  const numericUserId = Number(userId);
+  const validIds = courseIds
+    .map(id => Number(id))
+    .filter(id => Number.isFinite(id) && id > 0);
+
+  if (validIds.length === 0) return;
+
+  const params: any = {
+    wstoken: ADMIN_TOKEN,
+    wsfunction: "enrol_manual_enrol_users",
+    moodlewsrestformat: "json",
+  };
+
+  validIds.forEach((courseId, i) => {
+    params[`enrolments[${i}][roleid]`] = 5;
+    params[`enrolments[${i}][userid]`] = numericUserId;
+    params[`enrolments[${i}][courseid]`] = courseId;
+  });
+
+  try {
+    return await moodleFetch("/webservice/rest/server.php", params, "POST");
+  } catch (error: any) {
+    if (error.message?.includes("Valeur incorrecte de paramètre") || error.errorcode === "invalidparameter") {
+      if (IS_DEV) {
+        console.log(`[enrolUsersInCourses] User ${numericUserId} may already be enrolled or parameters invalid`);
+      }
+      return { status: "already_enrolled_or_error", courseIds: validIds, userId: numericUserId };
+    }
+    throw error;
+  }
 }
