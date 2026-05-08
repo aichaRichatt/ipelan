@@ -1,17 +1,14 @@
 import { RootState } from "@/services/redux/store";
 import { cleanAndAuthUrl } from "@/services/urlAuth";
 import { Feather } from "@expo/vector-icons";
-import Constants from 'expo-constants';
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useState } from "react";
-import { ActivityIndicator, Dimensions, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 import { useSelector } from "react-redux";
 
 const IS_DEV = process.env.NODE_ENV === "development";
-
-
 
 export default function PdfViewerScreen() {
   const router = useRouter();
@@ -19,8 +16,6 @@ export default function PdfViewerScreen() {
   const token = useSelector((state: RootState) => state.auth.token);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [totalPages, setTotalPages] = useState(0);
-  const [currentPage, setCurrentPage] = useState(1);
 
   const handleOpenExternal = () => {
     if (pdfUrl && token) {
@@ -42,7 +37,6 @@ export default function PdfViewerScreen() {
   }
 
   const authenticatedUrl = cleanAndAuthUrl(pdfUrl, token || "");
-  const source = { uri: authenticatedUrl, cache: true };
 
   return (
     <SafeAreaView style={styles.flex1_bgFAF9F6} edges={["top"]}>
@@ -54,11 +48,6 @@ export default function PdfViewerScreen() {
           <Text style={styles.textbase_fontbold_textgray900} numberOfLines={1}>
             {title || 'Document PDF'}
           </Text>
-          {totalPages > 0 && (
-            <Text style={styles.textxs_textgray500}>
-              Page {currentPage} / {totalPages}
-            </Text>
-          )}
         </View>
         <Pressable onPress={handleOpenExternal} style={styles.p2}>
           <Feather name="external-link" size={24} color="#002366" />
@@ -66,53 +55,15 @@ export default function PdfViewerScreen() {
       </View>
 
       <View style={styles.flex1_bggray100}>
-        {Constants.appOwnership === 'expo' ? (
-          // Sur Expo Go : react-native-pdf n'est pas disponible.
-          // On affiche le PDF via WebView directement (pas Google Docs, pour ne pas
-          // envoyer des URLs authentifiées vers un service tiers).
-          <WebView
-            source={{ uri: authenticatedUrl }}
-            style={{ flex: 1 }}
-            onLoad={() => setIsLoading(false)}
-            onError={(err) => {
-              setError(err.nativeEvent.description);
-              setIsLoading(false);
-            }}
-          />
-        ) : (
-          (() => {
-            const Pdf = require('react-native-pdf').default;
-            return (
-              <Pdf
-                source={source}
-                onLoadComplete={(numberOfPages: number) => {
-                  setTotalPages(numberOfPages);
-                  setIsLoading(false);
-                  if (IS_DEV) console.log(`[PdfViewer] Loaded PDF with ${numberOfPages} pages`);
-                }}
-                onPageChanged={(page: number) => {
-                  setCurrentPage(page);
-                }}
-                onError={(err: any) => {
-                  setError(err.toString());
-                  setIsLoading(false);
-                  if (IS_DEV) console.error('[PdfViewer] PDF Error:', err);
-                }}
-                onPressLink={(uri: string) => {
-                  if (IS_DEV) console.log(`[PdfViewer] Link pressed: ${uri}`);
-                  Linking.openURL(uri);
-                }}
-                style={styles.pdf}
-                renderActivityIndicator={() => (
-                  <View style={styles.itemscenter_justifycenter_p10}>
-                    <ActivityIndicator size="large" color="#002366" />
-                    <Text style={styles.mt4_textgray600}>Chargement du PDF...</Text>
-                  </View>
-                )}
-              />
-            );
-          })()
-        )}
+        <WebView
+          source={{ uri: authenticatedUrl }}
+          style={{ flex: 1 }}
+          onLoad={() => setIsLoading(false)}
+          onError={(err) => {
+            setError(err.nativeEvent.description);
+            setIsLoading(false);
+          }}
+        />
       </View>
 
       {error && (
@@ -139,12 +90,6 @@ export default function PdfViewerScreen() {
 }
 
 const styles = StyleSheet.create({
-  pdf: {
-    flex: 1,
-    width: Dimensions.get('window').width,
-    height: Dimensions.get('window').height,
-    backgroundColor: '#F3F4F6',
-  },
   absolute_inset0_bgFAF9F6_items: {
     alignItems: 'center',
     backgroundColor: '#FAF9F6',

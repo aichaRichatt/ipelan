@@ -582,7 +582,7 @@ export async function submitSingleAnswer(
   );
   if (!ok) return null;
 
-  // Recharger la page pour récupérer le nouveau sequencecheck
+  // Recharger la page pour récupérer le nouveau sequencecheck 
   const { questions, nextPage } = await getAttemptPage(authToken, attemptId, page);
   return { questions, nextPage };
 }

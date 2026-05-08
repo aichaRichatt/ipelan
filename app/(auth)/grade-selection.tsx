@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Grade } from "../../types";
 
@@ -19,26 +20,29 @@ interface GradeOption {
   label: string;
   description: string;
   icon: string;
+  color: string;
 }
 
 const GRADES: GradeOption[] = [
-  { value: 1, label: "1ère année", description: "Premiers pas", icon: "star" },
-  { value: 2, label: "2ème année", description: "Continuer", icon: "star" },
-  { value: 3, label: "3ème année", description: "Progresser", icon: "star" },
-  { value: 4, label: "4ème année", description: "Approfondir", icon: "award" },
-  { value: 5, label: "5ème année", description: "Maîtriser", icon: "award" },
-  { value: 6, label: "6ème année", description: "Expert", icon: "award" },
+  { value: 1, label: "1ère", description: "Premiers pas", icon: "star", color: '#F59E0B' },
+  { value: 2, label: "2ème", description: "Continuer", icon: "star", color: '#F59E0B' },
+  { value: 3, label: "3ème", description: "Progresser", icon: "star", color: '#F59E0B' },
+  { value: 4, label: "4ème", description: "Approfondir", icon: "award", color: '#002366' },
+  { value: 5, label: "5ème", description: "Maîtriser", icon: "award", color: '#002366' },
+  { value: 6, label: "6ème", description: "Expert", icon: "award", color: '#002366' },
 ];
 
 const styles = StyleSheet.create({
-  absolute_top2_right2_w6_h6_rou: {
+  checkBadge: {
     alignItems: 'center',
     backgroundColor: '#002366',
     borderRadius: 9999,
     height: 24,
     justifyContent: 'center',
     position: 'absolute',
-    width: 24
+    right: 8,
+    top: 8,
+    width: 24,
   },
   flex1: {
     flex: 1
@@ -137,10 +141,10 @@ const styles = StyleSheet.create({
     height: 56,
     justifyContent: 'center',
     marginBottom: 12,
-    width: 56
+    width: 56,
   },
   iconContainerSelected: {
-    backgroundColor: '#002366'
+    backgroundColor: '#002366',
   },
   gradeLabel: {
     color: '#111827',
@@ -176,10 +180,10 @@ export default function GradeSelectionScreen() {
       
       await AsyncStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences));
       
-      router.replace("/(auth)/login" as any);
+      router.replace("/(tabs)/(home)" as any);
     } catch (error) {
       console.error('Failed to save preferences:', error);
-      router.replace("/(auth)/login" as any);
+      router.replace("/(tabs)/(home)" as any);
     } finally {
       setIsLoading(false);
     }
@@ -192,49 +196,60 @@ export default function GradeSelectionScreen() {
   return (
     <SafeAreaView style={styles.flex1_bgFAF9F6}>
       <View style={styles.flex1_px6_pt4}>
-        <View style={styles.flexrow_itemscenter_mb8}>
+        <Animated.View 
+          entering={FadeInUp.duration(600)}
+          style={styles.flexrow_itemscenter_mb8}
+        >
           <Pressable onPress={handleBack} style={styles.p2_ml2}>
             <Feather name="arrow-left" size={24} color="#1F2937" />
           </Pressable>
           <View style={styles.flex1_itemscenter_mr10}>
             <Text style={styles.textxl_fontbold_textgray900}>Ton niveau</Text>
           </View>
-        </View>
+        </Animated.View>
 
-        <Text style={styles.text3xl_fontbold_textgray900_m}>
-          Quelle est ta classe ?
-        </Text>
-        <Text style={styles.textgray500_textbase_mb8_textc}>
-          Choisis ton année scolaire pour adapter les contenus
-        </Text>
+        <Animated.View entering={FadeInUp.delay(100).duration(600)}>
+          <Text style={styles.text3xl_fontbold_textgray900_m}>
+            Quelle est ta classe ?
+          </Text>
+          <Text style={styles.textgray500_textbase_mb8_textc}>
+            Choisis ton année scolaire pour adapter les contenus
+          </Text>
+        </Animated.View>
 
         <View style={styles.flex1}>
           <View style={styles.flexrow_flexwrap_justifybetwee}>
             {GRADES.map((grade, index) => (
-              <GradeCard
+              <Animated.View
                 key={grade.value}
-                grade={grade}
-                isSelected={selectedGrade === grade.value}
-                onPress={() => handleSelectGrade(grade.value)}
-                style={{ marginBottom: 16 }}
-              />
+                entering={FadeInDown.delay(200 + index * 100).duration(500)}
+                style={{ width: '48%', marginBottom: 16 }}
+              >
+                <GradeCard
+                  grade={grade}
+                  isSelected={selectedGrade === grade.value}
+                  onPress={() => handleSelectGrade(grade.value)}
+                />
+              </Animated.View>
             ))}
           </View>
         </View>
 
         <View style={styles.mb6}>
-          <Pressable
-            onPress={handleContinue}
-            disabled={!selectedGrade || isLoading}
-            style={[
-              styles.buttonBase,
-              (selectedGrade && !isLoading) ? styles.buttonActive : styles.buttonDisabled
-            ]}
-          >
-            <Text style={styles.textwhite_fontbold_textlg}>
-              {isLoading ? 'Chargement...' : 'Continuer'}
-            </Text>
-          </Pressable>
+          <Animated.View entering={FadeInUp.delay(800).duration(600)}>
+            <Pressable
+              onPress={handleContinue}
+              disabled={!selectedGrade || isLoading}
+              style={[
+                styles.buttonBase,
+                (selectedGrade && !isLoading) ? styles.buttonActive : styles.buttonDisabled
+              ]}
+            >
+              <Text style={styles.textwhite_fontbold_textlg}>
+                {isLoading ? 'Chargement...' : 'Continuer'}
+              </Text>
+            </Pressable>
+          </Animated.View>
           
           {selectedGrade && (
             <Text style={styles.textcenter_textgray500_textsm_}>
@@ -295,7 +310,7 @@ function GradeCard({ grade, isSelected, onPress, style }: GradeCardProps) {
         {grade.description}
       </Text>
       {isSelected && (
-        <View style={styles.absolute_top2_right2_w6_h6_rou}>
+        <View style={styles.textgray500_textbase_mb8_textc}>
           <Feather name="check" size={14} color="#FFFFFF" />
         </View>
       )}

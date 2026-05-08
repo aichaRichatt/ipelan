@@ -239,7 +239,7 @@ export default function ModuleDetailScreen() {
         return;
       }
       try {
-        const scores = await getAllScoresForCourse(courseId);
+        const scores = await getAllScoresForCourse(courseId, userId);
         const progressMap = new Map<number, ActivityWithProgress['progress']>();
         
         scores.forEach((scoreData, moduleId) => {
@@ -281,7 +281,7 @@ export default function ModuleDetailScreen() {
           syncCourseProgress(token, courseId, totalActivities, userId).then(syncResult => {
             if (syncResult.success) {
               console.log('[ModuleDetail] Sync completed, reloading scores...');
-              getAllScoresForCourse(courseId).then(updatedScores => {
+              getAllScoresForCourse(courseId, userId).then(updatedScores => {
                 const updatedMap = new Map<number, ActivityWithProgress['progress']>();
                 updatedScores.forEach((scoreData, modId) => {
                   updatedMap.set(modId, {
@@ -593,7 +593,8 @@ export default function ModuleDetailScreen() {
       const content = getModuleContent(mod.id);
       const type = content?.type || 'html';
       const isLocked = section.status === 'locked';
-      const isCompleted = mod.completiondata?.completionstate === 2;
+      const progressInfo = progressData.get(mod.id);
+      const isCompleted = progressInfo?.isCompleted === true || (mod.completiondata?.completionstate ?? 0) >= 1;
 
       let epubUrl: string | undefined;
       let pdfUrl: string | undefined;
@@ -871,7 +872,8 @@ export default function ModuleDetailScreen() {
               const type = content?.type || (mod.modname === 'quiz' ? 'quiz' : mod.modname === 'resource' ? 'resource' : 'html');
               const { icon, color } = getLessonIcon(type);
               const typeLabel = getContentTypeLabel(type);
-              const isCompleted = mod.completiondata?.completionstate === 2;
+              const progressInfo = progressData.get(mod.id);
+              const isCompleted = progressInfo?.isCompleted === true || (mod.completiondata?.completionstate ?? 0) >= 1;
               const isLocked = section.status === 'locked';
 
               return (

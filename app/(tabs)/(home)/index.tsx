@@ -1,6 +1,7 @@
 import { BuyHeartsModal } from "@/components/BuyHeartsModal";
 import { useLives } from "@/hooks/useLives";
 import { AntDesign, Feather, FontAwesome5, Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
@@ -8,11 +9,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
 import { useSyncStatus } from "../../../hooks/useSyncStatus";
 import { useUserStats } from "../../../hooks/useUserStats";
+import { getFirstCourseFromLanguageAndGrade } from "../../../services/api/courseService";
 import { RootState } from "../../../services/redux/store";
 import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
 import { calculateCourseProgress, getAllCourseProgress, saveCourseProgress } from "../../../services/storage/course-progress";
-
 const IS_DEV = process.env.NODE_ENV === 'development';
+const PREFERENCES_KEY = '@ipelan_preferences';
 
 interface ModuleData {
   id: string;
@@ -75,11 +77,14 @@ function useActiveCourse(activeToken: string) {
 
         const moodleCall = (await import('../../../services/api/moodleClient')).moodleCall;
 
+        console.log('[useActiveCourse] Calling Moodle API with token:', activeToken?.substring(0, 10) + '...');
         const result = await moodleCall(
           'core_course_get_enrolled_courses_by_timeline_classification',
           { classification: 'inprogress', limit: 10 },
           activeToken
         );
+
+        console.log('[useActiveCourse] Moodle API result:', result?.courses?.length || 0, 'courses');
 
         if (result && result.courses && result.courses.length > 0) {
           setCourses(result.courses);
@@ -136,7 +141,30 @@ function useActiveCourse(activeToken: string) {
         }
       } catch (cacheErr: any) {
         if (IS_DEV) console.error('[useActiveCourse] Cache failed:', cacheErr.message);
-        setCourses([]);
+      }
+
+      // Fallback 3: use language+grade preferences from registration
+      console.log('[useActiveCourse] Fallback check - loadedFromCache:', loadedFromCache, 'courses.length:', courses.length);
+      if (!loadedFromCache) {
+        try {
+          const prefsJson = await AsyncStorage.getItem(PREFERENCES_KEY);
+          console.log('[useActiveCourse] Preferences loaded:', prefsJson);
+          if (prefsJson) {
+            const { language, grade } = JSON.parse(prefsJson);
+            if (IS_DEV) console.log('[useActiveCourse] Trying preferences fallback:', language, grade);
+            const firstCourse = await getFirstCourseFromLanguageAndGrade(activeToken, language, grade);
+            console.log('[useActiveCourse] First course from preferences:', firstCourse?.fullname || 'null');
+            if (firstCourse) {
+              if (IS_DEV) console.log('[useActiveCourse] Found course via preferences:', firstCourse.fullname);
+              setCourses([firstCourse]);
+              loadedFromCache = true;
+            }
+          } else {
+            console.log('[useActiveCourse] No preferences found');
+          }
+        } catch (e) {
+          if (IS_DEV) console.warn('[useActiveCourse] Preferences fallback failed:', e);
+        }
       }
 
       if (!loadedFromCache && courses.length === 0) {
@@ -171,6 +199,23 @@ export default function HomeScreen() {
   const [courseProgressMap, setCourseProgressMap] = useState<any>({});
   const [courseScoreMap, setCourseScoreMap] = useState<any>({});
   const [showBuyModal, setShowBuyModal] = useState(false);
+
+  // Redirect to language selection if no preferences
+  useEffect(() => {
+    if (!activeToken) return;
+    const checkPreferences = async () => {
+      try {
+        const prefsJson = await AsyncStorage.getItem(PREFERENCES_KEY);
+        if (!prefsJson) {
+          console.log('[HomeScreen] No preferences, redirecting to language-selection');
+          router.replace("/(auth)/language-selection" as any);
+        }
+      } catch (e) {
+        console.warn('[HomeScreen] Failed to check preferences:', e);
+      }
+    };
+    checkPreferences();
+  }, [activeToken, router]);
 
   const [, forceRender] = useState(0);
   useEffect(() => {
@@ -207,7 +252,7 @@ export default function HomeScreen() {
         }
 
         if (course.id) {
-          const scores = await getAllScoresForCourse(course.id);
+          const scores = await getAllScoresForCourse(course.id, reduxUser?.id);
           setCourseScoreMap({ [course.id]: scores });
         }
 

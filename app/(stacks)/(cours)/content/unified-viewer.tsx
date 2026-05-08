@@ -2,19 +2,18 @@ import { injectAbsolutePaths, wrapHTMLForEPUB } from "@/services/epub/epubPathHe
 import { cleanAndAuthUrl } from "@/services/urlAuth";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { useAudioPlayer } from "expo-audio";
-import Constants from 'expo-constants';
 import { deleteAsync, documentDirectory, downloadAsync } from "expo-file-system/legacy";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
@@ -831,43 +830,15 @@ export default function UnifiedContentViewer() {
           const authPdfUrl = detectedContent.url ? cleanAndAuthUrl(detectedContent.url, token) : null;
           if (!authPdfUrl) return null;
 
-          const isExpoGo = Constants.appOwnership === 'expo';
-          
-          if (isExpoGo) {
-            // Expo Go doesn't support react-native-pdf (native module)
-            // Use Google Docs PDF viewer as fallback
-            const googleViewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(authPdfUrl)}&embedded=true`;
-            return (
-              <WebView
-                source={{ uri: googleViewerUrl }}
-                style={{ flex: 1 }}
-                originWhitelist={["*"]}
-                javaScriptEnabled={true}
-                domStorageEnabled={true}
-              />
-            );
-          }
-
-          // For native builds, dynamically import react-native-pdf
-          const PdfViewer = require('react-native-pdf').default;
+          // Use WebView for all platforms (react-native-pdf removed)
           return (
-            <View style={styles.flex1_bggray100}>
-              <PdfViewer
-                source={{ uri: authPdfUrl, cache: true }}
-                style={{
-                  flex: 1,
-                  width: Dimensions.get("window").width,
-                  height: Dimensions.get("window").height,
-                }}
-                onLoadComplete={(numberOfPages: number) => {
-                  if (IS_DEV) console.log(`[UnifiedViewer] PDF loaded with ${numberOfPages} pages`);
-                }}
-                onError={(err: any) => {
-                  if (IS_DEV) console.error("[UnifiedViewer] PDF error:", err);
-                  setError("Erreur lors de l'affichage du PDF");
-                }}
-              />
-            </View>
+            <WebView
+              source={{ uri: authPdfUrl }}
+              style={{ flex: 1 }}
+              originWhitelist={["*"]}
+              javaScriptEnabled={true}
+              domStorageEnabled={true}
+            />
           );
         }
         return (

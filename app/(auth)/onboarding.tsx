@@ -124,11 +124,11 @@ export default function OnboardingScreen() {
   };
 
   const handleFinish = () => {
-    router.replace("/(auth)/language-selection");
+    router.replace("/(auth)/signup");
   };
 
   const handleSkip = () => {
-    router.replace("/(auth)/language-selection");
+    router.replace("/(auth)/signup");
   };
 
   const slide = SLIDES[currentSlide];

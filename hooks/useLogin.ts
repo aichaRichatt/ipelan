@@ -189,7 +189,8 @@ export function useLogin() {
 
       dispatch(loginSuccess({ user: userData, token: authToken }));
 
-      router.replace("/(tabs)/(home)" as any);
+      // Always go to language selection to confirm/change preferences
+      router.replace("/(auth)/language-selection" as any);
 
       return { user: userData, token: authToken };
 

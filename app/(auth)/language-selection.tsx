@@ -1,80 +1,134 @@
 import { FontAwesome5 } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
-import React from "react";
+import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, {
-  FadeInDown,
-  FadeInUp,
+    FadeInDown,
+    FadeInUp,
 } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const LANGUAGE_STORAGE_KEY = '@ipelan_language';
 
+const LANGUAGES = [
+  { 
+    id: 'pulaar', 
+    label: 'Pulaar', 
+    subtitle: 'Apprendre en Pulaar',
+    icon: 'book-open',
+    color: '#F59E0B',
+  },
+  { 
+    id: 'soninke', 
+    label: 'Soninké', 
+    subtitle: 'Apprendre en Soninké',
+    icon: 'language',
+    color: '#10B981',
+  },
+  { 
+    id: 'wolof', 
+    label: 'Wolof', 
+    subtitle: 'Apprendre en Wolof',
+    icon: 'comments',
+    color: '#3B82F6',
+  },
+];
+
 const styles = StyleSheet.create({
-  bgf0f7ff_p4_rounded2xl_mb4: {
-    borderRadius: 16,
-    marginBottom: 16,
-    padding: 16
+  container: {
+    backgroundColor: '#FAF9F6',
+    flex: 1,
   },
-  flex1: {
-    flex: 1
-  },
-  flex1_bgwhite: {
-    backgroundColor: '#FFFFFF',
-    flex: 1
-  },
-  flex1_px6_py10_justifycenter: {
+  content: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: 24
+    paddingHorizontal: 24,
+    paddingVertical: 32,
   },
-  flexrow_itemscenter_p6_rounded: {
+  header: {
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  iconContainer: {
+    alignItems: 'center',
+    backgroundColor: '#002366',
+    borderRadius: 24,
+    height: 80,
+    justifyContent: 'center',
+    marginBottom: 24,
+    width: 80,
+  },
+  title: {
+    color: '#002366',
+    fontSize: 28,
+    fontWeight: '800',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  subtitle: {
+    color: '#6B7280',
+    fontSize: 16,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  cardsContainer: {
+    gap: 16,
+  },
+  card: {
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderRadius: 24,
+    borderRadius: 20,
     borderWidth: 2,
+    borderColor: '#E5E7EB',
     flexDirection: 'row',
-    marginBottom: 16,
-    padding: 24
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  fontbold_textxl: {
-    fontSize: 20,
-    fontWeight: '700'
+  cardPressed: {
+    borderColor: '#002366',
+    shadowOpacity: 0.1,
+    elevation: 4,
   },
-  itemscenter_mb12: {
-    alignItems: 'center'
-  },
-  p4_rounded2xl_mr6: {
+  cardIconContainer: {
+    alignItems: 'center',
     borderRadius: 16,
-    padding: 16
+    height: 56,
+    justifyContent: 'center',
+    marginRight: 16,
+    width: 56,
   },
-  text3xl_fontbold_text002366_te: {
-    color: '#002366',
-    fontSize: 30,
-    fontWeight: '700',
-    textAlign: 'center'
+  cardContent: {
+    flex: 1,
   },
-  textgray400_textsm: {
-    color: '#9CA3AF',
-    fontSize: 14
-  },
-  textlg_textgray400_mt2_textcen: {
-    color: '#9CA3AF',
+  cardTitle: {
+    color: '#111827',
     fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  cardSubtitle: {
+    color: '#6B7280',
+    fontSize: 14,
     fontWeight: '500',
-    marginTop: 8,
-    textAlign: 'center'
+  },
+  chevron: {
+    marginLeft: 8,
   },
 });
 
 export default function LanguageSelection() {
   const router = useRouter();
+  const [pressedId, setPressedId] = useState<string | null>(null);
 
-  const handleLanguageSelect = async (lang: string) => {
+  const handleLanguageSelect = async (langId: string) => {
     try {
-      await AsyncStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
-      console.log("Langue sauvegardée:", lang);
+      await AsyncStorage.setItem(LANGUAGE_STORAGE_KEY, langId);
+      console.log("Langue sauvegardée:", langId);
     } catch (e) {
       console.warn("Erreur sauvegarde langue:", e);
     }
@@ -82,75 +136,52 @@ export default function LanguageSelection() {
   };
 
   return (
-    <SafeAreaView style={styles.flex1_bgwhite}>
-      <View style={styles.flex1_px6_py10_justifycenter}>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.content}>
         
         <Animated.View 
           entering={FadeInUp.duration(800)}
-          style={styles.itemscenter_mb12}
+          style={styles.header}
         >
-          <View style={styles.bgf0f7ff_p4_rounded2xl_mb4}>
-            <FontAwesome5 name="globe" size={40} color="#002366" solid />
+          <View style={styles.iconContainer}>
+            <FontAwesome5 name="globe" size={40} color="#FFFFFF" solid />
           </View>
-          <Text style={styles.text3xl_fontbold_text002366_te}>
+          <Text style={styles.title}>
             Choisissez votre langue
           </Text>
-          <Text style={styles.textlg_textgray400_mt2_textcen}>
+          <Text style={styles.subtitle}>
             Sélectionnez la langue pour continuer
           </Text>
         </Animated.View>
 
         <Animated.View 
           entering={FadeInDown.delay(200).duration(800)}
-          style={{ gap: 16 } }
+          style={styles.cardsContainer}
         >
-          <LanguageOption 
-            label="Pulaar" 
-            icon="paw" 
-            color="#ff9500" 
-            onPress={() => handleLanguageSelect("pulaar")} 
-          />
-          <LanguageOption 
-            label="Soninké" 
-            icon="cat" 
-            color="#4cd964" 
-            onPress={() => handleLanguageSelect("soninke")} 
-          />
-          <LanguageOption 
-            label="Wolof" 
-            icon="fish" 
-            color="#007aff" 
-            onPress={() => handleLanguageSelect("wolof")} 
-          />
+          {LANGUAGES.map((lang) => (
+            <Pressable 
+              key={lang.id}
+              onPress={() => handleLanguageSelect(lang.id)}
+              onPressIn={() => setPressedId(lang.id)}
+              onPressOut={() => setPressedId(null)}
+              style={[
+                styles.card,
+                pressedId === lang.id && styles.cardPressed
+              ]}
+            >
+              <View style={[styles.cardIconContainer, { backgroundColor: `${lang.color}15` }]}>
+                <FontAwesome5 name={lang.icon} size={28} color={lang.color} solid />
+              </View>
+              <View style={styles.cardContent}>
+                <Text style={styles.cardTitle}>{lang.label}</Text>
+                <Text style={styles.cardSubtitle}>{lang.subtitle}</Text>
+              </View>
+              <FontAwesome5 name="chevron-right" size={16} color="#CBD5E1" style={styles.chevron} solid />
+            </Pressable>
+          ))}
         </Animated.View>
 
       </View>
     </SafeAreaView>
-  );
-}
-
-interface LanguageOptionProps {
-  label: string;
-  icon: string;
-  color: string;
-  onPress: () => void;
-}
-
-function LanguageOption({ label, icon, color, onPress }: LanguageOptionProps) {
-  return (
-    <Pressable 
-      onPress={onPress}
-      style={styles.flexrow_itemscenter_p6_rounded}
-    
-    >
-      <View style={[{ backgroundColor: `${color}15`+styles.p4_rounded2xl_mr6 }]}  >
-        <FontAwesome5 name={icon} size={28} color={color} solid />
-      </View>
-      <View style={styles.flex1}>
-        <Text style={[styles.fontbold_textxl, {color: "#002366"}] } >{label}</Text>
-        <Text style={styles.textgray400_textsm}>Apprendre en {label}</Text>
-      </View>
-      <FontAwesome5 name="chevron-right" size={16} color="#cbd5e1" solid />
-    </Pressable>
   );
 }
