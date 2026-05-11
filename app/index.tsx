@@ -1,91 +1,53 @@
-import { useRootNavigationState, useRouter } from "expo-router";
-import React, { useEffect } from "react";
-import { Alert, Image, StyleSheet, View } from "react-native";
+import { Redirect } from "expo-router";
+import React, { useEffect, useState } from "react";
+import { ActivityIndicator, View } from "react-native";
 import { useDispatch } from "react-redux";
-import ICON from "../assets/images/icon.png";
 import { loginSuccess } from "../services/redux/slices/authSlice";
 import { getToken, getUserData, hasValidToken } from "../services/storage/tokenStorage";
 
-const IS_DEV = process.env.NODE_ENV === "development";
-
 export default function Index() {
-  const router = useRouter();
   const dispatch = useDispatch();
-  const navigationState = useRootNavigationState();
+  const [destination, setDestination] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!navigationState?.key) {
-      Alert.alert("Debug", "Navigation not ready yet");
-      return;
-    }
+    let cancelled = false;
 
-    Alert.alert("Debug", "Navigation ready, starting...");
-    let isMounted = true;
+    const safetyTimer = setTimeout(() => {
+      if (!cancelled) setDestination("/(auth)/login");
+    }, 3000);
 
-    const run = async () => {
-      let destination: string = "/(auth)/login";
-
-      let hasToken = false;
-      try { hasToken = await hasValidToken(); } catch (e) {
-        Alert.alert("Debug", "Token check failed: " + String(e));
-      }
-
-      Alert.alert("Debug", "Has token: " + hasToken);
-
-      if (hasToken) {
-        let token: string | null = null;
-        let userData: any = null;
-        try { token = await getToken(); } catch (e) {
-          Alert.alert("Debug", "Get token error: " + String(e));
-        }
-        try { userData = await getUserData(); } catch (e) {
-          Alert.alert("Debug", "Get user error: " + String(e));
-        }
-        if (token && userData && isMounted) {
-          try { dispatch(loginSuccess({ user: userData, token })); } catch (e) {
-            Alert.alert("Debug", "Dispatch error: " + String(e));
-          }
-          destination = "/(tabs)/(home)";
-        }
-      }
-
-      await new Promise<void>((resolve) => setTimeout(resolve, 3000));
-
-      if (!isMounted) return;
-      Alert.alert("Debug", "Navigating to: " + destination);
+    const init = async () => {
       try {
-        router.replace(destination as any);
-        Alert.alert("Debug", "Navigation called successfully");
-      } catch (e) {
-        Alert.alert("Debug", "Navigation failed: " + String(e));
+        if (await hasValidToken()) {
+          const [token, userData] = await Promise.all([getToken(), getUserData()]);
+          if (!cancelled && token && userData) {
+            dispatch(loginSuccess({ user: userData, token }));
+            setDestination("/(tabs)/(home)");
+            clearTimeout(safetyTimer);
+            return;
+          }
+        }
+      } catch {}
+      if (!cancelled) {
+        setDestination("/(auth)/login");
+        clearTimeout(safetyTimer);
       }
     };
+    init();
 
-    run();
+    return () => {
+      cancelled = true;
+      clearTimeout(safetyTimer);
+    };
+  }, [dispatch]);
 
-    return () => { isMounted = false };
-  }, [dispatch, router, navigationState?.key]);
+  if (destination) {
+    return <Redirect href={destination as any} />;
+  }
 
   return (
-    <View style={styles.container}>
-      <Image
-        source={ICON}
-        style={styles.icon}
-        resizeMode="contain"
-      />
+    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#ffffff" }}>
+      <ActivityIndicator size="large" color="#002366" />
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  icon: {
-    width: 208,
-    height: 208,
-  },
-});

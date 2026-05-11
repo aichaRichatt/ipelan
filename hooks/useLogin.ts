@@ -92,15 +92,13 @@ export function useLogin() {
         });
       }
 
-      // ✅ OPTIMISATION : fire-and-forget — pas besoin d'attendre l'accord de politique
-      if (siteInfo?.policyagreed === 0) {
+       if (siteInfo?.policyagreed === 0) {
         agreeToSitePolicy(authToken).catch((policyErr) => {
           if (IS_DEV) console.warn("[useLogin] Policy agree failed:", policyErr);
         });
       }
 
-      // ✅ OPTIMISATION : fire-and-forget — l'enrôlement n'a pas besoin de bloquer la navigation
-      (async () => {
+       (async () => {
         try {
           const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
           const prefsStr = await AsyncStorage.getItem('@ipelan_preferences');
@@ -189,8 +187,13 @@ export function useLogin() {
 
       dispatch(loginSuccess({ user: userData, token: authToken }));
 
-      // Always go to language selection to confirm/change preferences
-      router.replace("/(auth)/language-selection" as any);
+      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+      const prefsStr = await AsyncStorage.getItem('@ipelan_preferences');
+      if (prefsStr) {
+        router.replace("/(tabs)/(home)" as any);
+      } else {
+        router.replace("/(auth)/language-selection" as any);
+      }
 
       return { user: userData, token: authToken };
 

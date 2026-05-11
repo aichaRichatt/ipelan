@@ -17,24 +17,13 @@ const TABS: { key: FilterTab; label: string }[] = [
   { key: 'wordOrder', label: 'Ordre' },
 ];
 
-const getTabColor = (tab: FilterTab): string => {
-  switch (tab) {
-    case 'quiz': return '#4a90e2';
-    case 'dictation': return '#10B981';
-    case 'listening': return '#F59E0B';
-    case 'association': return '#8B5CF6';
-    case 'wordOrder': return '#EC4899';
-    default: return '#002366';
-  }
-};
-
 export const ActivityTabs: React.FC<ActivityTabsProps> = ({
   activeTab,
   onTabChange,
   counts,
 }) => {
   return (
-    <View style={styles.bgwhite_borderb_bordergray200}>
+    <View style={styles.container}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -43,21 +32,20 @@ export const ActivityTabs: React.FC<ActivityTabsProps> = ({
         {TABS.map((tab) => {
           const isActive = activeTab === tab.key;
           const count = counts[tab.key] || 0;
-          const color = getTabColor(tab.key);
           
           return (
             <Pressable
               key={tab.key}
               onPress={() => onTabChange(tab.key)}
               style={[
-                styles.tabBase,
+                styles.tab,
                 isActive ? styles.tabActive : styles.tabInactive,
               ]}
             >
-              <View style={styles.flexrow_itemscenter}>
+              <View style={styles.tabContent}>
                 <Text
                   style={[
-                    styles.tabTextBase,
+                    styles.tabText,
                     isActive ? styles.tabTextActive : styles.tabTextInactive,
                   ]}
                 >
@@ -66,13 +54,13 @@ export const ActivityTabs: React.FC<ActivityTabsProps> = ({
                 {count > 0 && (
                   <View
                     style={[
-                      styles.countBadgeBase,
+                      styles.countBadge,
                       isActive ? styles.countBadgeActive : styles.countBadgeInactive,
                     ]}
                   >
                     <Text
                       style={[
-                        styles.countTextBase,
+                        styles.countText,
                         isActive ? styles.countTextActive : styles.countTextInactive,
                       ]}
                     >
@@ -92,25 +80,22 @@ export const ActivityTabs: React.FC<ActivityTabsProps> = ({
 export default ActivityTabs;
 
 const styles = StyleSheet.create({
-  bgwhite_borderb_bordergray200: {
+  container: {
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderColor: '#E5E7EB'
-  },
-  flexrow_itemscenter: {
-    alignItems: 'center',
-    flexDirection: 'row'
+    borderColor: '#E5E7EB',
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 12,
+    gap: 8,
   },
-  // Tab styles
-  tabBase: {
+  tab: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 10,
     marginRight: 8,
-    borderRadius: 9999,
+    borderRadius: 12,
+    minWidth: 70,
   },
   tabActive: {
     backgroundColor: '#002366',
@@ -118,9 +103,13 @@ const styles = StyleSheet.create({
   tabInactive: {
     backgroundColor: '#F3F4F6',
   },
-  // Text styles
-  tabTextBase: {
-    fontWeight: '500',
+  tabContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabText: {
+    fontWeight: '600',
     fontSize: 14,
   },
   tabTextActive: {
@@ -129,21 +118,22 @@ const styles = StyleSheet.create({
   tabTextInactive: {
     color: '#6B7280',
   },
-  // Count badge styles
-  countBadgeBase: {
+  countBadge: {
     marginLeft: 8,
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: 9999,
+    borderRadius: 10,
+    minWidth: 20,
+    alignItems: 'center',
   },
   countBadgeActive: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.3)',
   },
   countBadgeInactive: {
     backgroundColor: '#E5E7EB',
   },
-  countTextBase: {
-    fontSize: 12,
+  countText: {
+    fontSize: 11,
     fontWeight: '700',
   },
   countTextActive: {

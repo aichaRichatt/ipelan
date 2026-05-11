@@ -72,58 +72,49 @@ export const ActivityCard: React.FC<ActivityCardProps> = ({
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.bgwhite_rounded2xl_p4_mb3_bord,{
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 2,
-      }]}
-      
+      style={[styles.card, isCompleted && styles.cardCompleted]}
     >
-      <View style={styles.style_4}>
-        <View
-          style={[styles.w12_h12_roundedxl_itemscenter_ ,{ backgroundColor: `${color}15` }]}
-         >
+      <View style={styles.row}>
+        <View style={[styles.iconContainer, { backgroundColor: `${color}15` }]}>
           <Feather name={icon as any} size={24} color={color} />
         </View>
         
-        <View style={styles.flex1_ml3}>
-          <View style={styles.flexrow_itemscenter}>
-            <Text style={styles.textgray900_fontsemibold_flex1} numberOfLines={1}>
+        <View style={styles.flex1}>
+          <View style={styles.row}>
+            <Text style={styles.title} numberOfLines={1}>
               {title}
             </Text>
             {isCompleted && (
-              <View style={styles.style_3}>
-                <Text style={styles.style_2}>Terminé</Text>
+              <View style={styles.completedBadge}>
+                <Text style={styles.completedText}>Terminé</Text>
               </View>
             )}
           </View>
           
-          <View style={styles.flexrow_itemscenter_mt1}>
-            <View style={styles.bggray100_px2_py05_roundedmd}>
-              <Text style={styles.textgray600_textxs}>{label}</Text>
+          <View style={[styles.row, { marginTop: 4 }]}>
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{label}</Text>
             </View>
-            <View style={styles.flexrow_itemscenter_ml2}>
+            <View style={styles.xpContainer}>
               <Feather name="star" size={12} color="#F59E0B" />
-              <Text style={styles.textyellow700_textxs_fontmediu}>{xp} XP</Text>
+              <Text style={styles.xpText}>{xp} XP</Text>
             </View>
             {scoreDisplay && (
-        <View style={styles.ml2_bggreen100_px2_py05_rounde}>
-          <Text style={styles.textgreen700_textxs_fontmedium}>★ {scoreDisplay}</Text>
-        </View>
-      )}
+              <View style={styles.scoreBadge}>
+                <Text style={styles.scoreText}>★ {scoreDisplay}</Text>
+              </View>
+            )}
           </View>
         </View>
         
-        <View style={styles.itemsend}>
+        <View style={styles.rightSection}>
           {mastery ? (
-            <View style={styles.itemscenter}>
-              <Text style={styles.textlg}>{mastery.emoji}</Text>
-              <Text style={[styles.textxs_fontmedium,{ color: mastery.color }]} >
+            <View style={{ alignItems: 'center' }}>
+              <Text style={styles.masteryEmoji}>{mastery.emoji}</Text>
+              <Text style={[styles.masteryLabel, { color: mastery.color }]}>
                 {mastery.label}
               </Text>
-              <Text style={styles.textgray400_textxs}>{scorePercent}%</Text>
+              <Text style={styles.masteryPercent}>{scorePercent}%</Text>
             </View>
           ) : (
             <Feather name="chevron-right" size={20} color="#9CA3AF" />
@@ -132,15 +123,15 @@ export const ActivityCard: React.FC<ActivityCardProps> = ({
       </View>
       
       {progress && progress.totalScore > 0 && (
-        <View style={styles.mt3_pt3_bordert_bordergray100}>
-          <View style={styles.flexrow_itemscenter_justifybet}>
-            <Text style={styles.style_1}>Progression</Text>
-            <Text style={styles.textgray500_textxs}>{progress.bestScore}/{progress.totalScore}</Text>
+        <View style={styles.progressSection}>
+          <View style={styles.progressHeader}>
+            <Text style={styles.progressLabel}>Progression</Text>
+            <Text style={styles.progressValue}>{progress.bestScore}/{progress.totalScore}</Text>
           </View>
-          <View style={styles.h15_bggray100_roundedfull_over}>
+          <View style={styles.progressBarBg}>
             <View
-              style={[styles.hfull_roundedfull,{ width: `${scorePercent}%`, backgroundColor: color }]}
-             />
+              style={[styles.progressBarFill, { width: `${scorePercent}%`, backgroundColor: color }]}
+            />
           </View>
         </View>
       )}
@@ -151,129 +142,141 @@ export const ActivityCard: React.FC<ActivityCardProps> = ({
 export default ActivityCard;
 
 const styles = StyleSheet.create({
-  bggray100_px2_py05_roundedmd: {
-    backgroundColor: '#F3F4F6',
-    borderRadius: 6,
-    paddingHorizontal: 8
-  },
-  bgwhite_rounded2xl_p4_mb3_bord: {
+  // Card container
+  card: {
     backgroundColor: '#FFFFFF',
     borderColor: '#E5E7EB',
     borderRadius: 16,
     borderWidth: 1,
     marginBottom: 12,
-    padding: 16
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  flex1_ml3: {
+  cardCompleted: {
+    borderColor: '#10B981',
+    backgroundColor: '#F0FDF4',
+  },
+  // Layout
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  flex1: {
     flex: 1,
-    marginLeft: 12
+    marginLeft: 12,
   },
-  flexrow_itemscenter: {
+  // Icon
+  iconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
     alignItems: 'center',
-    flexDirection: 'row'
+    justifyContent: 'center',
   },
-  flexrow_itemscenter_justifybet: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4
-  },
-  flexrow_itemscenter_ml2: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    marginLeft: 8
-  },
-  flexrow_itemscenter_mt1: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    marginTop: 4
-  },
-  h15_bggray100_roundedfull_over: {
-    backgroundColor: '#F3F4F6',
-    borderRadius: 9999,
-    overflow: 'hidden'
-  },
-  hfull_roundedfull: {
-    borderRadius: 9999,
-    height: '100%'
-  },
-  itemscenter: {
-    alignItems: 'center'
-  },
-  itemsend: {
-    alignItems: 'flex-end'
-  },
-  ml2_bggreen100_px2_py05_rounde: {
-    backgroundColor: '#DCFCE7',
-    borderRadius: 6,
-    marginLeft: 8,
-    paddingHorizontal: 8
-  },
-  mt3_pt3_bordert_bordergray100: {
-    borderColor: '#F3F4F6',
-    borderTopWidth: 1,
-    marginTop: 12,
-    paddingTop: 12
-  },
-  style_1: {
-    color: '#6B7280',
-    fontSize: 12
-  },
-  style_2: {
-    color: '#15803D',
-    fontSize: 12,
-    fontWeight: '500'
-  },
-  style_3: {
-    backgroundColor: '#DCFCE7',
-    borderRadius: 9999,
-    marginLeft: 8,
-    paddingHorizontal: 8
-  },
-  style_4: {
-    alignItems: 'center',
-    flexDirection: 'row'
-  },
-  textgray400_textxs: {
-    color: '#9CA3AF',
-    fontSize: 12
-  },
-  textgray500_textxs: {
-    color: '#6B7280',
-    fontSize: 12
-  },
-  textgray600_textxs: {
-    color: '#4B5563',
-    fontSize: 12
-  },
-  textgray900_fontsemibold_flex1: {
+  // Text
+  title: {
     color: '#111827',
+    fontWeight: '600',
+    fontSize: 16,
     flex: 1,
-    fontWeight: '600'
   },
-  textgreen700_textxs_fontmedium: {
-    color: '#15803D',
+  badge: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  badgeText: {
+    color: '#4B5563',
     fontSize: 12,
-    fontWeight: '500'
   },
-  textlg: {
-    fontSize: 18
+  xpContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 8,
   },
-  textxs_fontmedium: {
-    fontSize: 12,
-    fontWeight: '500'
-  },
-  textyellow700_textxs_fontmediu: {
+  xpText: {
     color: '#A16207',
     fontSize: 12,
     fontWeight: '500',
-    marginLeft: 4
+    marginLeft: 4,
   },
-  w12_h12_roundedxl_itemscenter_: {
+  scoreBadge: {
+    backgroundColor: '#DCFCE7',
+    borderRadius: 6,
+    marginLeft: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  scoreText: {
+    color: '#15803D',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  // Right side
+  rightSection: {
+    alignItems: 'flex-end',
+    marginLeft: 8,
+  },
+  masteryEmoji: {
+    fontSize: 18,
+  },
+  masteryLabel: {
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  masteryPercent: {
+    color: '#9CA3AF',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  // Progress section
+  progressSection: {
+    borderTopWidth: 1,
+    borderColor: '#F3F4F6',
+    marginTop: 12,
+    paddingTop: 12,
+  },
+  progressHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 12,
-    height: 48,
-    justifyContent: 'center',
-    width: 48
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  progressLabel: {
+    color: '#6B7280',
+    fontSize: 12,
+  },
+  progressValue: {
+    color: '#6B7280',
+    fontSize: 12,
+  },
+  progressBarBg: {
+    height: 6,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  // Completed badge
+  completedBadge: {
+    backgroundColor: '#DCFCE7',
+    borderRadius: 9999,
+    marginLeft: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  completedText: {
+    color: '#15803D',
+    fontSize: 12,
+    fontWeight: '500',
   },
 });
