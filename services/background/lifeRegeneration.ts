@@ -58,10 +58,10 @@ export function registerLifeBackgroundTask() {
   });
 }
 
-/**
- * Démarrer le background fetch pour les vies
- */
-export async function startLifeBackgroundFetch(): Promise<boolean> {
+// Module-level promise to coalesce concurrent registration calls from multiple tabs
+let _lifeTaskRegistrationPromise: Promise<boolean> | null = null;
+
+async function _registerLifeTask(): Promise<boolean> {
   try {
     registerLifeBackgroundTask();
 
@@ -80,9 +80,22 @@ export async function startLifeBackgroundFetch(): Promise<boolean> {
     if (IS_DEV) console.log('[Background] Life regeneration task registered (15min interval)');
     return true;
   } catch (error) {
-    console.error('[Background] Failed to register life task:', error);
+    if (IS_DEV) console.warn('[Background] Failed to register life task:', error);
     return false;
   }
+}
+
+/**
+ * Démarrer le background fetch pour les vies.
+ * Les appels concurrents (ex: 3 tabs montées simultanément) partagent la même Promise.
+ */
+export async function startLifeBackgroundFetch(): Promise<boolean> {
+  if (_lifeTaskRegistrationPromise) return _lifeTaskRegistrationPromise;
+  _lifeTaskRegistrationPromise = _registerLifeTask();
+  const result = await _lifeTaskRegistrationPromise;
+  // Reset on failure so the next cold-start can retry
+  if (!result) _lifeTaskRegistrationPromise = null;
+  return result;
 }
 
 /**

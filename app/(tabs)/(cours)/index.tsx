@@ -64,8 +64,6 @@ export default function CoursScreen() {
   const [courses, setCourses] = useState<CourseData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [preferences, setPreferences] = useState<UserPreferences | null>(null);
-  const [courseProgressMap, setCourseProgressMap] = useState<Record<number, CourseProgressData>>({});
 
   useFocusEffect(
     useCallback(() => {
@@ -90,20 +88,6 @@ export default function CoursScreen() {
   };
 
   useEffect(() => {
-    const loadPreferences = async () => {
-      try {
-        const prefs = await AsyncStorage.getItem(PREFERENCES_KEY);
-        if (prefs) {
-          setPreferences(JSON.parse(prefs));
-        }
-      } catch (e) {
-        console.warn("Failed to load preferences:", e);
-      }
-    };
-    loadPreferences();
-  }, []);
-
-  useEffect(() => {
     const fetchCourses = async () => {
       if (!token) {
         setIsLoading(false);
@@ -111,19 +95,26 @@ export default function CoursScreen() {
       }
 
       try {
+        // ── Phase 1 : préférences + liste des cours en parallèle ──────────────
+        const [prefsStr, enrolledResponse] = await Promise.all([
+          AsyncStorage.getItem(PREFERENCES_KEY).catch(() => null),
+          getEnrolledCoursesByTimeline(token).catch(() => null),
+        ]);
+
+        const prefs: UserPreferences | null = prefsStr ? JSON.parse(prefsStr) : null;
         let fetchedCourses: any[] = [];
 
-        if (preferences) {
-          console.log("[Cours] Fetching courses for language:", preferences.language, "grade:", preferences.grade);
-          const langCourses = await getCoursesForLanguageAndGrade(token, preferences.language, preferences.grade);
+        if (prefs) {
+          if (IS_DEV) console.log("[Cours] Fetching courses for language:", prefs.language, "grade:", prefs.grade);
+          const langCourses = await getCoursesForLanguageAndGrade(token, prefs.language, prefs.grade);
           if (langCourses.length > 0) {
-            if (IS_DEV) console.log("[Cours] Found", langCourses.length, "courses for", preferences.language, "grade", preferences.grade);
+            if (IS_DEV) console.log("[Cours] Found", langCourses.length, "courses for", prefs.language, "grade", prefs.grade);
             fetchedCourses = langCourses;
           }
         }
 
         if (fetchedCourses.length === 0) {
-          console.log("[Cours] No grade-specific courses, fetching all from Langues Nationales iplan...");
+          if (IS_DEV) console.log("[Cours] No grade-specific courses, fetching all from Langues Nationales iplan...");
           const allLangCourses = await getAllCoursesFromLanguageCategory(token, ENV.API.LANGUAGE_CATEGORY_ID);
           if (allLangCourses.length > 0) {
             if (IS_DEV) console.log("[Cours] Found", allLangCourses.length, "courses in language category");
@@ -131,28 +122,24 @@ export default function CoursScreen() {
           }
         }
 
-        if (fetchedCourses.length === 0) {
-          console.log("[Cours] No filtered courses, trying enrolled courses...");
-          const response = await getEnrolledCoursesByTimeline(token);
-          if (response?.courses && Array.isArray(response.courses)) {
-            fetchedCourses = response.courses.filter((c: any) => c.visible !== false);
-          }
+        if (fetchedCourses.length === 0 && enrolledResponse?.courses) {
+          fetchedCourses = (enrolledResponse.courses as any[]).filter((c: any) => c.visible !== false);
         }
 
-        console.log("[Cours] Total courses to display:", fetchedCourses.length);
+        if (IS_DEV) console.log("[Cours] Total courses to display:", fetchedCourses.length);
 
-        const enrichedCourses: CourseData[] = await Promise.all(
+        if (fetchedCourses.length === 0) {
+          setError("Aucun cours trouvé dans les catégories de langues");
+          setIsLoading(false);
+          return;
+        }
+
+        // ── Phase 2 : afficher immédiatement avec données locales (SQLite) ────
+        // getCourseContents (réseau) est différé à la phase 3
+        const quickCourses: CourseData[] = await Promise.all(
           fetchedCourses.map(async (c: any) => {
-            let lessonsCount = 0;
             let dbProgress: CourseProgressData | null = null;
             let totalScore: string | undefined;
-
-            try {
-              const sections = await getCourseContents(token, c.id);
-              if (Array.isArray(sections)) {
-                sections.forEach(sec => { if (sec.modules) lessonsCount += sec.modules.length; });
-              }
-            } catch { }
 
             try {
               dbProgress = await getCourseProgress(c.id, userId);
@@ -179,40 +166,41 @@ export default function CoursScreen() {
               courseimage: c.courseimage || "",
               coursecategory: c.coursecategory || c.category || "",
               viewurl: c.viewurl || "",
-              lessonsCount,
+              lessonsCount: 0,  // rempli en phase 3
               dbProgress: dbProgress || undefined,
               totalScore,
             };
           })
         );
 
-        console.log('[Courses] Loaded', enrichedCourses.length, 'courses with DB progress');
-        setCourses(enrichedCourses);
+        // Afficher les cours sans attendre le nombre de leçons
+        setCourses(quickCourses);
+        setError(null);
+        setIsLoading(false);
 
-        if (enrichedCourses.length === 0) {
-          setError("Aucun cours trouvé dans les catégories de langues");
-        } else {
-          setError(null);
+        // ── Phase 3 : enrichir lessonsCount en arrière-plan ──────────────────
+        for (const c of fetchedCourses) {
+          try {
+            const sections = await getCourseContents(token, c.id);
+            let lessonsCount = 0;
+            if (Array.isArray(sections)) {
+              sections.forEach(sec => { if (sec.modules) lessonsCount += sec.modules.length; });
+            }
+            setCourses(prev => prev.map(course =>
+              course.id === c.id ? { ...course, lessonsCount } : course
+            ));
+          } catch { }
         }
+
       } catch (err: any) {
         console.error("Failed to fetch courses:", err);
         setError(err.message);
-
-        try {
-          const response = await getEnrolledCoursesByTimeline(token);
-          if (response?.courses) {
-            setCourses(Array.isArray(response.courses) ? response.courses : []);
-          }
-        } catch (fallbackErr) {
-          console.warn("Fallback also failed:", fallbackErr);
-        }
-      } finally {
         setIsLoading(false);
       }
     };
 
     fetchCourses();
-  }, [token, preferences]);
+  }, [token]);
 
   useEffect(() => {
     const reloadProgress = async () => {
@@ -226,7 +214,6 @@ export default function CoursScreen() {
             progressMap[course.id] = dbProgress;
           }
         }
-        setCourseProgressMap(progressMap);
 
         setCourses(prev => prev.map(c => ({
           ...c,

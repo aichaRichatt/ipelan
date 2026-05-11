@@ -22,6 +22,11 @@ import { useAppState } from './useAppState';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
 
+// Module-level sync guard — prevents 3 simultaneous tab mounts from each calling Moodle
+let _syncInProgress = false;
+let _lastSyncTimestamp = 0;
+const SYNC_COOLDOWN_MS = 8_000;
+
 export interface UserStats {
   xp: number;
   coins: number;
@@ -138,8 +143,11 @@ export function useUserStats(): UseUserStatsReturn {
       }
 
       const isOnline = await checkOnline() && token !== null;
+      const _now = Date.now();
+      const canSync = isOnline && !!token && !_syncInProgress && (_now - _lastSyncTimestamp > SYNC_COOLDOWN_MS);
 
-      if (isOnline && token) {
+      if (canSync) {
+        _syncInProgress = true;
         try {
           // 🔒 VÉRIFICATION DE SÉCURITÉ : Vérifier l'identité avant toute synchronisation
           const identityCheck = await verifyUserIdentityBeforeSync(token);
@@ -298,9 +306,12 @@ export function useUserStats(): UseUserStatsReturn {
             lives: localStats.lives,
             streak: localStats.streak,
           }));
+        } finally {
+          _syncInProgress = false;
+          _lastSyncTimestamp = Date.now();
         }
       } else {
-        // Offline mode - use local data only
+        // Offline mode or within cooldown window — use local data only
         setStats(localStats);
         dispatch(updateUser({
           xp: localStats.xp,
@@ -308,7 +319,7 @@ export function useUserStats(): UseUserStatsReturn {
           lives: localStats.lives,
           streak: localStats.streak,
         }));
-        if (IS_DEV) {
+        if (IS_DEV && !isOnline) {
           console.log('[useUserStats] Offline mode - using local data');
         }
       }
