@@ -3,13 +3,11 @@ import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useSelector } from "react-redux";
 import { useLives } from "../../../hooks/useLives";
 import { useLogin } from "../../../hooks/useLogin";
-import { CourseInput, useMoodleCourses } from "../../../hooks/useMoodleCourses";
+import { useMoodleCourses } from "../../../hooks/useMoodleCourses";
 import { useUserStats } from "../../../hooks/useUserStats";
-import { getEnrolledCoursesByTimeline } from "../../../services/api/courseService";
-import { RootState } from "../../../services/redux/store";
+import { CourseProgressData, getAllCourseProgress } from "../../../services/storage/course-progress";
 import { getLevelFromXP } from "../../../utils/levelCalculator";
 
 function formatHeartCountdown(nextHeartTime: string | null): string | null {
@@ -24,10 +22,9 @@ function formatHeartCountdown(nextHeartTime: string | null): string | null {
 export default function ProgressScreen() {
   const router = useRouter();
   const { user } = useLogin();
-  const token = useSelector((state: RootState) => state.auth.token);
-  const [courseInputs, setCourseInputs] = useState<CourseInput[]>([]);
   const { stats: userStats, refetch: refetchUserStats } = useUserStats();
   const { lives, coins, maxLives, canBuyLife, isBuying, lifeCost, error, buyLife } = useLives(refetchUserStats);
+  const [courseProgress, setCourseProgress] = useState<CourseProgressData[]>([]);
 
   // Refresh countdown every minute when lives < max
   const [, forceRender] = useState(0);
@@ -37,62 +34,61 @@ export default function ProgressScreen() {
     return () => clearInterval(id);
   }, [userStats.lives, lives, maxLives]);
 
-  useEffect(() => {
-    const fetchCourses = async () => {
-      if (!token) return;
-      try {
-        const response = await getEnrolledCoursesByTimeline(token);
-        if (response?.courses) {
-          const visible = response.courses.filter((c: any) => c.visible !== false && c.id > 0);
-          setCourseInputs(visible.map((c: any) => ({ id: c.id, name: c.fullname || c.shortname })));
-        }
-      } catch (err) {
-        console.warn('[Progress] Failed to fetch courses:', err);
-      }
-    };
-    fetchCourses();
-  }, [token]);
+  const loadCourseProgress = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const data = await getAllCourseProgress(user.id);
+      setCourseProgress(data);
+    } catch (err) {
+      console.warn('[Progress] Failed to load course progress:', err);
+    }
+  }, [user?.id]);
 
-  const {
-    progressList,
-    loading,
-    totalXP,
-    totalCompleted,
-    currentStreak,
-    badgesWithStatus,
-    reload
-  } = useMoodleCourses(courseInputs, user?.id || null);
+  useEffect(() => { loadCourseProgress(); }, [loadCourseProgress]);
 
-  // Reload stats and course data every time this screen comes into focus
+  // Badges — useMoodleCourses avec [] : seules les badges nécessitent ce hook
+  const { loading, badgesWithStatus, reload } = useMoodleCourses([], user?.id || null);
+
+  // Reload à chaque focus et après changement XP
   useFocusEffect(
     useCallback(() => {
       refetchUserStats();
       reload();
-    }, [refetchUserStats, reload])
+      loadCourseProgress();
+    }, [refetchUserStats, reload, loadCourseProgress])
   );
 
-  //  Recharger les données quand XP change (après une activité)
   useEffect(() => {
-    if (userStats.xp > 0) {
-      reload();
-    }
-  }, [userStats.xp, reload]);
+    if (userStats.xp > 0) loadCourseProgress();
+  }, [userStats.xp, loadCourseProgress]);
 
-  //  Utiliser ?? pour ne pas masquer les 0 légitimes (ex. 0 vies, 0 pièces)
-  const displayXP = userStats.xp ?? totalXP;
+  // Stats calculées depuis SQLite (source de vérité locale)
+  const displayXP = userStats.xp;
   const displayCoins = userStats.coins ?? coins;
   const displayLives = userStats.lives ?? lives;
-  const displayStreak = userStats.streak ?? currentStreak;
+  const displayStreak = userStats.streak;
   const heartCountdown = formatHeartCountdown(userStats.nextHeartTime);
 
-  const completedCourses = progressList.filter(c => c.completionPercent === 100).length;
-  const inProgressCourses = progressList.filter(c => c.completionPercent > 0 && c.completionPercent < 100).length;
+  const completedCourses = courseProgress.filter(c =>
+    c.totalActivities > 0 && c.completedActivities >= c.totalActivities
+  ).length;
+
+  const inProgressCourses = courseProgress.filter(c =>
+    c.completedActivities > 0 && c.completedActivities < c.totalActivities
+  ).length;
+
+  const totalCompleted = courseProgress.reduce((sum, c) => sum + (c.completedActivities || 0), 0);
+
+  const globalProgress = courseProgress.length > 0
+    ? Math.round(
+        courseProgress.reduce((sum, c) => {
+          const pct = c.totalActivities > 0 ? (c.completedActivities / c.totalActivities) * 100 : 0;
+          return sum + pct;
+        }, 0) / courseProgress.length
+      )
+    : 0;
 
   const { level, title } = getLevelFromXP(displayXP);
-
-  const globalProgress = progressList.length > 0
-    ? Math.round(progressList.reduce((sum, c) => sum + c.completionPercent, 0) / progressList.length)
-    : 0;
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -106,7 +102,7 @@ export default function ProgressScreen() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={loading && progressList.length > 0} onRefresh={reload} />
+          <RefreshControl refreshing={loading && courseProgress.length > 0} onRefresh={reload} />
         }
       >
         {/* Profile card */}
@@ -122,20 +118,21 @@ export default function ProgressScreen() {
                 <View>
                   <Text style={styles.profileName}>{user?.fullname || user?.username || "Utilisateur"}</Text>
                   <Text style={styles.profileLevel}>Niveau {level} - {title}</Text>
+                  <View style={styles.livesRow}>
+                    <Text style={styles.heartIconSmall}>❤️</Text>
+                    <Text style={styles.livesTextSmall}>{displayLives}/{maxLives}</Text>
+                    {heartCountdown && (
+                      <>
+                        <Text style={styles.dotSeparator}>•</Text>
+                        <Feather name="clock" size={10} color="#EF4444" />
+                        <Text style={styles.countdownTextSmall}>+1 dans {heartCountdown}</Text>
+                      </>
+                    )}
+                  </View>
                 </View>
               </View>
 
               <View style={styles.profileRight}>
-                <View style={styles.livesTag}>
-                  <Text style={styles.livesText}>{displayLives}/{maxLives}</Text>
-                  <Text style={styles.heartEmoji}>❤️</Text>
-                </View>
-                {heartCountdown && (
-                  <View style={styles.countdownTag}>
-                    <Feather name="clock" size={11} color="#EF4444" />
-                    <Text style={styles.countdownText}>+1 dans {heartCountdown}</Text>
-                  </View>
-                )}
                 <View style={styles.coinsTag}>
                   <Text style={styles.coinsText}>{displayCoins}</Text>
                   <Text style={styles.coinEmoji}>🪙</Text>
@@ -188,7 +185,7 @@ export default function ProgressScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Statistiques des Cours</Text>
           <View style={styles.card}>
-            {loading && progressList.length === 0 ? (
+            {loading && courseProgress.length === 0 ? (
               <View style={styles.loadingContainer}><ActivityIndicator size="small" color="#002366" /></View>
             ) : (
               <>
@@ -198,7 +195,7 @@ export default function ProgressScreen() {
                       <Feather name="book" size={20} color="#6B7280" />
                     </View>
                     <Text style={styles.barLabel}>Total</Text>
-                    <Text style={styles.barValue}>{progressList.length}</Text>
+                    <Text style={styles.barValue}>{courseProgress.length}</Text>
                     <Text style={styles.barSubLabel}>cours</Text>
                     <View style={styles.barGray} />
                   </View>
@@ -276,10 +273,10 @@ export default function ProgressScreen() {
           <View style={styles.overviewCard}>
             <View style={styles.progressLabelRow}>
               <Text style={styles.progressLabel}>Cours terminés</Text>
-              <Text style={styles.progressValue}>{completedCourses}/{progressList.length || 0}</Text>
+              <Text style={styles.progressValue}>{completedCourses}/{courseProgress.length || 0}</Text>
             </View>
             <View style={styles.progressBarBg}>
-              <View style={[styles.progressBarGreen, { width: `${progressList.length > 0 ? (completedCourses / progressList.length) * 100 : 0}%` }]} />
+              <View style={[styles.progressBarGreen, { width: `${courseProgress.length > 0 ? (completedCourses / courseProgress.length) * 100 : 0}%` }]} />
             </View>
           </View>
           <View style={styles.overviewCard}>
@@ -384,6 +381,30 @@ const styles = StyleSheet.create({
   profileLevel: {
     color: '#6b7280',
     fontSize: 14,
+  },
+  livesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  heartIconSmall: {
+    fontSize: 12,
+    marginRight: 4,
+  },
+  livesTextSmall: {
+    color: '#ef4444',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  dotSeparator: {
+    color: '#d1d5db',
+    marginHorizontal: 4,
+    fontSize: 10,
+  },
+  countdownTextSmall: {
+    color: '#ef4444',
+    fontSize: 11,
+    marginLeft: 2,
   },
   profileRight: {
     alignItems: 'flex-end',
