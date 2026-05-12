@@ -8,7 +8,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
 import ENV from "../../../constants/env";
 import { useLives } from "../../../hooks/useLives";
-import { getAllCoursesFromLanguageCategory, getCourseContents, getCoursesForLanguageAndGrade, getEnrolledCoursesByTimeline } from "../../../services/api/courseService";
+import { getAllCoursesFromLanguageCategory, getCourseContents, getCoursesForLanguageAndGrade, getCoursesByCategoryFromEnrollments, getEnrolledCoursesByTimeline, getUserCourses } from "../../../services/api/courseService";
+import { isMoodleOnline } from "../../../services/api/moodleClient";
 import { RootState } from "../../../services/redux/store";
 import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
 import { CourseProgressData, getCourseProgress } from "../../../services/storage/course-progress";
@@ -16,6 +17,7 @@ import { CourseProgressData, getCourseProgress } from "../../../services/storage
 const IS_DEV = process.env.NODE_ENV === "development";
 
 const PREFERENCES_KEY = '@ipelan_preferences';
+const COURSES_CACHE_KEY = '@ipelan_courses_cache';
 
 interface UserPreferences {
   language: string;
@@ -54,6 +56,43 @@ const getLevelFromCourse = (name: string): number => {
   if (lowerName.includes('3') || lowerName.includes('avan')) return 3;
   return 1;
 };
+
+// ── Filtre par langue et année sur les champs texte disponibles ──────────────
+const LANG_KEYWORDS: Record<string, string[]> = {
+  pulaar:  ['pulaar', 'pular'],
+  soninke: ['soninké', 'soninke'],
+  wolof:   ['wolof'],
+};
+// Noms exacts des catégories grade dans Moodle (screenshot admin confirmé)
+// "1ère année", "2 ème", "3 ème", "4 ème", "5 ème", "6 ème"
+const GRADE_KEYWORDS: Record<number, string[]> = {
+  1: ['1ère année', '1ere année', '1ère', '1ere', '1 ème', '1ème', '1eme'],
+  2: ['2 ème', '2 eme', '2ème', '2eme', '2 ère', '2ère', '2ere'],
+  3: ['3 ème', '3 eme', '3ème', '3eme', '3 ère', '3ère', '3ere'],
+  4: ['4 ème', '4 eme', '4ème', '4eme', '4 ère', '4ère', '4ere'],
+  5: ['5 ème', '5 eme', '5ème', '5eme', '5 ère', '5ère', '5ere'],
+  6: ['6 ème', '6 eme', '6ème', '6eme', '6 ère', '6ère', '6ere'],
+};
+
+function filterByPreferences(courses: any[], language: string, grade: number): any[] {
+  const langKeys = LANG_KEYWORDS[language.toLowerCase()] ?? [language.toLowerCase()];
+  const gradeKeys = GRADE_KEYWORDS[grade] ?? [];
+
+  return courses.filter(c => {
+    // Tous les champs texte disponibles dans la réponse Moodle
+    const text = [
+      c.coursecategory ?? '',
+      c.fullname ?? '',
+      c.shortname ?? '',
+      c.categoryname ?? '',
+      c.displayname ?? '',
+    ].join(' ').toLowerCase();
+
+    const hasLang  = langKeys.some(k  => text.includes(k.toLowerCase()));
+    const hasGrade = gradeKeys.length === 0 || gradeKeys.some(k => text.includes(k.toLowerCase()));
+    return hasLang && hasGrade;
+  });
+}
 
 export default function CoursScreen() {
   const router = useRouter();
@@ -95,35 +134,136 @@ export default function CoursScreen() {
       }
 
       try {
-        // ── Phase 1 : préférences + liste des cours en parallèle ──────────────
-        const [prefsStr, enrolledResponse] = await Promise.all([
-          AsyncStorage.getItem(PREFERENCES_KEY).catch(() => null),
-          getEnrolledCoursesByTimeline(token).catch(() => null),
-        ]);
-
+        // ── Phase 0 : cache offline ───────────────────────────────────────────
+        const prefsStr = await AsyncStorage.getItem(PREFERENCES_KEY).catch(() => null);
         const prefs: UserPreferences | null = prefsStr ? JSON.parse(prefsStr) : null;
         let fetchedCourses: any[] = [];
 
+        const online = await isMoodleOnline();
+        if (!online) {
+          if (IS_DEV) console.log("[Cours] Offline — loading from cache");
+          const cached = await AsyncStorage.getItem(COURSES_CACHE_KEY).catch(() => null);
+          if (cached) {
+            fetchedCourses = JSON.parse(cached);
+            if (IS_DEV) console.log("[Cours] Cache loaded:", fetchedCourses.length, "courses");
+          }
+          if (fetchedCourses.length === 0) {
+            setError("Hors ligne — aucun cours en cache");
+            setIsLoading(false);
+            return;
+          }
+          // Build quick courses from cache then return
+          const quickCourses: CourseData[] = await Promise.all(
+            fetchedCourses.map(async (c: any) => {
+              let dbProgress = null;
+              let totalScore: string | undefined;
+              try {
+                dbProgress = await getCourseProgress(c.id, userId);
+                if (dbProgress) {
+                  const scores = await getAllScoresForCourse(c.id);
+                  if (scores.size > 0) {
+                    let best = 0, max = 0;
+                    scores.forEach(s => { best += s.bestScore; max += s.totalScore; });
+                    if (max > 0) totalScore = `${best}/${max}`;
+                  }
+                }
+              } catch { }
+              const finalProgress = dbProgress && dbProgress.totalActivities > 0
+                ? Math.round((dbProgress.completedActivities / dbProgress.totalActivities) * 100)
+                : c.progress || 0;
+              return {
+                id: c.id,
+                fullname: c.fullname || c.shortname || "Cours",
+                shortname: c.shortname || "",
+                progress: finalProgress,
+                visible: c.visible ?? true,
+                courseimage: c.courseimage || "",
+                coursecategory: c.coursecategory || c.category || "",
+                viewurl: c.viewurl || "",
+                lessonsCount: c.lessonsCount || 0,
+                dbProgress: dbProgress || undefined,
+                totalScore,
+              };
+            })
+          );
+          setCourses(quickCourses);
+          setError(null);
+          setIsLoading(false);
+          return;
+        }
+
+        // ── Phase 1 : préférences + fetch Moodle ─────────────────────────────
+
+        // ── Tentative 1 : arbre de catégories Moodle ─────────────────────────
+        // Fonctionne si core_course_get_categories est ajouté au service ipelan_full
         if (prefs) {
-          if (IS_DEV) console.log("[Cours] Fetching courses for language:", prefs.language, "grade:", prefs.grade);
+          if (IS_DEV) console.log("[Cours] Attempt 1 – category tree for:", prefs.language, "grade", prefs.grade);
           const langCourses = await getCoursesForLanguageAndGrade(token, prefs.language, prefs.grade);
           if (langCourses.length > 0) {
-            if (IS_DEV) console.log("[Cours] Found", langCourses.length, "courses for", prefs.language, "grade", prefs.grade);
+            if (IS_DEV) console.log("[Cours] Attempt 1 found", langCourses.length, "courses");
             fetchedCourses = langCourses;
           }
         }
 
+        // ── Tentative 2 : catégories grade déduites des cours inscrits ────────
+        // N'utilise PAS core_course_get_categories — fiable avec ipelan_full
+        // Logique : cours inscrit → category ID (grade) → tous les cours du grade
+        if (fetchedCourses.length === 0 && userId) {
+          if (IS_DEV) console.log("[Cours] Attempt 2 – courses from enrolled category IDs");
+          const catCourses = await getCoursesByCategoryFromEnrollments(token, userId);
+          if (catCourses.length > 0) {
+            // Filtrer par langue si possible
+            if (prefs) {
+              const filtered = filterByPreferences(catCourses, prefs.language, prefs.grade);
+              fetchedCourses = filtered.length > 0 ? filtered : catCourses;
+              if (IS_DEV) console.log("[Cours] Attempt 2 filtered", filtered.length, "/", catCourses.length, "courses");
+            } else {
+              fetchedCourses = catCourses;
+            }
+          }
+        }
+
+        // ── Tentative 3 : catégorie racine langue (ID 18) ────────────────────
         if (fetchedCourses.length === 0) {
-          if (IS_DEV) console.log("[Cours] No grade-specific courses, fetching all from Langues Nationales iplan...");
+          if (IS_DEV) console.log("[Cours] Attempt 3 – root language category", ENV.API.LANGUAGE_CATEGORY_ID);
           const allLangCourses = await getAllCoursesFromLanguageCategory(token, ENV.API.LANGUAGE_CATEGORY_ID);
-          if (allLangCourses.length > 0) {
-            if (IS_DEV) console.log("[Cours] Found", allLangCourses.length, "courses in language category");
+          if (allLangCourses.length > 0 && prefs) {
+            const filtered = filterByPreferences(allLangCourses, prefs.language, prefs.grade);
+            fetchedCourses = filtered.length > 0 ? filtered : allLangCourses;
+            if (IS_DEV) console.log("[Cours] Attempt 3 filtered", filtered.length, "/", allLangCourses.length);
+          } else {
             fetchedCourses = allLangCourses;
           }
         }
 
-        if (fetchedCourses.length === 0 && enrolledResponse?.courses) {
-          fetchedCourses = (enrolledResponse.courses as any[]).filter((c: any) => c.visible !== false);
+        // ── Tentative 4 : cours inscrits (timeline) + filtre texte ───────────
+        if (fetchedCourses.length === 0) {
+          if (IS_DEV) console.log("[Cours] Attempt 4 – enrolled courses timeline");
+          const [userCoursesList, enrolledResponse] = await Promise.all([
+            userId ? getUserCourses(token, userId).catch(() => [] as any[]) : Promise.resolve([] as any[]),
+            getEnrolledCoursesByTimeline(token).catch(() => null),
+          ]);
+          const allEnrolled: any[] = userCoursesList?.length > 0
+            ? userCoursesList
+            : ((enrolledResponse?.courses as any[]) ?? []).filter((c: any) => c.visible !== false);
+
+          if (prefs && allEnrolled.length > 0) {
+            // Essai langue + année
+            let filtered = filterByPreferences(allEnrolled, prefs.language, prefs.grade);
+            // Essai langue seule
+            if (filtered.length === 0) {
+              const langKeys = LANG_KEYWORDS[prefs.language.toLowerCase()] ?? [prefs.language.toLowerCase()];
+              filtered = allEnrolled.filter(c => {
+                const text = [c.coursecategory ?? '', c.fullname ?? '', c.shortname ?? '', c.categoryname ?? '']
+                  .join(' ').toLowerCase();
+                return langKeys.some(k => text.includes(k));
+              });
+            }
+            fetchedCourses = filtered.length > 0 ? filtered : allEnrolled;
+            if (IS_DEV) console.log("[Cours] Attempt 4 enrolled:", fetchedCourses.length, "courses");
+          } else {
+            fetchedCourses = allEnrolled;
+          }
         }
 
         if (IS_DEV) console.log("[Cours] Total courses to display:", fetchedCourses.length);
@@ -178,7 +318,11 @@ export default function CoursScreen() {
         setError(null);
         setIsLoading(false);
 
+        // Sauvegarder les cours pour utilisation offline
+        AsyncStorage.setItem(COURSES_CACHE_KEY, JSON.stringify(fetchedCourses)).catch(() => {});
+
         // ── Phase 3 : enrichir lessonsCount en arrière-plan ──────────────────
+        const enrichedCache = [...fetchedCourses];
         for (const c of fetchedCourses) {
           try {
             const sections = await getCourseContents(token, c.id);
@@ -189,8 +333,12 @@ export default function CoursScreen() {
             setCourses(prev => prev.map(course =>
               course.id === c.id ? { ...course, lessonsCount } : course
             ));
+            const idx = enrichedCache.findIndex(x => x.id === c.id);
+            if (idx >= 0) enrichedCache[idx] = { ...enrichedCache[idx], lessonsCount };
           } catch { }
         }
+        // Mettre à jour le cache avec lessonsCount enrichi
+        AsyncStorage.setItem(COURSES_CACHE_KEY, JSON.stringify(enrichedCache)).catch(() => {});
 
       } catch (err: any) {
         console.error("Failed to fetch courses:", err);

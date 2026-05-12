@@ -52,7 +52,7 @@ export function registerLifeBackgroundTask() {
 
       return BackgroundFetch.BackgroundFetchResult.NoData;
     } catch (error) {
-      console.error('[Background] Life regeneration error:', error);
+      if (IS_DEV) console.warn('[Background] Life regeneration error:', error);
       return BackgroundFetch.BackgroundFetchResult.Failed;
     }
   });
@@ -92,10 +92,8 @@ async function _registerLifeTask(): Promise<boolean> {
 export async function startLifeBackgroundFetch(): Promise<boolean> {
   if (_lifeTaskRegistrationPromise) return _lifeTaskRegistrationPromise;
   _lifeTaskRegistrationPromise = _registerLifeTask();
-  const result = await _lifeTaskRegistrationPromise;
-  // Reset on failure so the next cold-start can retry
-  if (!result) _lifeTaskRegistrationPromise = null;
-  return result;
+  // Keep the promise even on failure — subsequent calls short-circuit to false silently
+  return _lifeTaskRegistrationPromise;
 }
 
 /**
@@ -106,7 +104,7 @@ export async function stopLifeBackgroundFetch(): Promise<void> {
     await BackgroundFetch.unregisterTaskAsync(BACKGROUND_LIFE_TASK);
     if (IS_DEV) console.log('[Background] Life task unregistered');
   } catch (error) {
-    console.error('[Background] Failed to unregister:', error);
+    if (IS_DEV) console.warn('[Background] Failed to unregister:', error);
   }
 }
 

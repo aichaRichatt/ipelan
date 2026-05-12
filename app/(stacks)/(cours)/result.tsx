@@ -256,7 +256,7 @@ export default function ResultScreen() {
   const xp = Math.min(Math.max(0, rawXp), maxXP);
   
   const percentage = Math.round((score / Math.max(total, 1)) * 100);
-  const isCompleted = percentage >= 50;
+  const isCompleted = percentage >= 60;
 
   const [earnedCoins, setEarnedCoins] = useState(0);
   const [lostLives, setLostLives] = useState(0);
@@ -303,7 +303,9 @@ export default function ResultScreen() {
         let lLost = 0;
 
         if (userId) {
-          const { coinsEarned, livesLost } = await processActivityResults(userId, score, total);
+          // association gère ses propres vies (pénalité Duolingo) → ne pas déduire ici
+          const skipLife = activityType === 'association';
+          const { coinsEarned, livesLost } = await processActivityResults(userId, score, total, { skipLifeDeduction: skipLife });
           cEarned = coinsEarned;
           lLost = livesLost;
           if (!isCancelled) {
@@ -343,11 +345,23 @@ export default function ResultScreen() {
           const existingBadges = await getUserBadges(userId);
           const existingIds = existingBadges.map(b => b.badgeId);
 
+          // Compter le nombre réel de quiz réussis depuis SQLite
+          let quizCompletedCount = 0;
+          try {
+            const { getDBConnection } = await import('@/services/storage/db-service');
+            const db = await getDBConnection();
+            const quizRow = await db.getFirstAsync<{ count: number }>(
+              `SELECT COUNT(*) as count FROM activity_progress WHERE (user_id = ? OR user_id IS NULL) AND type = 'quiz' AND is_completed = 1`,
+              [userId]
+            );
+            quizCompletedCount = quizRow?.count || 0;
+          } catch { /* utiliser 0 comme fallback */ }
+
           const newEarned = calculateNewBadges({
             completedLessons: currentStats.totalCompletedActivities,
             currentStreak: currentStats.streak,
             totalXP: currentStats.totalXp,
-            quizPassed: 0,
+            quizPassed: quizCompletedCount,
             perfectScores: currentStats.perfectScores,
             daysActive: currentStats.streak
           }, existingIds);
@@ -439,8 +453,8 @@ export default function ResultScreen() {
   
   const getGrade = () => {
     if (percentage >= 90) return { text: "Excellent !", color: "#10B981" };
-    if (percentage >= 70) return { text: "Bien joué !", color: "#4a90e2" };
-    if (percentage >= 50) return { text: "Continue !", color: "#F59E0B" };
+    if (percentage >= 75) return { text: "Bien joué !", color: "#4a90e2" };
+    if (percentage >= 60) return { text: "Continue !", color: "#F59E0B" };
     return { text: "Persévère !", color: "#EF4444" };
   };
   

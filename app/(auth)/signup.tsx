@@ -19,10 +19,6 @@ export default function SignUp() {
 
   const validatePassword = (pwd: string): string | null => {
     if (pwd.length < 8) return "Le mot de passe doit contenir au moins 8 caractères";
-    if (!/[A-Z]/.test(pwd)) return "Au moins une majuscule requise (ex: A, B, C...)";
-    if (!/[a-z]/.test(pwd)) return "Au moins une minuscule requise (ex: a, b, c...)";
-    if (!/[0-9]/.test(pwd)) return "Au moins un chiffre requis (ex: 1, 2, 3...)";
-    if (!/[^A-Za-z0-9]/.test(pwd)) return "Au moins un caractère spécial requis (ex: @, #, !)";
     return null;
   };
 

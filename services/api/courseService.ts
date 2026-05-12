@@ -146,21 +146,21 @@ export async function getCoursesForLanguageAndGrade(token: string, language: str
       console.log("[courseService] All categories:", categories.map(c => ({ id: c.id, name: c.name, parent: c.parent })));
     }
 
-    // Language names mapping
+    // Language names — correspond aux noms exacts des catégories Moodle
     const langMap: Record<string, string[]> = {
-      'pulaar': ['Pulaar', 'pulaar', 'PULAAR', 'Pular'],
+      'pulaar':  ['Pulaar', 'pulaar', 'PULAAR', 'Pular'],
       'soninke': ['Soninké', 'soninké', 'Soninke', 'soninke', 'SONINKE'],
-      'wolof': ['Wolof', 'wolof', 'WOLOF']
+      'wolof':   ['Wolof', 'wolof', 'WOLOF'],
     };
 
-    // Grade names mapping
+    // Grade names — noms exacts vus dans Moodle ("1ère année", "2 ème", "3 ème"…)
     const gradeMap: Record<number, string[]> = {
-      1: ['1ère année', '1ere année', '1ère', '1ere', '1e', '1 ère', '1 ème', '1è'],
-      2: ['2ème année', '2eme année', '2ème', '2eme', '2e', '2 ère', '2 ème', '2è'],
-      3: ['3ème année', '3eme année', '3ème', '3eme', '3e', '3 ère', '3 ème', '3è'],
-      4: ['4ème année', '4eme année', '4ème', '4eme', '4e', '4 ère', '4 ème', '4è'],
-      5: ['5ème année', '5eme année', '5ème', '5eme', '5e', '5 ère', '5 ème', '5è'],
-      6: ['6ème année', '6eme année', '6ème', '6eme', '6e', '6 ère', '6 ème', '6è'],
+      1: ['1ère année', '1ere année', '1ère', '1ere', '1 ère', '1 ème', '1ème', '1eme'],
+      2: ['2 ème', '2 eme', '2ème', '2eme', '2 ère', '2ère', '2ere', '2 ere'],
+      3: ['3 ème', '3 eme', '3ème', '3eme', '3 ère', '3ère', '3ere', '3 ere'],
+      4: ['4 ème', '4 eme', '4ème', '4eme', '4 ère', '4ère', '4ere', '4 ere'],
+      5: ['5 ème', '5 eme', '5ème', '5eme', '5 ère', '5ère', '5ere', '5 ere'],
+      6: ['6 ème', '6 eme', '6ème', '6eme', '6 ère', '6ère', '6ere', '6 ere'],
     };
 
     const possibleLangNames = langMap[language.toLowerCase()] || [language];
@@ -220,6 +220,59 @@ export async function getCoursesForLanguageAndGrade(token: string, language: str
     return courses;
   } catch (error) {
     console.warn("[courseService] getCoursesForLanguageAndGrade failed:", error);
+    return [];
+  }
+}
+
+/**
+ * Récupère TOUS les cours de la catégorie grade/langue de l'utilisateur
+ * sans utiliser core_course_get_categories (non présent dans le service).
+ *
+ * Stratégie : les cours inscrits (core_enrol_get_users_courses) retournent
+ * `category` (ID de la catégorie directe, ex. "1ère année").
+ * On utilise ces IDs pour fetcher tous les cours du même grade via
+ * core_course_get_courses_by_field (field=category) — présent dans ipelan_full.
+ */
+export async function getCoursesByCategoryFromEnrollments(
+  token: string,
+  userId: number
+): Promise<any[]> {
+  const IS_DEV = process.env.NODE_ENV === 'development';
+
+  try {
+    const userCourses = await getUserCourses(token, userId);
+    if (userCourses.length === 0) return [];
+
+    // Récupérer les IDs de catégories uniques des cours inscrits
+    const categoryIds: number[] = [
+      ...new Set(
+        userCourses
+          .map((c: any) => c.category)
+          .filter((id: any): id is number => typeof id === 'number' && id > 0)
+      ),
+    ];
+
+    if (IS_DEV) console.log('[courseService] Grade category IDs from enrollments:', categoryIds);
+
+    // Pour chaque catégorie grade → récupérer TOUS les cours disponibles
+    const allCourses: any[] = [];
+    for (const catId of categoryIds) {
+      const catCourses = await getCoursesByCategory(token, catId);
+      if (catCourses.length > 0) {
+        if (IS_DEV) console.log('[courseService] Category', catId, '→', catCourses.length, 'courses');
+        allCourses.push(...catCourses);
+      }
+    }
+
+    // Dédupliquer par course.id
+    const unique = allCourses.filter(
+      (c, i, self) => i === self.findIndex(x => x.id === c.id)
+    );
+
+    if (IS_DEV) console.log('[courseService] getCoursesByCategoryFromEnrollments → total:', unique.length);
+    return unique;
+  } catch (error) {
+    if (IS_DEV) console.warn('[courseService] getCoursesByCategoryFromEnrollments failed:', error);
     return [];
   }
 }

@@ -36,8 +36,8 @@ export function useCourseContent(
 
   const fetchContent = useCallback(async () => {
     if (!token || !courseId) {
-      console.error('[useCourseContent] Missing params - token:', !!token, 'courseId:', courseId);
-      setError("❌ useCourseContent: Token ou ID de cours manquant");
+      // Token not yet restored from SecureStore — wait silently, useEffect re-runs when token arrives
+      if (IS_DEV) console.log('[useCourseContent] Waiting for token (courseId:', courseId, ')');
       setIsLoading(false);
       return;
     }

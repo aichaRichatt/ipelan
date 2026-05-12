@@ -6,12 +6,14 @@ import { ActivityWithProgress, FilterTab, PaginationState } from "@/types/activi
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
 import { useCourseContent } from "../../../hooks/useCourseContent";
 import { useUserStats } from "../../../hooks/useUserStats";
+import { buyLife, triggerGamificationSync } from "../../../services/gamification/gamificationService";
 import { isEpubFile } from "../../../services/contentLoader";
+import { updateUser } from "../../../services/redux/slices/authSlice";
 import { RootState } from "../../../services/redux/store";
 import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
 import { checkInternetConnection, syncCourseProgress } from "../../../services/sync/progressSync";
@@ -172,6 +174,7 @@ interface Lesson {
 // Interface pour les modules de section
 interface ModuleData {
   id: number;
+  instance?: number;   // instanceId Moodle (quiz.id, glossary.id, assign.id…) — distinct du cmid (id)
   name: string;
   modname?: string;
   url?: string;
@@ -463,31 +466,25 @@ export default function ModuleDetailScreen() {
 
   const handleBuyLife = async () => {
     try {
-      const { buyLife, triggerGamificationSync } = await import('@/services/gamification/gamificationService');
       const result = await buyLife(reduxUser?.id || 0);
-      
+
       if (result.success) {
-        const { updateUser } = await import('@/services/redux/slices/authSlice');
         dispatch(updateUser({
           lives: result.newLives,
-          coins: result.newCoins
+          coins: result.newCoins,
         }));
         await triggerGamificationSync(reduxUser?.id || 0, activeToken);
-        
-        const { Alert } = await import('react-native');
         Alert.alert("Succès", "Vous avez récupéré un cœur ! Bonne chance !");
-        
         setIsBuyModalVisible(false);
         if (pendingAction) {
           pendingAction();
           setPendingAction(null);
         }
       } else {
-        const { Alert } = await import('react-native');
         Alert.alert("Erreur", result.message);
       }
     } catch (error) {
-      console.error("[handleBuyLife] Error:", error);
+      if (IS_DEV) console.error("[handleBuyLife] Error:", error);
     }
   };
 
@@ -653,7 +650,8 @@ export default function ModuleDetailScreen() {
   const handleLessonPress = async (lesson: Lesson) => {
     if (lesson.isLocked) return;
 
-    const params = `?moduleId=${lesson.id}&moduleTitle=${encodeURIComponent(lesson.title)}&courseId=${courseId}&cmid=${lesson.id}&instanceId=${lesson.id}`;
+    const instanceId = lesson.instanceId || lesson.id;
+    const params = `?moduleId=${lesson.id}&moduleTitle=${encodeURIComponent(lesson.title)}&courseId=${courseId}&cmid=${lesson.id}&instanceId=${instanceId}`;
 
     // ✅ Contenu éducatif: accessible SANS vies (visualisation/lecture)
     if (lesson.epubUrl) {
@@ -692,7 +690,7 @@ export default function ModuleDetailScreen() {
             pathname: '/(stacks)/(cours)/quiz-native',
             params: {
               cmid: String(lesson.id),
-              instanceId: String((lesson as any).instanceId || lesson.id),
+              instanceId: String(instanceId),
               courseId: String(courseId),
               moduleTitle: lesson.title,
             },
@@ -725,7 +723,7 @@ export default function ModuleDetailScreen() {
   return (
     <SafeAreaView style={styles.flex1_bgFAF9F6} edges={['top']}>
       <View style={[styles.px5, styles.py4, styles.flexRow, styles.itemsCenter, styles.bgFAF9F6]}>
-        <Pressable onPress={() => router.back()} style={[styles.mr4, styles.p2, styles.mlNegative2]}>
+        <Pressable onPress={() => router.push('/(tabs)/(home)')} style={[styles.mr4, styles.p2, styles.mlNegative2]}>
           <Feather name="arrow-left" size={24} color="black" />
         </Pressable>
         <Text style={[styles.textLg, styles.fontBold, styles.textGray900, styles.flex1]} numberOfLines={1}>
@@ -869,7 +867,16 @@ export default function ModuleDetailScreen() {
 
             {section.modules.map((mod: ModuleData, idx: number) => {
               const content = getModuleContent(mod.id);
-              const type = content?.type || (mod.modname === 'quiz' ? 'quiz' : mod.modname === 'resource' ? 'resource' : 'html');
+              // ⚠️ content?.type peut être écrasé par la détection de fichiers (.html → 'html')
+              // Pour le ROUTAGE : toujours utiliser modname (même source que les onglets spécifiques)
+              // content sert uniquement pour epubUrl / pdfUrl / audioUrl
+              const modnameTypeMap: Record<string, ActivityType> = {
+                quiz: 'quiz', assign: 'dictation', choice: 'listening',
+                glossary: 'association', lesson: 'association',
+                resource: 'resource', book: 'book', folder: 'folder',
+                label: 'label', page: 'html', url: 'html',
+              };
+              const type: ActivityType = modnameTypeMap[mod.modname?.toLowerCase() || ''] ?? content?.type ?? 'html';
               const { icon, color } = getLessonIcon(type);
               const typeLabel = getContentTypeLabel(type);
               const progressInfo = progressData.get(mod.id);
@@ -894,7 +901,7 @@ export default function ModuleDetailScreen() {
                         epubUrl: content?.epubUrl,
                         pdfUrl: content?.pdfUrl,
                         audioUrl: content?.audioUrl,
-                        instanceId: mod.id,
+                        instanceId: mod.instance || mod.id, // mod.instance = instanceId Moodle (≠ cmid)
                       };
                       handleLessonPress(lesson);
                     }

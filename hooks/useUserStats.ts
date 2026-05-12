@@ -172,7 +172,22 @@ export function useUserStats(): UseUserStatsReturn {
           // Lire le timestamp de la dernière sync locale (pour détection de conflits)
           const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
           const localLastSyncStr = await AsyncStorage.getItem('@ipelan_last_sync');
-          const localLastSync = localLastSyncStr ? new Date(localLastSyncStr).getTime() : 0;
+
+          // Valider le timestamp local — Hermes peut parser un year 5-digits en timestamp epoch
+          // (ex: "20026-05-12T..." → ~20026ms depuis epoch ≈ 0, déclenchant un faux conflit)
+          const MIN_VALID_TS = new Date('2020-01-01').getTime(); // 1577836800000
+          const MAX_VALID_TS = new Date('2100-01-01').getTime(); // 4102444800000
+          let localLastSync = 0;
+          if (localLastSyncStr) {
+            const parsed = new Date(localLastSyncStr).getTime();
+            if (!isNaN(parsed) && parsed >= MIN_VALID_TS && parsed <= MAX_VALID_TS) {
+              localLastSync = parsed;
+            } else {
+              // Valeur corrompue — supprimer pour repartir proprement
+              await AsyncStorage.removeItem('@ipelan_last_sync');
+              if (IS_DEV) console.log('[useUserStats] Cleared corrupted @ipelan_last_sync:', localLastSyncStr);
+            }
+          }
 
           // Fetch unified gamification profile from Moodle
           const moodleProfile = await getUserGamificationFromMoodle(token, userId);
@@ -197,11 +212,13 @@ export function useUserStats(): UseUserStatsReturn {
             if (IS_DEV) console.log('[useUserStats] Course progress seeded from Moodle:', moodleProfile.courseProgress);
           }
 
-          // ✅ Détection de conflit multi-device via ipelan_last_sync
+          // ✅ Détection de conflit multi-device via ipelan_last_sync (serveur fait autorité)
+          // Comparaison : timestamp serveur actuel vs timestamp serveur mémorisé localement
+          // localLastSync = 0 si aucune sync précédente valide → pas de conflit (premier lancement)
           const serverLastSync = moodleProfile.lastSync ? new Date(moodleProfile.lastSync).getTime() : 0;
-          const serverIsNewer = serverLastSync > localLastSync + 5000; // tolérance 5s
+          const serverIsNewer = localLastSync > 0 && serverLastSync > localLastSync + 5000;
           if (IS_DEV && serverIsNewer) {
-            console.warn('[useUserStats] ⚠️ Conflit détecté: le serveur a été sync plus récemment (autre appareil). Server:', moodleProfile.lastSync, '/ Local:', localLastSyncStr);
+            console.log('[useUserStats] Autre appareil détecté. Server sync:', moodleProfile.lastSync, '/ Mémorisé:', localLastSyncStr);
           }
 
           // ✅ Recalculer les vies avec le timestamp serveur (ipelan_last_lives_update)
@@ -281,8 +298,11 @@ export function useUserStats(): UseUserStatsReturn {
             streak: mergedStats.streak,
           }));
 
-          // ✅ Sauvegarder le timestamp de sync locale pour la prochaine détection de conflit
-          await AsyncStorage.setItem('@ipelan_last_sync', new Date().toISOString());
+          // ✅ Sauvegarder le timestamp du SERVEUR — la prochaine détection compare
+          //    "lastSync serveur que j'ai vu la dernière fois" vs "lastSync serveur actuel"
+          //    Si différents → un autre appareil a syncé entre-temps
+          const serverSyncToSave = moodleProfile.lastSync || new Date().toISOString();
+          await AsyncStorage.setItem('@ipelan_last_sync', serverSyncToSave);
 
           // Trigger background sync to ensure Moodle is up to date with merged state
           if (token) {

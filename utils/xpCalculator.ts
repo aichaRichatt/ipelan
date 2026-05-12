@@ -11,7 +11,23 @@ export interface XPConfig {
 }
 
 export const STREAK_BONUS_CAP = 5;
+/** @deprecated Use TIME_BONUS_THRESHOLDS[activityType] instead */
 export const TIME_BONUS_THRESHOLD_SECONDS = 60;
+
+/** Seuil de temps (secondes) en-dessous duquel le time bonus est accordé, par type d'activité */
+export const TIME_BONUS_THRESHOLDS: Record<ActivityType, number> = {
+  quiz:        90,   // plusieurs questions — 90 s
+  dictation:  120,   // écoute + frappe — 2 min
+  listening:   90,   // écoute + QCM — 90 s
+  association: 45,   // matching rapide — 45 s
+  wordOrder:   60,   // remise en ordre — 60 s
+  lesson:       0,
+  html:         0,
+  resource:     0,
+  folder:       0,
+  book:         0,
+  label:        0,
+};
 
 export const XP_CONFIG: Record<ActivityType, XPConfig> = {
   quiz: {
@@ -129,7 +145,8 @@ export function calculateXP(
   }
 
   let timeBonus = 0;
-  if (options.timeSpent && options.timeSpent < TIME_BONUS_THRESHOLD_SECONDS) {
+  const timeBonusThreshold = TIME_BONUS_THRESHOLDS[activityType];
+  if (options.timeSpent && timeBonusThreshold > 0 && options.timeSpent < timeBonusThreshold) {
     timeBonus = config.timeBonus;
   }
 

@@ -290,14 +290,16 @@ export const LIFE_COST = 20;
  * Met à jour les vies et les pièces après une activité.
  *
  * Règles :
- *  - score >= 50% → coins gagnés = floor((percentage/100) * 10), max 10
- *  - score < 50% → 1 vie perdue (plancher à 0)
+ *  - score >= 60% → coins gagnés = floor((percentage/100) * 10), max 10
+ *  - score < 60% ET skipLifeDeduction = false → 1 vie perdue (plancher à 0)
+ *  - skipLifeDeduction = true → pour les activités qui gèrent elles-mêmes leurs vies (association)
  *  - Si on passe de MAX_LIVES à MAX_LIVES-1 → on (re)démarre le timer 6h
  */
 export const processActivityResults = async (
   userId: number,
   score: number,
-  totalScore: number
+  totalScore: number,
+  options?: { skipLifeDeduction?: boolean }
 ): Promise<{ coinsEarned: number; livesLost: number }> => {
   const db = await getDBConnection();
   let coinsEarned = 0;
@@ -305,9 +307,10 @@ export const processActivityResults = async (
 
   const percentage = totalScore > 0 ? (score / totalScore) * 100 : 0;
 
-  if (percentage >= 50) {
+  if (percentage >= 60) {
     coinsEarned = Math.floor((percentage / 100) * 10);
-  } else {
+  } else if (!options?.skipLifeDeduction) {
+    // Déduire une vie uniquement si l'activité ne gère pas ses propres vies
     livesLost = 1;
   }
 

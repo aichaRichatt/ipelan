@@ -92,7 +92,8 @@ export async function registerBackgroundSync(): Promise<boolean> {
     console.log('[BackgroundSync] Not available, status:', status);
     return false;
   } catch (err) {
-    console.warn('[BackgroundSync] Registration failed:', err);
+    const IS_DEV = process.env.NODE_ENV === 'development';
+    if (IS_DEV) console.warn('[BackgroundSync] Registration failed:', err);
     return false;
   }
 }
