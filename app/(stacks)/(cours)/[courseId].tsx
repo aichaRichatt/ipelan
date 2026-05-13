@@ -655,7 +655,8 @@ export default function ModuleDetailScreen() {
 
     // ✅ Contenu éducatif: accessible SANS vies (visualisation/lecture)
     if (lesson.epubUrl) {
-      router.push(`/(stacks)/(cours)/epub/epub-reader?epubUrl=${encodeURIComponent(lesson.epubUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
+      // Passer le cmid (= lesson.id) au lecteur EPUB — le serveur EpubPlugin récupère le fichier depuis Moodle
+      router.push(`/(stacks)/(cours)/epub/epub-reader?cmid=${lesson.id}&epubUrl=${encodeURIComponent(lesson.epubUrl!)}&title=${encodeURIComponent(lesson.title)}` as any);
       return;
     }
 
@@ -673,7 +674,7 @@ export default function ModuleDetailScreen() {
     const isStaticContent = ['resource', 'folder', 'lesson', 'html', 'url', 'page'].includes(lesson.type);
     if (isStaticContent) {
       if (lesson.epubUrl) {
-        router.push(`/(stacks)/(cours)/epub/epub-reader?epubUrl=${encodeURIComponent(lesson.epubUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
+        router.push(`/(stacks)/(cours)/epub/epub-reader?cmid=${lesson.id}&epubUrl=${encodeURIComponent(lesson.epubUrl!)}&title=${encodeURIComponent(lesson.title)}` as any);
       } else if (lesson.pdfUrl) {
         router.push(`/(stacks)/(cours)/pdf/pdf-viewer?pdfUrl=${encodeURIComponent(lesson.pdfUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
       } else {

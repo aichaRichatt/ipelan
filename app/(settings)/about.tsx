@@ -12,7 +12,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4
   },
   bgwhite_rounded3xl_p6_mb4_bord: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FFFFFF~',
     borderColor: '#E5E7EB',
     borderRadius: 24,
     borderWidth: 1,

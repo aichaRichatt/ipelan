@@ -1,182 +1,176 @@
-import { useState, useEffect, useCallback } from 'react';
-import { EpubChapter, downloadEpubBuffer } from '../services/contentLoader';
-import { ParsedEpub, parseEpub, processEpubHtml, extractAudioFromEpub, extractImagesFromEpub } from '../services/epubParser';
+// hooks/useEpubReader.ts
+import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  fetchManifest,
+  getMainHtmlUrl,
+  getFileUrl,
+  buildBookId,
+  checkServerHealth,
+  EpubManifest,
+  EpubReadingSection,
+  EPUB_SERVER_URL,
+} from '../services/epub/epubServerService';
 
-const IS_DEV = process.env.NODE_ENV === "development";
+const IS_DEV = process.env.NODE_ENV === 'development';
 
-export interface EpubAudio {
-  href: string;
-  dataUrl: string;
-  title: string;
-}
-
-export interface EpubImage {
-  href: string;
-  dataUrl: string;
-}
+export type EpubLoadingState = 'idle' | 'checking_server' | 'fetching' | 'processing' | 'ready' | 'error';
 
 export interface UseEpubReaderReturn {
+  loadingState: EpubLoadingState;
   isLoading: boolean;
   error: string | null;
+  manifest: EpubManifest | null;
   title: string;
-  author?: string;
-  chapters: EpubChapter[];
-  currentChapter: number;
-  currentHtml: string;
-  audioFiles: EpubAudio[];
-  images: EpubImage[];
-  progress: number;
-  totalChapters: number;
-  goToChapter: (index: number) => void;
-  nextChapter: () => void;
-  previousChapter: () => void;
-  hasNextChapter: boolean;
-  hasPreviousChapter: boolean;
-  refetch: () => Promise<void>;
+  epubType: string;
+  language: string | null;
+  totalSections: number;
+  currentSectionIndex: number;
+  currentSection: EpubReadingSection | null;
+  sectionsWithAudio: EpubReadingSection[];
+  goToSection: (index: number) => void;
+  nextSection: () => void;
+  previousSection: () => void;
+  hasNextSection: boolean;
+  hasPreviousSection: boolean;
+  mainHtmlUrl: string | null;
+  currentAudioUrl: string | null;
+  getAudioUrl: (audioFilePath: string) => string;
+  refetch: () => void;
+  serverUrl: string;
 }
 
 export function useEpubReader(
-  epubUrl: string | null,
-  token: string
+  cmid: number | string | null,
+  epubUrl?: string | null
 ): UseEpubReaderReturn {
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [parsed, setParsed] = useState<ParsedEpub | null>(null);
-  const [currentChapter, setCurrentChapter] = useState(0);
-  const [currentHtml, setCurrentHtml] = useState('');
-  const [audioFiles, setAudioFiles] = useState<EpubAudio[]>([]);
-  const [images, setImages] = useState<EpubImage[]>([]);
+  const [loadingState, setLoadingState] = useState<EpubLoadingState>('idle');
+  const [error, setError]               = useState<string | null>(null);
+  const [manifest, setManifest]         = useState<EpubManifest | null>(null);
+  const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
+  // Incrémenter pour forcer un re-fetch manuel (refetch())
+  const [fetchTrigger, setFetchTrigger] = useState(0);
 
-  const loadEpub = useCallback(async () => {
-    if (!epubUrl) {
-      setError("URL EPUB manquante");
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      if (IS_DEV) console.log('[useEpubReader] Downloading EPUB from:', epubUrl);
-
-      const buffer = await downloadEpubBuffer(token, epubUrl);
-      
-      if (!buffer) {
-        setError("Impossible de télécharger le fichier EPUB");
-        setIsLoading(false);
-        return;
-      }
-
-      if (IS_DEV) console.log('[useEpubReader] Parsing EPUB...');
-      
-      const parsedEpub = parseEpub(buffer);
-      
-      if (!parsedEpub) {
-        setError("Impossible de lire le fichier EPUB");
-        setIsLoading(false);
-        return;
-      }
-
-      if (IS_DEV) {
-        console.log('[useEpubReader] EPUB parsed successfully');
-        console.log('[useEpubReader] Title:', parsedEpub.manifest.title);
-        console.log('[useEpubReader] Chapters:', parsedEpub.manifest.chapters.length);
-      }
-
-      setParsed(parsedEpub);
-      
-      const audios = extractAudioFromEpub(parsedEpub);
-      setAudioFiles(audios);
-      if (IS_DEV) console.log('[useEpubReader] Audio files:', audios.length);
-      
-      const imgs = extractImagesFromEpub(parsedEpub);
-      setImages(imgs);
-      if (IS_DEV) console.log('[useEpubReader] Images:', imgs.length);
-      
-      setCurrentChapter(0);
-      
-      if (parsedEpub.manifest.chapters.length > 0) {
-        const firstChapter = parsedEpub.manifest.chapters[0];
-        const html = parsedEpub.contentMap.get(firstChapter.href);
-        
-        if (html) {
-          const processed = processEpubHtml(html, parsedEpub.mediaMap, firstChapter.href);
-          setCurrentHtml(processed);
-        } else {
-          setCurrentHtml('<p>Contenu du chapitre non disponible</p>');
-        }
-      }
-      
-      setIsLoading(false);
-    } catch (err: any) {
-      if (IS_DEV) console.error('[useEpubReader] Error:', err);
-      setError(err.message || "Erreur lors du chargement de l'EPUB");
-      setIsLoading(false);
-    }
-  }, [epubUrl, token]);
+  const bookId = cmid != null ? buildBookId(cmid) : null;
 
   useEffect(() => {
-    loadEpub();
-  }, [loadEpub]);
+    if (!bookId) return;
 
-  const goToChapter = useCallback((index: number) => {
-    if (!parsed || index < 0 || index >= parsed.manifest.chapters.length) {
-      return;
-    }
+    // ── Pattern anti-StrictMode : flag cancelled local à cette invocation d'effet ──
+    // StrictMode monte → démonte → remonte. Le cleanup du premier mount
+    // met cancelled=true → son fetch async ignore ses résultats.
+    // Le second mount crée un nouveau cancelled=false et part normalement.
+    let cancelled = false;
 
-    setCurrentChapter(index);
-    
-    const chapter = parsed.manifest.chapters[index];
-    const html = parsed.contentMap.get(chapter.href);
-    
-    if (html) {
-      const processed = processEpubHtml(html, parsed.mediaMap, chapter.href);
-      setCurrentHtml(processed);
-    } else {
-      setCurrentHtml('<p>Contenu non disponible pour ce chapitre</p>');
-    }
-  }, [parsed]);
+    const run = async () => {
+      if (IS_DEV) console.log('[useEpubReader] Loading bookId:', bookId);
 
-  const nextChapter = useCallback(() => {
-    if (!parsed) return;
-    
-    if (currentChapter < parsed.manifest.chapters.length - 1) {
-      goToChapter(currentChapter + 1);
-    }
-  }, [parsed, currentChapter, goToChapter]);
+      setLoadingState('checking_server');
+      setError(null);
+      setManifest(null);
+      setCurrentSectionIndex(0);
 
-  const previousChapter = useCallback(() => {
-    if (currentChapter > 0) {
-      goToChapter(currentChapter - 1);
-    }
-  }, [currentChapter, goToChapter]);
+      const serverOk = await checkServerHealth();
+      if (cancelled) return;
 
-  const chapters = parsed?.manifest.chapters || [];
-  const title = parsed?.manifest.title || 'EPUB';
-  const author = parsed?.manifest.author;
-  const totalChapters = chapters.length;
-  const progress = totalChapters > 0 ? ((currentChapter + 1) / totalChapters) * 100 : 0;
-  const hasNextChapter = parsed ? currentChapter < parsed.manifest.chapters.length - 1 : false;
-  const hasPreviousChapter = currentChapter > 0;
+      if (!serverOk) {
+        setLoadingState('error');
+        setError(
+          `Serveur EPUB inaccessible (${EPUB_SERVER_URL || 'URL non configurée'}).\n` +
+          'Vérifiez que le serveur EpubPlugin est démarré et que vous êtes sur le même réseau Wi-Fi.'
+        );
+        return;
+      }
+
+      setLoadingState('fetching');
+
+      try {
+        const m = await fetchManifest(bookId, {
+          timeoutMs     : 10 * 60 * 1000,
+          pollIntervalMs: 2000,
+          epubUrl       : epubUrl ?? undefined,
+          onProcessing  : () => {
+            if (!cancelled) setLoadingState('processing');
+          },
+        });
+
+        if (cancelled) return;
+
+        setManifest(m);
+        setLoadingState('ready');
+
+        if (IS_DEV) {
+          console.log('[useEpubReader] Ready:', m.metadata.title);
+          console.log('[useEpubReader] Sections:', m.readingSections.length);
+          console.log('[useEpubReader] AudioType:', m.audioType);
+        }
+      } catch (err: any) {
+        if (cancelled) return;
+        if (IS_DEV) console.error('[useEpubReader] Error:', err.message);
+        setLoadingState('error');
+        setError(err.message || "Erreur lors du chargement du livre");
+      }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true; // annule les setState du fetch en cours lors du cleanup
+    };
+  }, [bookId, epubUrl, fetchTrigger]);
+
+  // ── Navigation ──
+  const allSections    = manifest?.readingSections || [];
+  const currentSection = allSections[currentSectionIndex] || null;
+  const sectionsWithAudio = allSections.filter(s => s.audioFiles.length > 0);
+
+  const goToSection = useCallback((index: number) => {
+    if (!manifest) return;
+    setCurrentSectionIndex(Math.max(0, Math.min(index, manifest.readingSections.length - 1)));
+  }, [manifest]);
+
+  const nextSection = useCallback(() => {
+    if (!manifest) return;
+    setCurrentSectionIndex(prev => Math.min(prev + 1, manifest.readingSections.length - 1));
+  }, [manifest]);
+
+  const previousSection = useCallback(() => {
+    setCurrentSectionIndex(prev => Math.max(prev - 1, 0));
+  }, []);
+
+  // ── URLs ──
+  const mainHtmlUrl = manifest && bookId ? getMainHtmlUrl(bookId, manifest) : null;
+
+  const currentAudioUrl = (currentSection && bookId && currentSection.audioFiles.length > 0)
+    ? getFileUrl(bookId, currentSection.audioFiles[0])
+    : null;
+
+  const getAudioUrl = useCallback((audioFilePath: string): string => {
+    if (!bookId) return '';
+    return getFileUrl(bookId, audioFilePath);
+  }, [bookId]);
 
   return {
-    isLoading,
+    loadingState,
+    isLoading: loadingState === 'checking_server' || loadingState === 'fetching' || loadingState === 'processing',
     error,
-    title,
-    author,
-    chapters,
-    currentChapter,
-    currentHtml,
-    audioFiles,
-    images,
-    progress,
-    totalChapters,
-    goToChapter,
-    nextChapter,
-    previousChapter,
-    hasNextChapter,
-    hasPreviousChapter,
-    refetch: loadEpub,
+    manifest,
+    title        : manifest?.metadata.title || 'Livre',
+    epubType     : manifest?.epubType       || 'unknown',
+    language     : manifest?.language       || null,
+    totalSections: allSections.length,
+    currentSectionIndex,
+    currentSection,
+    sectionsWithAudio,
+    goToSection,
+    nextSection,
+    previousSection,
+    hasNextSection    : manifest ? currentSectionIndex < manifest.readingSections.length - 1 : false,
+    hasPreviousSection: currentSectionIndex > 0,
+    mainHtmlUrl,
+    currentAudioUrl,
+    getAudioUrl,
+    refetch  : () => setFetchTrigger(n => n + 1), // incrémente → re-run du useEffect
+    serverUrl: EPUB_SERVER_URL,
   };
 }
 
