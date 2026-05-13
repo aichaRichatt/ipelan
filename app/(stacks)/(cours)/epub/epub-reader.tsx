@@ -87,19 +87,37 @@ export default function EpubReaderScreen() {
     })));
 
   // ── CSS injecté ──
+  // Principe : ne PAS écraser les styles de l'EPUB original.
+  // Les fichiers CSS du livre (Style1-3.css) sont chargés normalement par la WebView.
+  // On ajoute seulement :
+  //   • padding-bottom pour le footer de navigation
+  //   • audio visible + taille raisonnable dans son conteneur flex
+  //   • styles exclusifs aux word-tracks (éléments ajoutés par notre JS)
   const injectedCSS = `
     body { padding-bottom: 120px !important; }
+
+    /* Les <audio> dans ce livre sont TOUJOURS dans un <p style="display:flex">.
+       On les laisse se comporter comme des flex-items (flex:1) pour partager
+       la ligne avec "Écoutez :" sans écraser la mise en page originale. */
     audio {
       display: block !important;
-      width: 100% !important;
-      height: 54px !important;
-      margin: 8px 0 4px 0 !important;
+      flex: 1 1 auto !important;
+      min-width: 280px !important;
+      height: 100px !important;
+      margin: 4px 0 4px 6px !important;
+      box-sizing: border-box !important;
     }
+
+    /* Word-tracks — éléments INSÉRÉS après le <p> contenant l'audio.
+       Background léger pour les distinguer visuellement du texte EPUB. */
     .ipelan-word-track {
-      padding: 8px 4px 10px 4px;
+      padding: 8px 6px 10px 6px;
       line-height: 2;
       font-size: 15px;
-      font-family: sans-serif;
+      font-family: Arial, sans-serif;
+      background: rgba(255,255,255,0.6);
+      border-radius: 6px;
+      margin: 4px 0 10px 0;
     }
     .ipelan-word {
       display: inline;
@@ -109,11 +127,6 @@ export default function EpubReaderScreen() {
     }
     .ipelan-word.current { background: #F59E0B; color: #fff; }
     .ipelan-word.done    { color: #a06000; }
-    img {
-      margin-top: 12px !important;
-      margin-bottom: 12px !important;
-      display: block !important;
-    }
   `;
 
   // ── JS injecté dans la WebView ──
@@ -293,11 +306,19 @@ export default function EpubReaderScreen() {
             track.appendChild(document.createTextNode(' '));
           }
 
-          // Insérer le word-track APRÈS l'élément audio (contrôles visibles + mots dessous)
-          if (audioEl.nextSibling) {
-            audioEl.parentNode.insertBefore(track, audioEl.nextSibling);
+          // Les <audio> de ce livre sont DANS un <p style="display:flex">.
+          // On insère le word-track APRÈS ce <p>, pas à l'intérieur,
+          // pour ne pas casser la mise en page flex du paragraphe.
+          var insertAfterEl = audioEl;
+          var pParent = audioEl.parentNode;
+          if (pParent && pParent.tagName &&
+              ['P', 'SPAN', 'A', 'LABEL'].indexOf(pParent.tagName.toUpperCase()) !== -1) {
+            insertAfterEl = pParent; // remonter au <p> pour insérer après lui
+          }
+          if (insertAfterEl.nextSibling) {
+            insertAfterEl.parentNode.insertBefore(track, insertAfterEl.nextSibling);
           } else {
-            audioEl.parentNode.appendChild(track);
+            insertAfterEl.parentNode.appendChild(track);
           }
 
           // Attacher les listeners sur le <audio> natif
@@ -307,20 +328,49 @@ export default function EpubReaderScreen() {
 
       // ── 7. API publique (appelée par React Native via injectJavaScript) ──
 
-      // Navigation TOC : scroll (ne pas arrêter l'audio — l'utilisateur contrôle)
+      // Cache des wrappers de page (calculé une seule fois après le chargement)
+      var _pageWrappers = null;
+      function getPageWrappers() {
+        if (!_pageWrappers) {
+          _pageWrappers = Array.prototype.slice.call(
+            document.querySelectorAll('.chapter-wrapper, .page-container')
+          ).filter(function(el) {
+            // Garder uniquement les wrappers de premier niveau (pas imbriqués)
+            var p = el.parentElement;
+            while (p) {
+              if (p.classList && (p.classList.contains('chapter-wrapper') || p.classList.contains('page-container'))) return false;
+              p = p.parentElement;
+            }
+            return true;
+          });
+        }
+        return _pageWrappers;
+      }
+
+      // Navigation TOC principale : scroll par index de manifest (fiable pour TOUTES les sections)
+      window.__ipelanScrollToIndex = function(n) {
+        var wrappers = getPageWrappers();
+        if (wrappers[n]) {
+          wrappers[n].scrollIntoView(true);
+          window.scrollBy(0, -8); // petit offset pour ne pas coller en haut
+        }
+      };
+
+      // Navigation par id (secondaire, si l'id existe)
       window.__ipelanSetSection = function(sectionId) {
         if (!sectionId) return;
         var el = document.getElementById(sectionId);
-        if (el) el.scrollIntoView(true);
+        if (el) { el.scrollIntoView(true); window.scrollBy(0, -8); }
       };
 
-      // Navigation pour sections sans id
+      // Navigation pour sections sans id (tertiaire)
       window.__ipelanScrollToAudio = function(audioFileName) {
         var allAudios = document.querySelectorAll('audio');
         for (var i = 0; i < allAudios.length; i++) {
           var src = allAudios[i].querySelector('source');
           if (src && (src.getAttribute('src') || '').split('/').pop() === audioFileName) {
             allAudios[i].scrollIntoView(true);
+            window.scrollBy(0, -8);
             return;
           }
         }
@@ -396,29 +446,20 @@ export default function EpubReaderScreen() {
   }, []); // deps vides — utilise des refs pour accéder aux valeurs courantes
 
   // ── Scroll vers la section active quand elle change ──
-  // Utilise currentSectionIndex (number) comme dep car currentSection.id peut être ""
-  // (falsy) pour les sections dont le div XHTML n'a pas d'attribut id.
+  // Utilise __ipelanScrollToIndex (index positionnel) comme méthode principale :
+  // fiable pour TOUTES les sections, avec ou sans id DOM.
   useEffect(() => {
     if (!currentSection || !webviewReady) return;
 
-    const sid      = currentSection.id ?? '';
-    // Premier fichier audio de la section (utilisé si sid est vide)
-    const firstAudioFile = (currentSection.audioFiles?.[0] ?? '').split('/').pop();
-
-    if (sid) {
-      // Section avec id → scroll standard
-      webviewRef.current?.injectJavaScript(
-        `window.__ipelanSetSection && window.__ipelanSetSection('${sid}'); true;`
-      );
-    } else if (firstAudioFile) {
-      // Section sans id → scroll vers son premier audio
-      webviewRef.current?.injectJavaScript(
-        `window.__ipelanScrollToAudio && window.__ipelanScrollToAudio('${firstAudioFile}'); true;`
-      );
-    }
+    // Scroll positionnel — fonctionne pour toutes les sections
+    webviewRef.current?.injectJavaScript(
+      `window.__ipelanScrollToIndex && window.__ipelanScrollToIndex(${currentSectionIndex}); true;`
+    );
 
     if (autoPlayNextRef.current) {
       autoPlayNextRef.current = false;
+      const sid            = currentSection.id ?? '';
+      const firstAudioFile = (currentSection.audioFiles?.[0] ?? '').split('/').pop();
       // Délai pour laisser le scroll se terminer avant de lancer l'audio
       setTimeout(() => {
         if (sid) {
@@ -474,7 +515,16 @@ export default function EpubReaderScreen() {
     setWebviewActiveSectionId(null);
     goToSection(index);
     setShowToc(false);
-  }, [goToSection]);
+    // Injecter le scroll directement après la fermeture du modal (animation ~300ms)
+    // Le useEffect le fait aussi, mais ce setTimeout garantit l'ordre
+    if (webviewReady) {
+      setTimeout(() => {
+        webviewRef.current?.injectJavaScript(
+          `window.__ipelanScrollToIndex && window.__ipelanScrollToIndex(${index}); true;`
+        );
+      }, 320);
+    }
+  }, [goToSection, webviewReady]);
 
   // ── Loading ──
   if (isLoading) {
