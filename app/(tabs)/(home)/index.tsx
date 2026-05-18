@@ -190,6 +190,7 @@ export default function HomeScreen() {
 
   const loggedUser = reduxUser;
   const activeToken = reduxToken || "";
+  const [avatarError, setAvatarError] = useState(false);
 
   const { course, allCourses, isLoading, error } = useActiveCourse(activeToken);
   const { stats, isLoading: statsLoading, isSyncing, refetch: refetchUserStats } = useUserStats();
@@ -402,8 +403,10 @@ export default function HomeScreen() {
               <Pressable onPress={() => router.push("/(tabs)/(profile)")}>
                 <View style={styles.avatarWrapper}>
                   <Image
-                    source={loggedUser?.avatar ? { uri: loggedUser?.avatar } : DefaultProfileImage}
+                    source={(!avatarError && loggedUser?.avatar) ? { uri: loggedUser.avatar } : DefaultProfileImage}
+                    defaultSource={DefaultProfileImage}
                     style={styles.avatarImage}
+                    onError={() => setAvatarError(true)}
                   />
                 </View>
               </Pressable>

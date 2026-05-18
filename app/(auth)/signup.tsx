@@ -1,9 +1,23 @@
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { PolicyModal } from "../../components/PolicyModal";
 import { useSignup } from "../../hooks/useSignup";
+
+const LOGO = require("../../assets/images/icon.png");
 
 export default function SignUp() {
   const router = useRouter();
@@ -11,6 +25,7 @@ export default function SignUp() {
   const [lastname, setLastname] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showPolicy, setShowPolicy] = useState(false);
   const [policyAccepted, setPolicyAccepted] = useState(false);
@@ -23,7 +38,7 @@ export default function SignUp() {
   };
 
   const sanitizeInput = (input: string): string => {
-    return input.trim().replace(/[<>\"\'\\]/g, '');
+    return input.trim().replace(/[<>"'\\]/g, '');
   };
 
   const handleSignup = async () => {
@@ -67,7 +82,7 @@ export default function SignUp() {
         email: cleanEmail,
         password,
         firstname: cleanFirstname,
-        lastname: cleanLastname
+        lastname: cleanLastname,
       });
 
       Alert.alert(
@@ -77,8 +92,8 @@ export default function SignUp() {
           {
             text: "Se connecter",
             onPress: () => router.replace("/(auth)/login"),
-            style: "default"
-          }
+            style: "default",
+          },
         ]
       );
     } catch (signupErr: any) {
@@ -89,12 +104,11 @@ export default function SignUp() {
           "Cette adresse email ou ce nom d'utilisateur est déjà enregistré. Veuillez vous connecter.",
           [
             { text: "Se connecter", onPress: () => router.replace("/(auth)/login") },
-            { text: "Annuler", style: "cancel" }
+            { text: "Annuler", style: "cancel" },
           ]
         );
         return;
       }
-
       Alert.alert("Erreur", signupErr.message || "Impossible de créer le compte. Veuillez réessayer plus tard.");
     } finally {
       setIsProcessing(false);
@@ -107,89 +121,112 @@ export default function SignUp() {
         style={styles.flex1}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-          <View style={styles.innerContainer}>
-            <View style={styles.headerContainer}>
-              <Text style={styles.title}>Inscription</Text>
-              <Text style={styles.subtitle}>Rejoignez la communauté Ipelan</Text>
+        {/* Navy header */}
+        <View style={styles.header}>
+          <View style={styles.logoCircle}>
+            <Image source={LOGO} style={styles.logo} resizeMode="contain" />
+          </View>
+          <Text style={styles.headerTagline}>Apprentissage des langues nationales</Text>
+        </View>
+
+        {/* White card with scroll */}
+        <View style={styles.card}>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={styles.cardTitle}>Créer un compte</Text>
+            <Text style={styles.cardSubtitle}>Rejoignez la communauté IPELAN</Text>
+
+            {/* Nom / Prénom — side by side */}
+            <View style={styles.nameRow}>
+              <View style={[styles.inputWrapper, styles.halfInput]}>
+                <TextInput
+                  value={lastname}
+                  style={styles.textInput}
+                  placeholder="Nom"
+                  placeholderTextColor="#9CA3AF"
+                  autoCapitalize="words"
+                  onChangeText={setLastname}
+                />
+              </View>
+              <View style={[styles.inputWrapper, styles.halfInput]}>
+                <TextInput
+                  value={firstname}
+                  style={styles.textInput}
+                  placeholder="Prénom"
+                  placeholderTextColor="#9CA3AF"
+                  autoCapitalize="words"
+                  onChangeText={setFirstname}
+                />
+              </View>
             </View>
 
-            <View style={styles.inputRow}>
-              <TextInput
-                value={lastname}
-                style={styles.textInput}
-                placeholder="Nom"
-                autoCapitalize="words"
-                onChangeText={setLastname}
-              />
-            </View>
-
-            <View style={styles.inputRow}>
-              <TextInput
-                value={firstname}
-                style={styles.textInput}
-                placeholder="Prénom"
-                autoCapitalize="words"
-                onChangeText={setFirstname}
-              />
-            </View>
-
-            <View style={styles.inputRow}>
+            <View style={styles.inputWrapper}>
               <TextInput
                 value={email}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 style={styles.textInput}
-                placeholder="Email"
+                placeholder="Adresse email"
+                placeholderTextColor="#9CA3AF"
                 onChangeText={setEmail}
               />
             </View>
 
-            <View style={styles.inputRow}>
+            <View style={styles.inputWrapper}>
               <TextInput
                 value={password}
-                placeholder="Mot de passe (A-z, 0-9, @...)"
-                secureTextEntry
+                placeholder="Mot de passe (min. 8 caractères)"
+                placeholderTextColor="#9CA3AF"
+                secureTextEntry={!showPassword}
                 style={styles.textInput}
                 onChangeText={setPassword}
               />
+              <Pressable onPress={() => setShowPassword(v => !v)} style={styles.eyeButton}>
+                <Text style={styles.eyeText}>{showPassword ? "Cacher" : "Voir"}</Text>
+              </Pressable>
             </View>
 
-            <Pressable
-              onPress={() => setShowPolicy(true)}
-              style={styles.policyRow}
-            >
+            {/* Policy checkbox */}
+            <Pressable onPress={() => setShowPolicy(true)} style={styles.policyRow}>
               <View style={[styles.checkbox, policyAccepted && styles.checkboxChecked]}>
                 {policyAccepted && <Text style={styles.checkmark}>✓</Text>}
               </View>
               <Text style={styles.policyText}>
-                J&apos;accepte les <Text style={styles.policyLink}>conditions d&apos;utilisation</Text>
+                {"J'accepte les "}
+                <Text style={styles.policyLink}>conditions d'utilisation</Text>
               </Text>
             </Pressable>
 
             <View style={styles.buttonContainer}>
               {isProcessing ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color="#2563eb" />
+                <View style={styles.loadingBox}>
+                  <ActivityIndicator size="large" color="#002366" />
                   <Text style={styles.loadingText}>Création en cours...</Text>
                 </View>
               ) : (
                 <Pressable
                   onPress={handleSignup}
-                  style={styles.signupButton}
+                  style={({ pressed }) => [
+                    styles.signupButton,
+                    pressed && styles.signupButtonPressed,
+                  ]}
                 >
-                  <Text style={styles.signupButtonText}>S&apos;inscrire</Text>
+                  <Text style={styles.signupButtonText}>Créer mon compte</Text>
                 </Pressable>
               )}
             </View>
 
             <Pressable onPress={() => router.replace("/(auth)/login")} style={styles.loginLink}>
               <Text style={styles.loginLinkText}>
-                Vous avez déjà un compte ? <Text style={styles.loginLinkBold}>Se connecter</Text>
+                {"Déjà un compte ? "}
+                <Text style={styles.loginLinkBold}>Se connecter</Text>
               </Text>
             </Pressable>
-          </View>
-        </ScrollView>
+          </ScrollView>
+        </View>
       </KeyboardAvoidingView>
 
       <PolicyModal
@@ -207,115 +244,174 @@ export default function SignUp() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#002366',
   },
   flex1: {
     flex: 1,
   },
-  scrollContent: {
-    flexGrow: 1,
+  header: {
+    alignItems: 'center',
+    paddingTop: 12,
+    paddingBottom: 28,
+    paddingHorizontal: 24,
   },
-  innerContainer: {
-    padding: 20,
-    flex: 1,
+  logoCircle: {
+    width: 104,
+    height: 104,
+    borderRadius: 52,
+    backgroundColor: '#ffffff',
     justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
   },
-  headerContainer: {
-    marginBottom: 32,
-    alignItems: 'center',
+  logo: {
+    width: 82,
+    height: 68,
   },
-  title: {
-    fontSize: 30,
+  headerTagline: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.7)',
+    textAlign: 'center',
+  },
+  card: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+  },
+  scrollContent: {
+    paddingHorizontal: 28,
+    paddingTop: 32,
+    paddingBottom: 40,
+  },
+  cardTitle: {
+    fontSize: 24,
     fontWeight: 'bold',
-    color: '#1d4ed8',
+    color: '#111827',
+    marginBottom: 6,
   },
-  subtitle: {
-    color: '#6b7280',
-    marginTop: 8,
+  cardSubtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginBottom: 28,
   },
-  inputRow: {
+  nameRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 0,
+  },
+  halfInput: {
+    flex: 1,
+  },
+  inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f9fafb',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 14,
     height: 56,
-    borderRadius: 12,
-    marginVertical: 8,
-    paddingHorizontal: 16,
-    width: '100%',
+    marginBottom: 14,
+    paddingHorizontal: 14,
   },
   textInput: {
     flex: 1,
-    height: '100%',
     fontSize: 15,
-    color: '#111827',
+    color: '#1E293B',
+    height: '100%',
+  },
+  eyeButton: {
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+  },
+  eyeText: {
+    fontSize: 12,
+    color: '#64748B',
+    fontWeight: '500',
   },
   policyRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    width: '100%',
     paddingVertical: 12,
+    marginBottom: 6,
   },
   checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 6,
     borderWidth: 2,
-    borderColor: '#2563eb',
+    borderColor: '#002366',
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 10,
   },
   checkboxChecked: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#002366',
   },
   checkmark: {
     color: '#ffffff',
-    fontSize: 10,
-  },
-  policyText: {
-    color: '#4b5563',
-    fontSize: 14,
-    marginLeft: 8,
-  },
-  policyLink: {
-    color: '#2563eb',
+    fontSize: 12,
     fontWeight: 'bold',
   },
-  buttonContainer: {
-    width: '100%',
-    marginTop: 16,
+  policyText: {
+    color: '#4B5563',
+    fontSize: 14,
+    flex: 1,
   },
-  loadingContainer: {
+  policyLink: {
+    color: '#002366',
+    fontWeight: '600',
+  },
+  buttonContainer: {
+    marginTop: 8,
+    marginBottom: 20,
+  },
+  loadingBox: {
+    height: 56,
+    justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 16,
   },
   loadingText: {
-    color: '#6b7280',
+    color: '#6B7280',
     marginTop: 8,
     fontSize: 14,
   },
   signupButton: {
-    backgroundColor: '#2563eb',
-    padding: 16,
-    borderRadius: 12,
+    backgroundColor: '#002366',
+    paddingVertical: 17,
+    borderRadius: 14,
     alignItems: 'center',
+    shadowColor: '#002366',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  signupButtonPressed: {
+    backgroundColor: '#001a4d',
+    elevation: 2,
   },
   signupButtonText: {
     color: '#ffffff',
     fontWeight: 'bold',
-    fontSize: 18,
+    fontSize: 16,
+    letterSpacing: 0.5,
   },
   loginLink: {
-    marginTop: 24,
-    paddingBottom: 40,
+    alignItems: 'center',
   },
   loginLinkText: {
-    color: '#2563eb',
+    color: '#6B7280',
+    fontSize: 14,
     textAlign: 'center',
   },
   loginLinkBold: {
-    fontWeight: 'bold',
+    color: '#002366',
+    fontWeight: '700',
   },
 });

@@ -67,8 +67,7 @@ npx expo export             # Exporter pour production
 | Video | expo-video | ~3.0.16 |
 | EPUB Parsing | xmldom | 0.6.0 |
 | ZIP Archive | react-native-zip-archive | 7.0.2 |
-| Styling | NativeWind (Tailwind) | 2.0.11 |
-
+ 
 ### Structure des Répertoires
 
 ```
@@ -161,86 +160,3 @@ services/
 ```
 
 ---
-
-## Pipeline EPUB (Hors Ligne)
-
-```
-EPUB URL
-    ↓
-downloadService.downloadEPUB()
-    ↓
-unzipService.unzipEPUB()
-    ↓
-epubParserLite.findOPFPath() → container.xml
-    ↓
-epubParserLite.parseOPFLite() → spine
-    ↓
-pathResolver.resolveChapterPath()
-    ↓
-EPUBLessonViewer (WebView avec base URL)
-```
-
-### Étapes d'implémentation
-
-1. **Phase 0** : Téléchargement + Décompression + Extraction HTML ✅
-2. **Phase 1** : Parsing OPF + Spine + Chemins ✅
-3. **Phase 2** : Correction assets (images/audio) ✅
-4. **Phase 3** : Navigation chapitres ✅
-
----
-
-## Contenus Pédagogiques
-
-Source : **https://ipelan.mr/archives**
-
-Structure :
-```
-Langue (Pulaar/Soninké/Wolof)
-└── Niveau (1ère à 6ème année)
-    └── Matière
-        ├── Leçons → EPUB
-        ├── Audio → Fichiers audio
-        └── Activités → Quiz, Dictée, etc.
-```
-
----
-
-## Configuration Environment
-
-Créer `.env` :
-
-```env
-EXPO_PUBLIC_MOODLE_API_URL=https://moodle.richatt.com
-MOODLE_ADMIN_TOKEN=your_admin_token_here
-```
-
----
-
-## État du Projet
-
-| Composant | Status |
-|-----------|--------|
-| Authentification (login + signup + restore) | ✅ Fonctionnel |
-| Navigation tabs | ✅ Fonctionnel |
-| Quiz (mod_quiz) | ✅ Fonctionnel |
-| Listening (mod_choice) | ✅ Fonctionnel |
-| Dictée (mod_assign) | ✅ Fonctionnel — mots extraits de l'intro HTML |
-| Association (mod_glossary) | ✅ Fonctionnel |
-| Word Order (mod_lesson) | ✅ Fonctionnel |
-| SQLite + migrations versionnées | ✅ Fonctionnel |
-| EPUB Download / Parse / Assets / Navigation | ✅ Fonctionnel |
-| Cache audio offline | ✅ Fonctionnel (téléchargement async) |
-| Moodle Sync (XP/Coins/Lives/Streak/Badges) | ✅ Fonctionnel |
-| File de sync persistante (offline → online retry) | ✅ Fonctionnel |
-| Background sync | ⚠️ Optionnel — `expo-background-fetch` non installé |
-| Détection réseau native | ⚠️ Fallback HEAD HTTP — `@react-native-community/netinfo` non installé |
-
-> **Préalable Moodle** : créer les customfields `ipelan_xp`, `ipelan_coins`, `ipelan_lives`, `ipelan_streak`, `ipelan_badges`, `ipelan_badges_count`, `ipelan_last_badge` (Site administration → Users → User profile fields). Sans eux, la synchronisation gamification retourne une erreur de permission qui est gérée gracieusement.
-
-Voir [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) pour les diagrammes complets.
-
----
-
-## License
-
-MIT

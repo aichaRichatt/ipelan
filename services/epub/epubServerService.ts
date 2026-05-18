@@ -20,6 +20,12 @@ export const EPUB_SERVER_URL = (process.env.EXPO_PUBLIC_EPUB_SERVER_URL || '').r
 // Types
 // ─────────────────────────────────────────────────────────────
 
+export interface EpubWordTiming {
+  word: string;
+  start: number;  // secondes depuis le début du fichier audio
+  end: number;
+}
+
 export interface EpubReadingSection {
   id: string;           // "p21" — id de la div dans le XHTML
   pageNumber: number | null;
@@ -27,6 +33,10 @@ export interface EpubReadingSection {
   audioFiles: string[]; // ["OEBPS/Audio/21.opus"] — relatif à la racine EPUB
   images: string[];     // ["OEBPS/Images/21.png"]
   hasAudio: boolean;
+  // wordTimings : présent si Whisper est activé côté serveur
+  // clé = nom de fichier relatif (ex: "OEBPS/Audio/21.opus")
+  // valeur = [{word, start, end}] dans l'ordre de la transcription
+  wordTimings?: Record<string, EpubWordTiming[]>;
 }
 
 export interface EpubSpineItem {
@@ -210,6 +220,42 @@ export async function fetchCatalog(): Promise<EpubCatalog> {
     throw new Error(`Catalog fetch failed: ${res.status}`);
   }
   return res.json();
+}
+
+// ─────────────────────────────────────────────────────────────
+// fetchAlignment()
+// Forced alignment via WhisperX : donne le texte exact EPUB + audio
+// → retourne les timestamps mot-par-mot précis.
+//
+// Appelé en arrière-plan par epub-reader après chaque changement de section.
+// Les résultats sont injectés dans la WebView via window.__ipelanSetTimings().
+//
+// @param bookId    "cmid-783"
+// @param audioFile "OEBPS/Audio/10.opus" (relatif à la racine EPUB)
+// @param text      Texte brut de la section (section.text du manifest)
+// @param lang      Code langue pour le modèle d'alignement (défaut: 'fr')
+// @returns [{word, start, end, score}] ou [] si indisponible
+// ─────────────────────────────────────────────────────────────
+
+export async function fetchAlignment(
+  bookId  : string,
+  audioFile: string,
+  text     : string,
+  lang     = 'fr'
+): Promise<EpubWordTiming[]> {
+  if (!EPUB_SERVER_URL || !text.trim()) return [];
+  try {
+    const res = await fetch(`${EPUB_SERVER_URL}/epub/${bookId}/align`, {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body   : JSON.stringify({ audioFile, text, lang }),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.words || []) as EpubWordTiming[];
+  } catch {
+    return [];
+  }
 }
 
 // ─────────────────────────────────────────────────────────────

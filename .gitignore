@@ -15,6 +15,12 @@ AUDIT_IPELAN.md
 *.orig.*
 Avancement.md
 *.jks
+DEEP_CHECK_GAMIFICATION.md
+GAMIFICATION_AUDIT.md
+GAMIFICATION_VALIDATION.md
+deployment.json
+docs/
+/docs
 *.p8
 *.p12
 *.key

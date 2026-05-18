@@ -17,11 +17,14 @@ import { useLogin } from "../../hooks/useLogin";
 import { useLoginValidation } from "../../hooks/useLoginValidation";
 import { RootState } from "../../services/redux/store";
 
+const LOGO = require("../../assets/images/icon.png");
+
 export default function Login() {
   const router = useRouter();
   const dispatch = useDispatch();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const { errors, validateAll } = useLoginValidation();
   const { login } = useLogin();
@@ -61,25 +64,28 @@ export default function Login() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
-
-        {/* En-tête */}
-        <View style={styles.headerContainer}>
-          <Text style={styles.title}>Connexion</Text>
-          <Text style={styles.subtitle}>Bienvenue sur Ipelan</Text>
+      {/* Navy header */}
+      <View style={styles.header}>
+        <View style={styles.logoCircle}>
+          <Image source={LOGO} style={styles.logo} resizeMode="contain" />
         </View>
+        <Text style={styles.headerTagline}>Apprentissage des langues nationales</Text>
+      </View>
 
-        {/* Message d'erreur */}
+      {/* White card */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Connexion</Text>
+        <Text style={styles.cardSubtitle}>Bienvenue ! Entrez vos identifiants.</Text>
+
         {(reduxError || errors.username || errors.password) && (
-          <View style={styles.errorContainer}>
+          <View style={styles.errorBanner}>
             <Text style={styles.errorText}>
               {reduxError || errors.username || errors.password}
             </Text>
           </View>
         )}
 
-        {/* Champ email */}
-        <View style={styles.inputRow}>
+        <View style={styles.inputWrapper}>
           <Image
             source={require("../../assets/images/email.png")}
             style={styles.inputIcon}
@@ -90,7 +96,7 @@ export default function Login() {
             autoCapitalize="none"
             keyboardType="email-address"
             style={styles.textInput}
-            placeholder="Email"
+            placeholder="Email ou identifiant"
             placeholderTextColor="#9CA3AF"
             underlineColorAndroid="transparent"
             onChangeText={(text) => {
@@ -100,8 +106,7 @@ export default function Login() {
           />
         </View>
 
-        {/* Champ mot de passe */}
-        <View style={styles.inputRow}>
+        <View style={styles.inputWrapper}>
           <Image
             source={require("../../assets/images/lock.png")}
             style={styles.inputIcon}
@@ -111,7 +116,7 @@ export default function Login() {
             style={styles.textInput}
             placeholder="Mot de passe"
             placeholderTextColor="#9CA3AF"
-            secureTextEntry
+            secureTextEntry={!showPassword}
             underlineColorAndroid="transparent"
             value={password}
             onChangeText={(text) => {
@@ -119,38 +124,45 @@ export default function Login() {
               dispatch(clearError());
             }}
           />
+          <Pressable onPress={() => setShowPassword(v => !v)} style={styles.eyeButton}>
+            <Text style={styles.eyeText}>{showPassword ? "Cacher" : "Voir"}</Text>
+          </Pressable>
         </View>
 
-        {/* Mot de passe oublié */}
         <Pressable
           onPress={() => router.push("/(auth)/resetpassword" as any)}
-          style={styles.forgotPasswordContainer}
+          style={styles.forgotContainer}
         >
-          <Text style={styles.forgotPasswordText}>Mot de passe oublié ?</Text>
+          <Text style={styles.forgotText}>Mot de passe oublié ?</Text>
         </Pressable>
 
-        {/* Bouton connexion */}
-        <View style={styles.loginButtonContainer}>
+        <View style={styles.buttonContainer}>
           {isLoading ? (
-            <ActivityIndicator size="large" color="#0062FF" />
+            <View style={styles.loadingBox}>
+              <ActivityIndicator size="large" color="#002366" />
+            </View>
           ) : (
-            <Pressable onPress={handleLogin} style={styles.loginButton}>
+            <Pressable
+              onPress={handleLogin}
+              style={({ pressed }) => [
+                styles.loginButton,
+                pressed && styles.loginButtonPressed,
+              ]}
+            >
               <Text style={styles.loginButtonText}>Se connecter</Text>
             </Pressable>
           )}
         </View>
 
-        {/* Lien inscription */}
         <Pressable
           onPress={() => router.replace("/(auth)/signup")}
           style={styles.signupLink}
         >
           <Text style={styles.signupLinkText}>
-            {"Vous n'avez pas de compte ? "}
+            {"Pas encore de compte ? "}
             <Text style={styles.signupLinkBold}>S'inscrire</Text>
           </Text>
         </Pressable>
-
       </View>
     </SafeAreaView>
   );
@@ -159,51 +171,80 @@ export default function Login() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#002366',
   },
-  container: {
-    flex: 1,
+  header: {
+    alignItems: 'center',
+    paddingTop: 12,
+    paddingBottom: 36,
     paddingHorizontal: 24,
+  },
+  logoCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#ffffff',
     justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
   },
-  headerContainer: {
-    alignItems: 'center',
-    marginBottom: 32,
+  logo: {
+    width: 96,
+    height: 80,
   },
-  title: {
-    fontSize: 30,
+  headerTagline: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.7)',
+    textAlign: 'center',
+  },
+  card: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    paddingHorizontal: 28,
+    paddingTop: 32,
+    paddingBottom: 24,
+  },
+  cardTitle: {
+    fontSize: 26,
     fontWeight: 'bold',
-    color: '#002366',
+    color: '#111827',
+    marginBottom: 6,
   },
-  subtitle: {
-    fontSize: 15,
+  cardSubtitle: {
+    fontSize: 14,
     color: '#6B7280',
-    marginTop: 8,
+    marginBottom: 28,
   },
-  errorContainer: {
-    backgroundColor: '#FEE2E2',
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 16,
-    width: '100%',
+  errorBanner: {
+    backgroundColor: '#FEF2F2',
+    borderLeftWidth: 4,
+    borderLeftColor: '#EF4444',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    marginBottom: 18,
   },
   errorText: {
     color: '#DC2626',
-    textAlign: 'center',
-    fontSize: 14,
+    fontSize: 13,
   },
-  inputRow: {
+  inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 14,
     height: 56,
-    marginVertical: 8,
-    paddingHorizontal: 12,
-    width: '100%',
+    marginBottom: 14,
+    paddingHorizontal: 14,
   },
   inputIcon: {
     width: 20,
@@ -213,43 +254,66 @@ const styles = StyleSheet.create({
   textInput: {
     flex: 1,
     fontSize: 15,
-    color: '#111827',
+    color: '#1E293B',
   },
-  forgotPasswordContainer: {
-    width: '100%',
-    marginTop: 4,
-    marginBottom: 16,
-    alignItems: 'flex-end',
+  eyeButton: {
+    paddingHorizontal: 6,
+    paddingVertical: 4,
   },
-  forgotPasswordText: {
-    color: '#0062FF',
+  eyeText: {
+    fontSize: 12,
+    color: '#64748B',
     fontWeight: '500',
-    fontSize: 14,
   },
-  loginButtonContainer: {
-    width: '100%',
-    marginTop: 8,
+  forgotContainer: {
+    alignSelf: 'flex-end',
+    marginBottom: 24,
+    marginTop: -4,
+  },
+  forgotText: {
+    color: '#002366',
+    fontWeight: '500',
+    fontSize: 13,
+  },
+  buttonContainer: {
+    marginBottom: 20,
+  },
+  loadingBox: {
+    height: 56,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   loginButton: {
-    backgroundColor: '#0062FF',
-    paddingVertical: 16,
-    borderRadius: 12,
+    backgroundColor: '#002366',
+    paddingVertical: 17,
+    borderRadius: 14,
     alignItems: 'center',
+    shadowColor: '#002366',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  loginButtonPressed: {
+    backgroundColor: '#001a4d',
+    elevation: 2,
   },
   loginButtonText: {
     color: '#ffffff',
     fontWeight: 'bold',
-    fontSize: 17,
+    fontSize: 16,
+    letterSpacing: 0.5,
   },
   signupLink: {
-    marginTop: 24,
+    alignItems: 'center',
+    marginTop: 4,
   },
   signupLinkText: {
     color: '#6B7280',
     fontSize: 14,
   },
   signupLinkBold: {
-    color: '#0062FF',
-    fontWeight: '600',
+    color: '#002366',
+    fontWeight: '700',
   },
 });
