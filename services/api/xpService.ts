@@ -102,9 +102,7 @@ export async function getUserGamificationFromMoodle(
     try {
       const raw = fields.ipelan_course_progress || '';
       if (raw) courseProgress = JSON.parse(raw);
-    } catch { 
-      console.log("[xpService] Erreur ")
-    }
+    } catch { /* JSON mal formé — courseProgress ignoré */ }
 
     return {
       xp: parseInt(fields.ipelan_xp || '0', 10),

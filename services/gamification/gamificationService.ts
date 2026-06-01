@@ -16,6 +16,15 @@ export const MAX_LIVES = 6;
 export const MAX_COINS = 1000; // Limite maximale de pièces
 export const REGEN_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 h
 
+// SQLite datetime('now') → '2025-05-20 10:00:00' (no T, no Z).
+// Hermes may parse that as local time — force UTC interpretation.
+function normalizeSQLiteTimestamp(ts: string): string {
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(ts)) {
+    return ts.replace(' ', 'T') + 'Z';
+  }
+  return ts;
+}
+
 /**
  * Vérifie et régénère les vies (1 toutes les 6h, max 6).
  *
@@ -56,16 +65,17 @@ export const checkAndRegenerateLives = async (
     mostRecentTimestamp = serverTimestamp;
   }
 
-  // Si aucun timestamp, initialiser maintenant
+  // Pas de timestamp → l'utilisateur n'a jamais perdu de vie via le timer.
+  // On restaure immédiatement le maximum (absence inconnue = absence longue).
   if (!mostRecentTimestamp) {
     await db.runAsync(
-      `UPDATE users SET last_lives_update = ? WHERE id = ?`,
-      [new Date(now).toISOString(), userId]
+      `UPDATE users SET lives = ?, last_lives_update = ? WHERE id = ?`,
+      [MAX_LIVES, new Date(now).toISOString(), userId]
     );
-    return { newLives: user.lives, regenerated: false, livesAdded: 0 };
+    return { newLives: MAX_LIVES, regenerated: true, livesAdded: MAX_LIVES - user.lives };
   }
 
-  const lastUpdate = new Date(mostRecentTimestamp).getTime();
+  const lastUpdate = new Date(normalizeSQLiteTimestamp(mostRecentTimestamp)).getTime();
   const diffMs = now - lastUpdate;
 
   if (diffMs <= 0) {
@@ -124,7 +134,7 @@ export const getGlobalGamificationStats = async (userId: number): Promise<{
       SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed_activities,
       SUM(CASE WHEN best_score = total_score AND total_score > 0 THEN 1 ELSE 0 END) as perfect_scores
     FROM activity_progress
-    WHERE user_id = ? OR user_id IS NULL
+    WHERE user_id = ?
   `, [userId]);
 
   const userInfo = await db.getFirstAsync<{ coins: number; lives: number; streak: number; ipelan_xp: number; last_lives_update: string }>(
@@ -315,17 +325,17 @@ export const processActivityResults = async (
   }
 
   if (coinsEarned > 0 || livesLost > 0) {
-    // ✅ Validation: s'assurer que les vies restent entre 0 et MAX_LIVES
+    const nowISO = new Date().toISOString();
     await db.runAsync(
       `UPDATE users SET
         coins = MIN(${MAX_COINS}, coins + ?),
         lives = MAX(0, MIN(${MAX_LIVES}, lives - ?)),
         last_lives_update = CASE
-          WHEN lives = ${MAX_LIVES} AND ? > 0 THEN datetime('now')
+          WHEN ? > 0 THEN ?
           ELSE last_lives_update
         END
        WHERE id = ?`,
-      [coinsEarned, livesLost, livesLost, userId]
+      [coinsEarned, livesLost, livesLost, nowISO, userId]
     );
   }
 

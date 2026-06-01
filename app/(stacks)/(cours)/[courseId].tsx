@@ -4,8 +4,8 @@ import { BuyHeartsModal } from "@/components/BuyHeartsModal";
 import { EmptyState } from "@/components/EmptyState";
 import { ActivityWithProgress, FilterTab, PaginationState } from "@/types/activity";
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
@@ -15,14 +15,19 @@ import { buyLife, triggerGamificationSync } from "../../../services/gamification
 import { isEpubFile } from "../../../services/contentLoader";
 import { updateUser } from "../../../services/redux/slices/authSlice";
 import { RootState } from "../../../services/redux/store";
-import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
-import { checkInternetConnection, syncCourseProgress } from "../../../services/sync/progressSync";
+import { getAllScoresForCourse, saveActivityScore } from "../../../services/storage/activity-progress";
+import { checkInternetConnection, syncAfterActivity, syncCourseProgress } from "../../../services/sync/progressSync";
 import { getContentTypeColor, getContentTypeIcon, getContentTypeLabel, MappedContent } from "../../../utils/contentMapper";
 import { ActivityType, XP_CONFIG } from "../../../utils/xpCalculator";
 
 const ACTIVITY_TYPES: ActivityType[] = ['quiz', 'dictation', 'listening', 'association', 'wordOrder'];
 const ITEMS_PER_PAGE = 10;
 const IS_DEV = process.env.NODE_ENV === "development";
+
+// Lesson whose name contains "jeu" → word order game ; otherwise → association
+function lessonType(name: string): ActivityType {
+  return name.toLowerCase().includes('jeu') ? 'wordOrder' : 'association';
+}
 
 const styles = StyleSheet.create({
   // Layout
@@ -235,6 +240,32 @@ export default function ModuleDetailScreen() {
   const [isBuyModalVisible, setIsBuyModalVisible] = useState(false);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
 
+  // Reload progress from SQLite every time the screen gains focus (e.g. returning from result.tsx)
+  useFocusEffect(
+    useCallback(() => {
+      if (!courseId || !userId) return;
+      getAllScoresForCourse(courseId, userId)
+        .then(scores => {
+          const map = new Map<number, ActivityWithProgress['progress']>();
+          scores.forEach((s, id) => {
+            map.set(id, {
+              moduleId: s.moduleId,
+              courseId: s.courseId,
+              type: s.type,
+              bestScore: s.bestScore,
+              totalScore: s.totalScore,
+              attempts: s.attemptsCount,
+              isCompleted: s.isCompleted,
+              lastAttempt: s.lastAttempt,
+              xpEarned: s.xpEarned,
+            });
+          });
+          setProgressData(map);
+        })
+        .catch(() => {});
+    }, [courseId, userId])
+  );
+
   useEffect(() => {
     const loadProgress = async () => {
       if (!courseId || !token) {
@@ -261,13 +292,13 @@ export default function ModuleDetailScreen() {
         
         setProgressData(progressMap);
         
-        console.log('[ModuleDetail] Loaded scores for', scores.size, 'activities from SQLite');
+        if (IS_DEV) console.log('[ModuleDetail] Loaded scores for', scores.size, 'activities from SQLite');
         
         const MODNAME_TO_ACTIVITY: Record<string, ActivityType> = {
           quiz: 'quiz',
           assign: 'dictation',
           choice: 'listening',
-          lesson: 'association',
+          lesson: 'wordOrder', // covers both word-order and association lessons for count
           glossary: 'association',
         };
         
@@ -374,7 +405,7 @@ export default function ModuleDetailScreen() {
         } else if (modname === 'choice') {
           type = 'listening';
         } else if (modname === 'lesson') {
-          type = 'association';
+          type = lessonType(mod.name || '');
         } else if (modname === 'glossary') {
           type = 'association';
         }
@@ -529,6 +560,55 @@ export default function ModuleDetailScreen() {
     });
   };
 
+  // Must be before early returns to respect Rules of Hooks
+  const { allLessons, completedCount } = useMemo(() => {
+    const lessons: Lesson[] = [];
+    let completed = 0;
+    for (const section of sections || []) {
+      for (const mod of section.modules || []) {
+        const content = getModuleContent(mod.id);
+        const type = content?.type || 'html';
+        const isLocked = section.status === 'locked';
+        const progressInfo = progressData.get(mod.id);
+        const isCompleted = progressInfo?.isCompleted === true || (mod.completiondata?.completionstate ?? 0) >= 1;
+
+        let epubUrl: string | undefined;
+        let pdfUrl: string | undefined;
+        let audioUrl: string | undefined;
+        for (const file of mod.contents || []) {
+          const filename = file.filename?.toLowerCase() || '';
+          if (isEpubFile(filename)) {
+            epubUrl = file.fileurl;
+          } else if (filename.endsWith('.pdf')) {
+            pdfUrl = file.fileurl;
+          } else if (filename.match(/\.(mp3|wav|ogg|m4a)$/)) {
+            audioUrl = file.fileurl;
+          }
+          if (IS_DEV && filename) {
+            console.log(`[Module ${mod.id}] file="${filename}" type=${epubUrl ? 'epub' : pdfUrl ? 'pdf' : audioUrl ? 'audio' : 'other'}`);
+          }
+        }
+
+        if (isCompleted) completed++;
+        lessons.push({
+          id: mod.id,
+          title: mod.name || `Module ${mod.id}`,
+          type,
+          duration: "10 min",
+          xp: 10,
+          isCompleted,
+          isLocked,
+          content: content || undefined,
+          epubUrl,
+          pdfUrl,
+          audioUrl,
+          instanceId: mod.instance,
+        });
+      }
+    }
+    return { allLessons: lessons, completedCount: completed };
+  }, [sections, progressData, getModuleContent]);
+
   if (isLoading) {
     return (
       <SafeAreaView style={styles.flex1_bgFAF9F6} edges={['top']}>
@@ -580,63 +660,6 @@ export default function ModuleDetailScreen() {
     );
   }
 
-  const allLessons: Lesson[] = [];
-  let completedCount = 0;
-
-  for (const section of sections) {
-    const sectionModules = section.modules || [];
-    for (let i = 0; i < sectionModules.length; i++) {
-      const mod = sectionModules[i];
-      const content = getModuleContent(mod.id);
-      const type = content?.type || 'html';
-      const isLocked = section.status === 'locked';
-      const progressInfo = progressData.get(mod.id);
-      const isCompleted = progressInfo?.isCompleted === true || (mod.completiondata?.completionstate ?? 0) >= 1;
-
-      let epubUrl: string | undefined;
-      let pdfUrl: string | undefined;
-      let audioUrl: string | undefined;
-      if (mod.contents && mod.contents.length > 0) {
-        console.log(`[Module ${mod.id}] Full contents:`, JSON.stringify(mod.contents, null, 2));
-        for (const file of mod.contents) {
-          const filename = file.filename?.toLowerCase() || '';
-          const fileurl = file.fileurl || '';
-          console.log(`[Module ${mod.id}] Checking file: "${filename}" from URL: ${fileurl.substring(0, 100)}...`);
-          
-          if (isEpubFile(filename)) {
-            console.log(`[Module ${mod.id}] → Detected as EPUB`);
-            epubUrl = file.fileurl;
-          } else if (filename.endsWith('.pdf')) {
-            console.log(`[Module ${mod.id}] → Detected as PDF`);
-            pdfUrl = file.fileurl;
-          } else if (filename.match(/\.(mp3|wav|ogg|m4a)$/)) {
-            console.log(`[Module ${mod.id}] → Detected as audio`);
-            audioUrl = file.fileurl;
-          } else {
-            console.log(`[Module ${mod.id}] → Unknown type (will use lesson screen)`);
-          }
-        }
-      }
-
-      if (isCompleted) completedCount++;
-
-      allLessons.push({
-        id: mod.id,
-        title: mod.name || `Module ${mod.id}`,
-        type,
-        duration: "10 min",
-        xp: 10,
-        isCompleted,
-        isLocked,
-        content: content || undefined,
-        epubUrl,
-        pdfUrl,
-        audioUrl,
-        instanceId: mod.instance,
-      });
-    }
-  }
-
   const courseTitle = title || sections[0]?.title || "Cours";
   const courseDescription = sections[0]?.summary || "";
   const progressPercent = Math.round((completedCount / Math.max(allLessons.length, 1)) * 100);
@@ -647,6 +670,57 @@ export default function ModuleDetailScreen() {
     return { icon: iconName, color };
   };
 
+  // Mark static content (PDF, EPUB, HTML) as completed when opened — "view = complete"
+  const markContentViewed = (cmid: number, contentType: ActivityType = 'lesson') => {
+    if (!userId) return;
+
+    // Already completed — sync to Moodle only, never re-award XP
+    if (progressData.get(cmid)?.isCompleted) {
+      syncAfterActivity({ courseId, cmid, score: 100, maxScore: 100, userId, tokenParam: token || undefined })
+        .catch(e => { if (IS_DEV) console.warn('[markContentViewed] sync failed:', e); });
+      return;
+    }
+
+    const xpForContent = XP_CONFIG[contentType]?.baseXP ?? 5;
+
+    // Optimistic UI update — immediate progress bar refresh in this screen
+    setProgressData(prev => {
+      if (prev.get(cmid)?.isCompleted) return prev;
+      const next = new Map(prev);
+      next.set(cmid, {
+        moduleId: cmid,
+        courseId,
+        type: contentType,
+        bestScore: 100,
+        totalScore: 100,
+        attempts: 1,
+        isCompleted: true,
+        lastAttempt: new Date().toISOString(),
+        xpEarned: xpForContent,
+      });
+      return next;
+    });
+
+    const totalModules = sections?.reduce((sum: number, s: any) => sum + (s.modules?.length || 0), 0) || 0;
+
+    // Persist locally then update course_progress so the course list stays in sync
+    saveActivityScore(cmid, courseId, contentType, 100, 100, xpForContent, userId, 0, token || undefined)
+      .then(async () => {
+        try {
+          const { updateCourseProgressFromActivities } = await import('../../../services/storage/course-progress');
+          await updateCourseProgressFromActivities(courseId, totalModules, userId);
+          if (IS_DEV) console.log('[markContentViewed] course_progress updated', { courseId, totalModules });
+        } catch (e) {
+          if (IS_DEV) console.warn('[markContentViewed] course_progress update failed:', e);
+        }
+      })
+      .catch(e => { if (IS_DEV) console.warn('[markContentViewed] save failed:', e); });
+
+    // Sync to Moodle (non-blocking)
+    syncAfterActivity({ courseId, cmid, score: 100, maxScore: 100, userId, tokenParam: token || undefined })
+      .catch(e => { if (IS_DEV) console.warn('[markContentViewed] sync failed:', e); });
+  };
+
   const handleLessonPress = async (lesson: Lesson) => {
     if (lesson.isLocked) return;
 
@@ -655,17 +729,19 @@ export default function ModuleDetailScreen() {
 
     // ✅ Contenu éducatif: accessible SANS vies (visualisation/lecture)
     if (lesson.epubUrl) {
-      // Passer le cmid (= lesson.id) au lecteur EPUB — le serveur EpubPlugin récupère le fichier depuis Moodle
-      router.push(`/(stacks)/(cours)/epub/epub-reader?cmid=${lesson.id}&epubUrl=${encodeURIComponent(lesson.epubUrl!)}&title=${encodeURIComponent(lesson.title)}` as any);
+      markContentViewed(lesson.id, 'book');
+      router.push(`/(stacks)/(cours)/epub/epub-reader?cmid=${lesson.id}&courseId=${courseId}&epubUrl=${encodeURIComponent(lesson.epubUrl!)}&title=${encodeURIComponent(lesson.title)}` as any);
       return;
     }
 
     if (lesson.pdfUrl) {
+      markContentViewed(lesson.id, 'resource');
       router.push(`/(stacks)/(cours)/pdf/pdf-viewer?pdfUrl=${encodeURIComponent(lesson.pdfUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
       return;
     }
 
     if (lesson.audioUrl) {
+      markContentViewed(lesson.id, 'resource');
       router.push(`/(stacks)/(cours)/audio-player?audioUrl=${encodeURIComponent(lesson.audioUrl)}&moduleId=${lesson.id}&title=${encodeURIComponent(lesson.title)}&courseId=${courseId}` as any);
       return;
     }
@@ -673,13 +749,8 @@ export default function ModuleDetailScreen() {
     // Contenu statique (leçons, ressources) : accessible sans vies
     const isStaticContent = ['resource', 'folder', 'lesson', 'html', 'url', 'page'].includes(lesson.type);
     if (isStaticContent) {
-      if (lesson.epubUrl) {
-        router.push(`/(stacks)/(cours)/epub/epub-reader?cmid=${lesson.id}&epubUrl=${encodeURIComponent(lesson.epubUrl!)}&title=${encodeURIComponent(lesson.title)}` as any);
-      } else if (lesson.pdfUrl) {
-        router.push(`/(stacks)/(cours)/pdf/pdf-viewer?pdfUrl=${encodeURIComponent(lesson.pdfUrl)}&title=${encodeURIComponent(lesson.title)}` as any);
-      } else {
-        router.push(`/(stacks)/(cours)/lesson/${lesson.id}?courseId=${courseId}` as any);
-      }
+      markContentViewed(lesson.id, lesson.type as ActivityType);
+      router.push(`/(stacks)/(cours)/lesson/${lesson.id}?courseId=${courseId}` as any);
       return;
     }
 
@@ -786,13 +857,13 @@ export default function ModuleDetailScreen() {
               </Text>
             </View>
 
-            <Pressable
+            {/* <Pressable
               onPress={handleViewTimeline}
               style={[styles.mt4, styles.bgWhite10, styles.roundedXl, styles.p3, styles.flexRow, styles.itemsCenter, styles.justifyCenter]}
             >
               <Feather name="git-branch" size={18} color="white" style={styles.mr2} />
               <Text style={[styles.textWhite, styles.fontMedium]}>Voir le parcours d&apos;apprentissage</Text>
-            </Pressable>
+            </Pressable> */}
           </View>
         </View>
 
@@ -871,13 +942,16 @@ export default function ModuleDetailScreen() {
               // ⚠️ content?.type peut être écrasé par la détection de fichiers (.html → 'html')
               // Pour le ROUTAGE : toujours utiliser modname (même source que les onglets spécifiques)
               // content sert uniquement pour epubUrl / pdfUrl / audioUrl
+              const modnameLower = mod.modname?.toLowerCase() || '';
               const modnameTypeMap: Record<string, ActivityType> = {
                 quiz: 'quiz', assign: 'dictation', choice: 'listening',
-                glossary: 'association', lesson: 'association',
+                glossary: 'association',
                 resource: 'resource', book: 'book', folder: 'folder',
                 label: 'label', page: 'html', url: 'html',
               };
-              const type: ActivityType = modnameTypeMap[mod.modname?.toLowerCase() || ''] ?? content?.type ?? 'html';
+              const type: ActivityType = modnameLower === 'lesson'
+                ? lessonType(mod.name || '')
+                : (modnameTypeMap[modnameLower] ?? content?.type ?? 'html');
               const { icon, color } = getLessonIcon(type);
               const typeLabel = getContentTypeLabel(type);
               const progressInfo = progressData.get(mod.id);
@@ -911,7 +985,7 @@ export default function ModuleDetailScreen() {
                 >
                   <View style={[styles.flexRow, styles.itemsCenter]}>
                     <View style={[styles.w10, styles.h10, styles.roundedFull, styles.itemsCenter, styles.justifyCenter, styles.mr4]}>
-                      {isCompleted ? (
+                      {isCompleted && ACTIVITY_TYPES.includes(type) ? (
                         <View style={[styles.w10, styles.h10, styles.roundedFull, styles.bgGreen500, styles.itemsCenter, styles.justifyCenter]}>
                           <AntDesign name="check" size={20} color="white" />
                         </View>
@@ -933,11 +1007,6 @@ export default function ModuleDetailScreen() {
                         <Text style={[styles.fontBold, styles.textGray900, styles.textSm, { flex: 1 }]}>
                           {mod.name}
                         </Text>
-                        {isCompleted && (
-                          <View style={[styles.bgGreen100, styles.px2, styles.completedBadge, styles.roundedFull]}>
-                            <Text style={[styles.textGreen600, styles.textXs, styles.fontMedium]}>✓ Terminé</Text>
-                          </View>
-                        )}
                       </View>
                       <View style={[styles.flexRow, styles.itemsCenter]}>
                         <View
@@ -945,11 +1014,11 @@ export default function ModuleDetailScreen() {
                         >
                           <Text style={[styles.textXs, { color }]}>{typeLabel}</Text>
                         </View>
-                        <Text style={[styles.textGray400, styles.textXs]}>{10} XP</Text>
+                        <Text style={[styles.textGray400, styles.textXs]}>{XP_CONFIG[type]?.baseXP ?? 10} XP</Text>
                       </View>
                     </View>
 
-                    {!isLocked && !isCompleted && (
+                    {!isLocked && (
                       <Feather name="chevron-right" size={20} color="#9CA3AF" style={styles.ml2} />
                     )}
                   </View>
@@ -959,37 +1028,7 @@ export default function ModuleDetailScreen() {
           </View>
         ))}
 
-        <View style={[styles.px5, { marginTop: 24 }, styles.mb8]}>
-          <Pressable
-            onPress={() => {
-              const nextLesson = allLessons.find(l => !l.isCompleted && !l.isLocked);
-              if (nextLesson) handleLessonPress(nextLesson);
-            }}
-            style={[
-              styles.bgBlue,
-              styles.rounded2xl,
-              styles.py4,
-              styles.itemsCenter,
-              {
-                shadowColor: "#F59E0B",
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.3,
-                shadowRadius: 4,
-                elevation: 4,
-              },
-            ]}
-          >
-            <Text
-              style={[
-                styles.textWhite,
-                styles.fontBold,
-                styles.textLg,
-              ]}
-            >
-              {completedCount === 0 ? "Commencer" : "Continuer"}
-            </Text>
-          </Pressable>
-        </View>
+      
       </ScrollView>
 
       <BuyHeartsModal

@@ -91,6 +91,7 @@ export default function LessonScreen() {
   const [htmlContent, setHtmlContent] = useState<string>('');
   const [lessonTitle, setLessonTitle] = useState<string>('Leçon');
   const [error, setError] = useState<string | null>(null);
+  const [redirectInfo, setRedirectInfo] = useState<{ fileUrl: string; contentType: string } | null>(null);
   const targetModuleRef = useRef<MoodleModule | null>(null);
 
   const getAuthToken = () => {
@@ -296,16 +297,16 @@ export default function LessonScreen() {
           const mimetype = (content.mimetype || content.type || '').toLowerCase();
 
           if (filename.endsWith('.pdf') || mimetype.includes('pdf')) {
-            setError("PDF_DETECTED:" + content.fileurl); setIsLoading(false); return;
+            setRedirectInfo({ fileUrl: content.fileurl, contentType: 'PDF_DETECTED' }); setIsLoading(false); return;
           }
           if (filename.endsWith('.epub') || filename.endsWith('.epub+zip')) {
-            setError("EPUB_DETECTED:" + content.fileurl); setIsLoading(false); return;
+            setRedirectInfo({ fileUrl: content.fileurl, contentType: 'EPUB_DETECTED' }); setIsLoading(false); return;
           }
           if (filename.match(/\.(mp3|wav|ogg|m4a)$/) || mimetype.includes('audio')) {
-            setError("AUDIO_DETECTED:" + content.fileurl); setIsLoading(false); return;
+            setRedirectInfo({ fileUrl: content.fileurl, contentType: 'AUDIO_DETECTED' }); setIsLoading(false); return;
           }
           if (filename.match(/\.(mp4|webm|m4v)$/) || mimetype.includes('video')) {
-            setError("VIDEO_DETECTED:" + content.fileurl); setIsLoading(false); return;
+            setRedirectInfo({ fileUrl: content.fileurl, contentType: 'VIDEO_DETECTED' }); setIsLoading(false); return;
           }
           if (filename.match(/\.(html|htm|xhtml)$/) || mimetype.includes('html')) {
             const html = await fetchWithAuth(content.fileurl);
@@ -323,16 +324,16 @@ export default function LessonScreen() {
             return;
           }
           if (filename.endsWith('.zip') || filename.endsWith('.scorm')) {
-            setError("CONTENT_URL:" + content.fileurl); setIsLoading(false); return;
+            setRedirectInfo({ fileUrl: content.fileurl, contentType: 'CONTENT_URL' }); setIsLoading(false); return;
           }
           if (content.fileurl.includes('pluginfile.php') || content.fileurl.includes('draftfile.php')) {
-            setError("CONTENT_URL:" + content.fileurl); setIsLoading(false); return;
+            setRedirectInfo({ fileUrl: content.fileurl, contentType: 'CONTENT_URL' }); setIsLoading(false); return;
           }
         }
       }
 
       if (targetModule.url) {
-        setError("CONTENT_URL:" + targetModule.url);
+        setRedirectInfo({ fileUrl: targetModule.url, contentType: 'CONTENT_URL' });
         setIsLoading(false);
         return;
       }
@@ -422,16 +423,10 @@ export default function LessonScreen() {
 
   // Redirect to unified viewer for non-HTML content types
   useEffect(() => {
-    if (!error) return;
-    const isRedirect = /^(PDF_DETECTED:|EPUB_DETECTED:|AUDIO_DETECTED:|VIDEO_DETECTED:|CONTENT_URL:)/.test(error);
-    if (!isRedirect) return;
-
-    const fileUrl = error.replace(/^(PDF_DETECTED:|EPUB_DETECTED:|AUDIO_DETECTED:|VIDEO_DETECTED:|CONTENT_URL:)/, "");
-    const contentType = error.match(/^([A-Z_]+):/)?.[1] || 'html';
+    if (!redirectInfo) return;
     const moduleInstance = targetModuleRef.current?.instance;
-
-    router.replace(`/(stacks)/(cours)/content/unified-viewer?fileUrl=${encodeURIComponent(fileUrl)}&contentType=${contentType}&moduleTitle=${encodeURIComponent(lessonTitle)}&moduleId=${moduleId}&courseId=${courseId}&lessonInstance=${moduleInstance || ''}` as any);
-  }, [error]);
+    router.replace(`/(stacks)/(cours)/content/unified-viewer?fileUrl=${encodeURIComponent(redirectInfo.fileUrl)}&contentType=${redirectInfo.contentType}&moduleTitle=${encodeURIComponent(lessonTitle)}&moduleId=${moduleId}&courseId=${courseId}&lessonInstance=${moduleInstance || ''}` as any);
+  }, [redirectInfo]);
 
   // ─── Loading ────────────────────────────────────────────────────────────────
   if (isLoading) {
@@ -445,7 +440,7 @@ export default function LessonScreen() {
   }
 
   // ─── Redirect state ──────────────────────────────────────────────────────────
-  if (error && /^(PDF_DETECTED:|EPUB_DETECTED:|AUDIO_DETECTED:|VIDEO_DETECTED:|CONTENT_URL:)/.test(error)) {
+  if (redirectInfo) {
     return (
       <SafeAreaView style={styles.redirectContainer}>
         <ActivityIndicator size="large" color="#002366" />
@@ -509,7 +504,7 @@ export default function LessonScreen() {
         />
       </View>
 
-      <View style={styles.footer}>
+      {/* <View style={styles.footer}>
         <Pressable
           onPress={() => router.back()}
           disabled={!hasScrolledToBottom}
@@ -520,7 +515,7 @@ export default function LessonScreen() {
         {!hasScrolledToBottom && (
           <Text style={styles.scrollHint}>Déroule la page pour continuer</Text>
         )}
-      </View>
+      </View> */}
     </SafeAreaView>
   );
 }

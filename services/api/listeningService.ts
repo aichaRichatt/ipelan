@@ -15,9 +15,11 @@ export interface ListeningExercise {
 }
 
 function buildAudioUrl(fileurl: string, token: string): string {
-  return fileurl
-    .replace('/pluginfile.php/', '/webservice/pluginfile.php/')
-    + `?token=${token}`;
+  const url = fileurl.includes('/webservice/pluginfile.php/')
+    ? fileurl
+    : fileurl.replace('/pluginfile.php/', '/webservice/pluginfile.php/');
+  if (url.includes('token=') || url.includes('wstoken=')) return url;
+  return url + (url.includes('?') ? '&' : '?') + `token=${token}`;
 }
 
 export async function getListeningExercise(
@@ -52,7 +54,7 @@ export async function getListeningExercise(
     }
 
     const audioFile = mod.introfiles?.find((f: any) =>
-      f.filename?.match(/\.(mp3|wav|ogg|m4a)$/i)
+      f.filename?.match(/\.(mp3|wav|ogg|m4a|opus|aac)$/i)
     );
 
     if (!audioFile) {

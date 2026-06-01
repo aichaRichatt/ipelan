@@ -10,6 +10,8 @@ export interface DownloadResult {
   status: number;
 }
 
+const MAX_CACHE_BYTES = 500 * 1024 * 1024; // 500 MB
+
 class DownloadService {
   private baseDir: Directory;
   private inFlight = new Map<string, Promise<DownloadResult>>();
@@ -65,6 +67,35 @@ class DownloadService {
     }
   }
 
+  private async evictToFit(neededBytes: number): Promise<void> {
+    if (!this.baseDir.exists) return;
+    try {
+      type Entry = { file: File; size: number; mtime: number };
+      const entries: Entry[] = [];
+      let total = 0;
+
+      for (const entry of this.baseDir.list()) {
+        if (!(entry instanceof File)) continue;
+        try {
+          const info = await entry.info();
+          const size = (info as any).size ?? 0;
+          const mtime = (info as any).modificationTime ?? (info as any).lastModified ?? 0;
+          entries.push({ file: entry, size, mtime });
+          total += size;
+        } catch { /* skip unreadable entries */ }
+      }
+
+      if (total + neededBytes <= MAX_CACHE_BYTES) return;
+
+      // Delete oldest files first until we have enough headroom
+      entries.sort((a, b) => a.mtime - b.mtime);
+      for (const { file, size } of entries) {
+        if (total + neededBytes <= MAX_CACHE_BYTES) break;
+        try { await file.delete(); total -= size; } catch { /* ignore */ }
+      }
+    } catch { /* non-fatal */ }
+  }
+
   private async _downloadFile(url: string, cacheKey: string): Promise<DownloadResult> {
     const filename = this.getFilenameFromUrl(cacheKey);
     const localFile = new File(this.baseDir, filename);
@@ -75,6 +106,7 @@ class DownloadService {
       return { uri: localFile.uri, status: 200 };
     }
 
+    await this.evictToFit(0);
     await File.downloadFileAsync(url, localFile);
     return { uri: localFile.uri, status: 200 };
   }
@@ -104,6 +136,7 @@ class DownloadService {
       return localFile.uri;
     }
 
+    await this.evictToFit(0);
     await File.downloadFileAsync(audioUrl, localFile);
     return localFile.uri;
   }

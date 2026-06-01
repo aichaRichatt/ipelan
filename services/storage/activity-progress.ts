@@ -66,34 +66,49 @@ export const saveActivityScore = async (
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const db = await getDBConnection();
-      const isCompleted = score >= total * 0.5;
+      const isCompleted = score >= total * 0.6;
       if (IS_DEV) {
         console.log(`[saveActivityScore] moduleId=${moduleId}, courseId=${courseId}, score=${score}/${total}, isCompleted=${isCompleted}`);
       }
       const now = new Date().toISOString();
 
+      // Read existing record to compute XP delta correctly:
+      // - First save → award full xpEarned
+      // - Retry with better score → award only the improvement delta
+      // - Retry with same/lower score → award nothing (prevents double-accumulation)
+      const existing = userId != null
+        ? await db.getFirstAsync<{ xp_earned: number }>(
+            'SELECT xp_earned FROM activity_progress WHERE user_id = ? AND module_id = ? AND course_id = ?',
+            [userId, moduleId, courseId]
+          )
+        : null;
+      const isFirstSave = !existing;
+      const xpDelta = isFirstSave
+        ? xpEarned
+        : Math.max(0, xpEarned - (existing?.xp_earned ?? 0));
+
       await db.runAsync(
         `INSERT INTO activity_progress (user_id, module_id, course_id, type, best_score, total_score, attempts_count, is_completed, last_attempt, xp_earned, coins_earned, synced_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(user_id, module_id, course_id) DO UPDATE SET
-           best_score = CASE 
-             WHEN excluded.best_score > best_score THEN excluded.best_score 
-             ELSE best_score 
+           best_score = CASE
+             WHEN excluded.best_score > best_score THEN excluded.best_score
+             ELSE best_score
            END,
            total_score = excluded.total_score,
            attempts_count = attempts_count + 1,
-           is_completed = CASE 
-             WHEN excluded.best_score >= best_score AND excluded.is_completed = 1 THEN 1 
-             ELSE is_completed 
+           is_completed = CASE
+             WHEN excluded.best_score >= best_score AND excluded.is_completed = 1 THEN 1
+             ELSE is_completed
            END,
            last_attempt = excluded.last_attempt,
-           xp_earned = CASE 
-             WHEN excluded.xp_earned > xp_earned THEN excluded.xp_earned 
-             ELSE xp_earned 
+           xp_earned = CASE
+             WHEN excluded.xp_earned > xp_earned THEN excluded.xp_earned
+             ELSE xp_earned
            END,
-           coins_earned = CASE 
-             WHEN excluded.coins_earned > coins_earned THEN excluded.coins_earned 
-             ELSE coins_earned 
+           coins_earned = CASE
+             WHEN excluded.coins_earned > coins_earned THEN excluded.coins_earned
+             ELSE coins_earned
            END,
            synced_at = NULL`,
         [
@@ -112,18 +127,17 @@ export const saveActivityScore = async (
         ]
       );
 
-      // Si userId est fourni, on met à jour les stats globales (XP, Streak)
-      if (userId) {
-        await addXP(userId, xpEarned);
+      // Award XP delta: full amount on first save, only the improvement on retries
+      // updateStreak only when user actually earned XP (not on score=0 saves)
+      if (userId && xpDelta > 0) {
+        await addXP(userId, xpDelta);
         await updateStreak(userId);
-
-        // Déclencher la synchro vers Moodle
         if (token) {
           syncQueue.syncGamification(userId, token);
         }
       }
 
-      console.log('[ActivityProgress] Saved score:', { moduleId, score, total, bestScore: score, xpEarned });
+      if (IS_DEV) console.log('[ActivityProgress] Saved score:', { moduleId, score, total, bestScore: score, xpEarned });
       return;
     } catch (error: any) {
       lastError = error;
@@ -408,7 +422,7 @@ export const getCourseActivityStats = async (
       completed: number;
       totalXp: number;
     }>(
-      `SELECT 
+      `SELECT
         COUNT(*) as total,
         SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed,
         SUM(xp_earned) as totalXp
@@ -419,5 +433,37 @@ export const getCourseActivityStats = async (
   } catch (error) {
     console.error('Failed to get course activity stats:', error);
     return { total: 0, completed: 0, totalXp: 0 };
+  }
+};
+
+export interface QuizStats {
+  quizPassed: number;
+  perfectScores: number;
+}
+
+/**
+ * Compte les quiz réussis et les scores parfaits pour un utilisateur.
+ * quizPassed  = type='quiz' AND is_completed=1
+ * perfectScores = best_score >= total_score AND total_score > 0
+ */
+export const getQuizStats = async (userId: number | null | undefined): Promise<QuizStats> => {
+  try {
+    const db = await getDBConnection();
+    const userFilter = userId != null ? 'AND user_id = ?' : '';
+    const params = userId != null ? [userId, userId] : [];
+    const result = await db.getFirstAsync<{ quizPassed: number; perfectScores: number }>(
+      `SELECT
+         SUM(CASE WHEN type = 'quiz' AND is_completed = 1 ${userFilter} THEN 1 ELSE 0 END) AS quizPassed,
+         SUM(CASE WHEN best_score >= total_score AND total_score > 0 ${userFilter} THEN 1 ELSE 0 END) AS perfectScores
+       FROM activity_progress`,
+      params
+    );
+    return {
+      quizPassed: result?.quizPassed ?? 0,
+      perfectScores: result?.perfectScores ?? 0,
+    };
+  } catch (error) {
+    console.error('[ActivityProgress] Failed to get quiz stats:', error);
+    return { quizPassed: 0, perfectScores: 0 };
   }
 };

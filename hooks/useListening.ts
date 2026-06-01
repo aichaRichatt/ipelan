@@ -157,9 +157,11 @@ const fetchListeningContent = useCallback(async () => {
           }
         }
 
-        // Générer les exercices si on a des options
+        // Générer les exercices si on a des options (max 10 pour éviter session trop longue)
+        const MAX_EXERCISES = 10;
         if (options.length >= 2) {
-          choiceExercises = options.map((option: string, index: number) => {
+          const exerciseOptions = options.slice(0, MAX_EXERCISES);
+          choiceExercises = exerciseOptions.map((option: string, index: number) => {
             const wrongOptions = shuffle(
               options.filter((_: string, i: number) => i !== index)
             ).slice(0, Math.min(3, options.length - 1));

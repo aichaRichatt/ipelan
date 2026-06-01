@@ -34,19 +34,32 @@ export async function getStreak(userId: number): Promise<StreakData> {
 }
 
 
+// Retourne la date courante en UTC sous forme "YYYY-MM-DD"
+function todayUTC(): string {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+// Normalise un dateString (ISO timestamp ou date seule) en "YYYY-MM-DD" UTC
+function dateOnlyUTC(dateStr: string): string {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr.slice(0, 10); // fallback si parse échoue
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
 export async function updateStreakAfterActivity(userId: number): Promise<StreakData> {
   const db = await getDBConnection();
-  //   Correction timezone: utiliser la date locale sans dépendance au fuseau horaire
-  const now = new Date();
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const today = todayUTC();
   const existing = await getStreak(userId);
 
   let newStreak = 1;
   let totalDays = existing.totalDaysActive;
 
   if (existing.lastActivityDate) {
-    const last = new Date(existing.lastActivityDate);
-    const now = new Date(today);
+    // Normaliser en date UTC pure pour éviter le décalage timezone
+    const lastDateOnly = dateOnlyUTC(existing.lastActivityDate);
+    const last = new Date(lastDateOnly); // UTC midnight
+    const now = new Date(today);         // UTC midnight
     const diffMs = now.getTime() - last.getTime();
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
@@ -89,6 +102,47 @@ export async function updateStreakAfterActivity(userId: number): Promise<StreakD
     lastActivityDate: today,
     totalDaysActive: totalDays,
   };
+}
+
+/**
+ * Vérifie le streak au premier plan (quand l'utilisateur ouvre l'app).
+ * Si plus d'un jour s'est écoulé depuis la dernière activité, reset à 0.
+ * Préserve best_streak et last_activity_date.
+ */
+export async function checkStreakOnForeground(userId: number): Promise<number> {
+  const db = await getDBConnection();
+  const today = todayUTC();
+  const existing = await getStreak(userId);
+
+  if (!existing.lastActivityDate) {
+    if (existing.currentStreak !== 0) {
+      await db.runAsync(
+        `UPDATE user_streaks SET current_streak = 0, updated_at = datetime('now') WHERE user_id = ?`,
+        [userId]
+      );
+    }
+    return 0;
+  }
+
+  const lastDateOnly = dateOnlyUTC(existing.lastActivityDate);
+  const last = new Date(lastDateOnly);
+  const now = new Date(today);
+  const diffMs = now.getTime() - last.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  // Actif aujourd'hui (0) ou hier (1) → streak valide
+  if (diffDays <= 1) return existing.currentStreak;
+
+  // Déjà à 0 → rien à faire
+  if (existing.currentStreak === 0) return 0;
+
+  // Rupture : au moins un jour complet sans activité
+  await db.runAsync(
+    `UPDATE user_streaks SET current_streak = 0, updated_at = datetime('now') WHERE user_id = ?`,
+    [userId]
+  );
+
+  return 0;
 }
 
 // ─── Hook React ───────────────────────────────────────────────────────────────

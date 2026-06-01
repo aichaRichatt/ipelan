@@ -103,11 +103,43 @@ export default function CoursScreen() {
   const [courses, setCourses] = useState<CourseData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [highlightCourses, setHighlightCourses] = useState(false);
+  const PAGE_SIZE = 3;
+  const [visibleCounts, setVisibleCounts] = useState<Record<number, number>>({ 1: PAGE_SIZE, 2: PAGE_SIZE, 3: PAGE_SIZE });
+
+  const scrollViewRef = React.useRef<any>(null);
+  const coursesYRef = React.useRef(0);
+
+  // Track courses in a ref to read latest value inside useFocusEffect without adding it as dep
+  const coursesRef = React.useRef<CourseData[]>([]);
+  React.useEffect(() => { coursesRef.current = courses; }, [courses]);
 
   useFocusEffect(
     useCallback(() => {
       refetchUserStats();
-    }, [refetchUserStats])
+
+      // Reload per-course progress from SQLite on every tab focus
+      // This makes progress bar update immediately after viewing content in [courseId].tsx
+      const reloadOnFocus = async () => {
+        const current = coursesRef.current;
+        if (current.length === 0 || !userId) return;
+        const updates: Record<number, number> = {};
+        for (const c of current) {
+          try {
+            const prog = await getCourseProgress(c.id, userId);
+            if (prog && prog.totalActivities > 0) {
+              updates[c.id] = Math.round((prog.completedActivities / prog.totalActivities) * 100);
+            }
+          } catch { /* non-fatal */ }
+        }
+        if (Object.keys(updates).length > 0) {
+          setCourses(prev => prev.map(c =>
+            updates[c.id] !== undefined ? { ...c, progress: updates[c.id] } : c
+          ));
+        }
+      };
+      reloadOnFocus();
+    }, [refetchUserStats, userId])
   );
 
   const guardActivity = (_path: string) => {
@@ -119,11 +151,10 @@ export default function CoursScreen() {
       );
       return;
     }
-    Alert.alert(
-      "Sélectionne un cours",
-      "Ouvre un cours depuis la liste ci-dessous pour accéder à cette activité.",
-      [{ text: "OK" }]
-    );
+    // Scroll to courses list and flash highlight so user knows to pick a course
+    scrollViewRef.current?.scrollTo({ y: coursesYRef.current, animated: true });
+    setHighlightCourses(true);
+    setTimeout(() => setHighlightCourses(false), 1500);
   };
 
   useEffect(() => {
@@ -400,7 +431,6 @@ export default function CoursScreen() {
   };
 
   const renderModuleCard = (course: CourseData) => {
-    const isCompleted = course.progress === 100;
     const totalLessons = course.lessonsCount;
     const iconData = getIconForCourse(course.fullname);
 
@@ -420,16 +450,6 @@ export default function CoursScreen() {
               <Text style={styles.moduleTitle}>
                 {course.fullname}
               </Text>
-              {isCompleted ? (
-                <View style={styles.completedBadge}>
-                  <AntDesign name="check" size={12} color="#10B981" />
-                  <Text style={styles.completedBadgeText}>Terminé</Text>
-                </View>
-              ) : (
-                <View style={styles.xpBadge}>
-                  <Text style={styles.xpBadgeText}>+50 XP</Text>
-                </View>
-              )}
               {course.totalScore && (
                 <View style={styles.scoreBadge}>
                   <Text style={styles.scoreBadgeText}>★ {course.totalScore}</Text>
@@ -457,6 +477,9 @@ export default function CoursScreen() {
 
     const completedModules = levelCourses.filter(c => c.progress === 100).length;
     const { title, subtitle } = levelTitles[level] || { title: `Niveau ${level}`, subtitle: "" };
+    const visible = visibleCounts[level] ?? PAGE_SIZE;
+    const visibleCourses = levelCourses.slice(0, visible);
+    const hasMore = levelCourses.length > visible;
 
     return (
       <View key={level} style={styles.levelSection}>
@@ -478,8 +501,17 @@ export default function CoursScreen() {
         </View>
 
         <View style={styles.levelCourses}>
-          {levelCourses.map(renderModuleCard)}
+          {visibleCourses.map(renderModuleCard)}
         </View>
+
+        {hasMore && (
+          <Pressable
+            onPress={() => setVisibleCounts(prev => ({ ...prev, [level]: (prev[level] ?? PAGE_SIZE) + PAGE_SIZE }))}
+            style={styles.showMoreButton}
+          >
+            <Text style={styles.showMoreText}>Voir plus ({levelCourses.length - visible} restants)</Text>
+          </Pressable>
+        )}
       </View>
     );
   };
@@ -487,6 +519,7 @@ export default function CoursScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
       <ScrollView
+        ref={scrollViewRef}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
@@ -513,7 +546,7 @@ export default function CoursScreen() {
         </View>
 
         <View style={styles.activitiesSection}>
-          <Text style={styles.activitiesSectionTitle}>Activités Récentes</Text>
+          <Text style={styles.activitiesSectionTitle}>Accès Rapide</Text>
           <View style={styles.activitiesGrid}>
             <ActivityIconCard
               title="Oral"
@@ -546,7 +579,10 @@ export default function CoursScreen() {
           </View>
         </View>
 
-        <View style={styles.learningPathSection}>
+        <View
+          style={[styles.learningPathSection, highlightCourses && styles.learningPathHighlight]}
+          onLayout={(e) => { coursesYRef.current = e.nativeEvent.layout.y; }}
+        >
           <Text style={styles.learningPathTitle}>Parcours d&apos;Apprentissage</Text>
 
           {isLoading ? (
@@ -700,6 +736,14 @@ const styles = StyleSheet.create({
   learningPathSection: {
     paddingHorizontal: 20,
   },
+  learningPathHighlight: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#BFDBFE',
+    paddingTop: 12,
+    marginHorizontal: 4,
+  },
   learningPathTitle: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -792,6 +836,21 @@ const styles = StyleSheet.create({
   },
   levelCourses: {
     paddingLeft: 4,
+  },
+  showMoreButton: {
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    marginTop: 4,
+    marginBottom: 12,
+    paddingVertical: 10,
+  },
+  showMoreText: {
+    color: '#002366',
+    fontSize: 14,
+    fontWeight: '600',
   },
   moduleCard: {
     backgroundColor: '#ffffff',

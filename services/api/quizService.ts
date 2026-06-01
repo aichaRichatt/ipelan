@@ -38,6 +38,21 @@ export interface QuizOption {
   inputName: string;
 }
 
+export interface MatchingSubQuestion {
+  text: string;
+  inputName: string;
+}
+
+export interface MatchingChoice {
+  value: string;
+  label: string;
+}
+
+export interface MatchingData {
+  subQuestions: MatchingSubQuestion[];
+  choices: MatchingChoice[];
+}
+
 export interface ParsedQuestion {
   /** numéro de slot Moodle (1, 2, 3 …) */
   slot: number;
@@ -57,6 +72,8 @@ export interface ParsedQuestion {
   rawHtml: string;
   /** points max (mod_quiz.maxmark) */
   maxmark?: number;
+  /** données de matching (sous-questions + choix) — uniquement pour type='matching' */
+  matchingData?: MatchingData;
 }
 
 export interface QuizAttempt {
@@ -166,8 +183,8 @@ function extractQtext(html: string): string {
 function extractMultichoiceOptions(html: string): QuizOption[] {
   const options: QuizOption[] = [];
 
-  // Découper par <div class="r0"> ou <div class="r1">
-  const blocks = html.split(/<div\s+class="r[01]"[^>]*>/i);
+  // Découper par <div class="rN"> (r0, r1, r2, r3 … pour 4 options ou plus)
+  const blocks = html.split(/<div\s+class="r\d+"[^>]*>/i);
   blocks.shift(); // contenu avant la première option
 
   for (const block of blocks) {
@@ -221,6 +238,50 @@ function extractMultichoiceOptions(html: string): QuizOption[] {
 }
 
 /**
+ * Extrait les sous-questions et choix d'une question de type `matching`.
+ *
+ * Structure Moodle 4.x :
+ *   <table>
+ *     <tr><td class="text">Left item</td>
+ *         <td class="control"><select name="q1:1_sub0">
+ *           <option value="">Choisir...</option>
+ *           <option value="1">Choice A</option></select></td></tr>
+ *   </table>
+ */
+function extractMatchingData(html: string): MatchingData | undefined {
+  const subQuestions: MatchingSubQuestion[] = [];
+  const choicesMap = new Map<string, string>(); // value → label (dédupliqué)
+
+  const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rowMatch: RegExpExecArray | null;
+  while ((rowMatch = rowRe.exec(html)) !== null) {
+    const row = rowMatch[1];
+    const textCell = row.match(/<td[^>]*class="[^"]*\btext\b[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const selectEl = row.match(/<select[^>]+name="([^"]+)"[^>]*>([\s\S]*?)<\/select>/i);
+    if (!textCell || !selectEl) continue;
+
+    const subText = stripHtml(textCell[1]).trim();
+    const inputName = selectEl[1];
+    if (!subText || !inputName) continue;
+    subQuestions.push({ text: subText, inputName });
+
+    const optRe = /<option[^>]+value="([^"]*)"[^>]*>([\s\S]*?)<\/option>/gi;
+    let optMatch: RegExpExecArray | null;
+    while ((optMatch = optRe.exec(selectEl[2])) !== null) {
+      const val = optMatch[1];
+      const lbl = stripHtml(optMatch[2]).trim();
+      if (val && lbl && !choicesMap.has(val)) choicesMap.set(val, lbl);
+    }
+  }
+
+  if (subQuestions.length === 0) return undefined;
+  return {
+    subQuestions,
+    choices: Array.from(choicesMap.entries()).map(([value, label]) => ({ value, label })),
+  };
+}
+
+/**
  * Parse une question Moodle depuis son HTML.
  *
  * - multichoice / truefalse : extrait toutes les options via `extractMultichoiceOptions`
@@ -251,6 +312,7 @@ function parseQuestionHtml(
 
   let options: QuizOption[] = [];
   let answerInputName = '';
+  let matchingData: MatchingData | undefined;
 
   if (type === 'multichoice' || type === 'truefalse') {
     options = extractMultichoiceOptions(html);
@@ -268,6 +330,9 @@ function parseQuestionHtml(
       /<input[^>]+type="text"[^>]+name="(q\d+:\d+_answer)"[^>]*>/i
     );
     answerInputName = m?.[1] || '';
+  } else if (type === 'matching') {
+    matchingData = extractMatchingData(html);
+    answerInputName = matchingData?.subQuestions[0]?.inputName || '';
   }
 
   return {
@@ -280,6 +345,7 @@ function parseQuestionHtml(
     sequencecheckName,
     rawHtml: html,
     maxmark,
+    matchingData,
   };
 }
 
@@ -333,8 +399,8 @@ export async function getOrCreateAttempt(
       });
     }
 
-    // Reprendre toute tentative en cours (inprogress, overdue, abandoned)
-    const activeStates = ['inprogress', 'overdue', 'abandoned'];
+    // Reprendre toute tentative en cours — abandoned exclu (Moodle rejette les saves dessus)
+    const activeStates = ['inprogress', 'overdue'];
     const existingAttempt = attempts.find(a => activeStates.includes(a.state));
     if (existingAttempt?.id) {
       if (IS_DEV) console.log('[quizService] Resuming attempt:', existingAttempt.id, 'state:', existingAttempt.state);
@@ -373,19 +439,6 @@ export async function getOrCreateAttempt(
       } else {
         throw err;
       }
-    }
-
-     if (startResult?.exception && startResult?.message?.includes('Tentative encore en cours')) {
-      if (IS_DEV) console.log('[quizService] Attempt in progress blocking, forcing new attempt with forcenew=1');
-      startResult = await moodleFetch('/webservice/rest/server.php', {
-        wstoken: authToken,
-        wsfunction: 'mod_quiz_start_attempt',
-        moodlewsrestformat: 'json',
-        quizid: quizInstanceId,
-        forcenew: '1',
-        'preflightdata[0][name]': 'confirmdatasaved',
-        'preflightdata[0][value]': '1',
-      });
     }
 
     if (startResult?.exception) {
@@ -559,35 +612,6 @@ export async function finishQuizAttempt(
 }
 
 /**
- * Sauvegarde une SEULE réponse puis recharge la page pour synchroniser le
- * sequencecheck. Recommandé : `submitAnswer` après chaque clic de l'utilisateur.
- *
- * Renvoie les questions rafraîchies (avec nouveaux sequencechecks) ou null
- * en cas d'échec.
- */
-export async function submitSingleAnswer(
-  authToken: string,
-  attemptId: number,
-  page: number,
-  inputName: string,
-  value: string,
-  slot: number,
-  sequencecheck: number
-): Promise<{ questions: ParsedQuestion[]; nextPage: number } | null> {
-  const ok = await saveQuizAnswers(
-    authToken,
-    attemptId,
-    { [inputName]: value },
-    { [String(slot)]: String(sequencecheck) }
-  );
-  if (!ok) return null;
-
-  // Recharger la page pour récupérer le nouveau sequencecheck 
-  const { questions, nextPage } = await getAttemptPage(authToken, attemptId, page);
-  return { questions, nextPage };
-}
-
-/**
  * Récupère la review (corrections + bonnes réponses + score final).
  */
 export async function getAttemptReview(
@@ -616,84 +640,37 @@ export async function getAttemptReview(
  * Extrait le score final d'une review Moodle.
  *
  * Structure réelle de mod_quiz_get_attempt_review :
- *   attempt.sumgrades → score brut (ex. 2.0 sur 3 questions)
- *   grade             → STRING POURCENTAGE (ex. "66.67"), PAS la note max
- *   questions         → tableau des questions (pour compter le total)
+ *   attempt.sumgrades → score brut (nombre de bonnes réponses, ex. 1.0)
+ *   grade             → note sur l'échelle du quiz (ex. "10" si maxgrade=10, PAS un %)
+ *   questions         → tableau des questions (source fiable pour le total)
  *
- * IMPORTANT : review.grade est un pourcentage, pas une note absolue.
- * Utiliser review.grade comme dénominateur donne un résultat complètement faux.
+ * RÈGLE : utiliser sumgrades / questionsCount comme source principale.
+ * review.grade est sur l'échelle du quiz (0-10 par défaut) — pas un pourcentage.
  */
 export function extractFinalScore(review: any): {
   sumgrades: number;
   maxgrade: number;
   percentage: number;
 } {
-  const attempt = review?.attempt || {};
-  const sumgrades = Number(attempt.sumgrades ?? 0);
-
-  // review.grade est un pourcentage string comme "66.67" — pas la note max
-  const gradePercent = review?.grade != null ? Number(review.grade) : NaN;
+  const attempt       = review?.attempt || {};
+  const sumgrades     = Number(attempt.sumgrades ?? 0);
   const questionsCount = Array.isArray(review?.questions) ? review.questions.length : 0;
+  const maxgrade      = questionsCount > 0 ? questionsCount : Math.max(1, Math.round(sumgrades) || 1);
 
-  let percentage = 0;
-  // Utiliser le nombre de questions comme maxgrade si disponible
-  let maxgrade = questionsCount || 1;
-
-  if (!isNaN(gradePercent) && gradePercent >= 0) {
-    // Si grade > sumgrades et proche, c'est la note max (100%)
-    // Ex: sumgrades=10, grade=10 → 100%, mais sumgrades=1, grade=1 sur 3 questions → 33%
-    // ✅ CORRECTION: grade doit etre >= questionsCount pour etre la note max possible
-    if (gradePercent >= sumgrades && gradePercent > 0 && sumgrades > 0 &&
-      Math.abs(gradePercent - sumgrades) < 0.01 &&
-      (questionsCount === 0 || gradePercent >= questionsCount)) {
-      // grade est la note max (toutes les reponses correctes) → 100%
-      maxgrade = Math.max(gradePercent, sumgrades, questionsCount || 1);
-      percentage = 100;
-    } else if (gradePercent <= 100 && Math.abs(gradePercent - sumgrades) >= 0.01) {
-      // grade est un vrai pourcentage (ex: 66.67)
-      percentage = Math.round(gradePercent);
-      if (sumgrades > 0 && gradePercent > 0 && questionsCount === 0) {
-        maxgrade = Math.round(sumgrades / (gradePercent / 100));
-      }
-    } else {
-      // grade est une note brute supérieure à 100 ou égale à sumgrades avec sumgrades=0
-      percentage = maxgrade > 0 ? Math.round((sumgrades / maxgrade) * 100) : 0;
-    }
-  } else if (maxgrade > 0 && sumgrades > 0) {
-    percentage = Math.round((sumgrades / maxgrade) * 100);
+  // Priorité 1 : sumgrades / questionsCount (fiable — indépendant de l'échelle du quiz)
+  if (questionsCount > 0) {
+    const percentage = Math.round((sumgrades / questionsCount) * 100);
+    return { sumgrades, maxgrade, percentage };
   }
 
-  return { sumgrades, maxgrade, percentage };
+  // Priorité 2 : review.grade est un pourcentage strict (entre 0 et 100, sans ambiguïté)
+  // Cas : quiz avec notation sur 100, grade="66.67"
+  const gradeRaw = review?.grade != null ? Number(review.grade) : NaN;
+  if (!isNaN(gradeRaw) && gradeRaw >= 0 && gradeRaw <= 100 && gradeRaw !== sumgrades) {
+    return { sumgrades, maxgrade, percentage: Math.round(gradeRaw) };
+  }
+
+  // Fallback : 0%
+  return { sumgrades, maxgrade, percentage: 0 };
 }
 
-/**
- * @deprecated — utiliser `submitSingleAnswer` qui recharge le sequencecheck.
- * Conservé pour compatibilité ascendante.
- */
-export async function processSingleAnswer(
-  authToken: string,
-  attemptId: number,
-  slot: number,
-  answerValue: string,
-  sequencecheck: number
-): Promise<boolean> {
-  const params: Record<string, any> = {
-    wstoken: authToken,
-    wsfunction: 'mod_quiz_process_attempt',
-    moodlewsrestformat: 'json',
-    attemptid: attemptId,
-    finishattempt: '0',
-    'data[0][name]': `q${slot}:_sequencecheck`,
-    'data[0][value]': String(sequencecheck),
-    'data[1][name]': `q${slot}:_answer`,
-    'data[1][value]': answerValue,
-    'preflightdata[0][name]': 'confirmdatasaved',
-    'preflightdata[0][value]': '1',
-  };
-  const result = await moodleFetch('/webservice/rest/server.php', params);
-  if (result?.exception) {
-    if (IS_DEV) console.warn('[quizService] processSingleAnswer:', result.message);
-    return false;
-  }
-  return true;
-}

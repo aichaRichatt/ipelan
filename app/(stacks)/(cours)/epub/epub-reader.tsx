@@ -25,22 +25,31 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
+import { useUserStats } from '../../../../hooks/useUserStats';
 import { useEpubReader } from '../../../../hooks/useEpubReader';
 import {
   buildBookId,
   EpubReadingSection,
   fetchAlignment,
 } from '../../../../services/epub/epubServerService';
+import { syncAfterActivity } from '../../../../services/sync/progressSync';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
 
 export default function EpubReaderScreen() {
   const router = useRouter();
-  const { cmid, epubUrl, title } = useLocalSearchParams<{ cmid?: string; epubUrl?: string; title?: string }>();
+  const { cmid, courseId: courseIdParam, epubUrl, title } = useLocalSearchParams<{
+    cmid?: string; courseId?: string; epubUrl?: string; title?: string;
+  }>();
+  const courseId = courseIdParam ? Number(courseIdParam) : 0;
+
+  const { addXP, addCoins } = useUserStats();
 
   const webviewRef = useRef<WebView>(null);
-  const [showToc, setShowToc] = useState(false);
+  const [showToc, setShowToc]           = useState(false);
   const [webviewReady, setWebviewReady] = useState(false);
+  const [webviewError, setWebviewError] = useState<string | null>(null);
+  const completionFiredRef              = useRef(false);
 
   // État audio piloté par les messages de la WebView
   const [webviewPlaying, setWebviewPlaying]               = useState(false);
@@ -613,10 +622,20 @@ export default function EpubReaderScreen() {
       } else if (data.type === 'audioEnded') {
         setWebviewPlaying(false);
         setWebviewActiveSectionId(null);
-        // Auto-avance : passer à la section suivante et la jouer automatiquement
+
         if (hasNextSectionRef.current) {
+          // Auto-avance vers la section suivante
           autoPlayNextRef.current = true;
           nextSectionRef.current();
+        } else if (!completionFiredRef.current) {
+          // Dernière section — déclencher la completion une seule fois
+          completionFiredRef.current = true;
+          const cmidNum = cmid ? Number(cmid) : 0;
+          if (cmidNum && courseId) {
+            syncAfterActivity({ courseId, cmid: cmidNum, score: 100, maxScore: 100 });
+          }
+          addXP(30);
+          addCoins(10);
         }
 
       } else if (data.type === 'audioError') {
@@ -625,7 +644,7 @@ export default function EpubReaderScreen() {
         setWebviewActiveSectionId(null);
       }
     } catch {}
-  }, []); // deps vides — utilise des refs pour accéder aux valeurs courantes
+  }, [cmid, courseId, addXP, addCoins]); // cmid/courseId/addXP/addCoins stables — refs pour le reste
 
   // ── Scroll vers la section active quand elle change ──
   // Utilise __ipelanScrollToIndex (index positionnel) comme méthode principale :
@@ -880,11 +899,21 @@ export default function EpubReaderScreen() {
             mediaPlaybackRequiresUserAction={false}
             onError={(e) => {
               if (IS_DEV) console.warn('[EpubReader] WebView error:', e.nativeEvent);
+              setWebviewError('Impossible de charger le contenu du livre.');
             }}
           />
         ) : (
           <View style={styles.centered}>
             <Text style={styles.loadingText}>Fichier introuvable</Text>
+          </View>
+        )}
+        {webviewError && (
+          <View style={styles.webviewErrorOverlay}>
+            <Ionicons name="alert-circle" size={36} color="#EF4444" />
+            <Text style={styles.webviewErrorText}>{webviewError}</Text>
+            <Pressable onPress={() => { setWebviewError(null); setWebviewReady(false); }} style={styles.retryButton}>
+              <Text style={styles.retryButtonText}>Réessayer</Text>
+            </Pressable>
           </View>
         )}
       </View>
@@ -955,7 +984,7 @@ export default function EpubReaderScreen() {
                       ]} numberOfLines={2}>
                         {item.text.substring(0, 80) || `Page ${item.pageNumber ?? index + 1}`}
                       </Text>
-                      {item.hasAudio && (
+                      {(item.audioFiles?.length ?? 0) > 0 && (
                         <Ionicons name="musical-notes" size={12} color="#4a90e2" style={styles.tocAudioIcon} />
                       )}
                     </View>
@@ -1182,5 +1211,20 @@ const styles = StyleSheet.create({
   },
   tocAudioIcon: {
     marginLeft: 6,
+  },
+  webviewErrorOverlay: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  webviewErrorText: {
+    marginTop: 12,
+    color: '#4B5563',
+    textAlign: 'center',
+    fontSize: 14,
+    lineHeight: 20,
   },
 });

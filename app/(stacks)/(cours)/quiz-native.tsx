@@ -14,7 +14,7 @@ import { RootState } from '@/services/redux/store';
 import { calculateXP } from '@/utils/xpCalculator';
 import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React from 'react';
+import React, { useRef } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
@@ -229,6 +229,8 @@ export default function QuizNativePage() {
   }>();
 
   const token = useSelector((s: RootState) => s.auth.token) || '';
+  const streak = useSelector((s: RootState) => s.auth.user?.streak ?? 0);
+  const startTimeRef = useRef(Date.now());
 
   // Résolution multi-alias des paramètres
   const cmid = parseInt(params.cmid || params.quizId || params.moduleId || '0', 10);
@@ -240,6 +242,7 @@ export default function QuizNativePage() {
     questions,
     currentIndex,
     selectedValue,
+    matchingAnswers,
     answers,
     isLoading,
     isSaving,
@@ -249,7 +252,9 @@ export default function QuizNativePage() {
     isLastQuestion,
     quizName,
     selectAnswer,
+    selectMatchingAnswer,
     submitAnswer,
+    submitMatchingAnswers,
     nextQuestion,
     finishQuiz,
     reload,
@@ -329,6 +334,22 @@ export default function QuizNativePage() {
   // ─── Action : valider la question puis passer à la suivante ─────────────
 
   const handleNext = async () => {
+    if (currentQuestion.type === 'matching') {
+      const subQs = currentQuestion.matchingData?.subQuestions ?? [];
+      const allAnswered = subQs.length > 0 && subQs.every(s => matchingAnswers[s.inputName]);
+      if (!allAnswered) {
+        Alert.alert('Répondre à toutes les paires', 'Associe chaque élément avant de continuer.');
+        return;
+      }
+      const ok = await submitMatchingAnswers();
+      if (!ok) {
+        Alert.alert('Synchronisation impossible', 'Les réponses n\'ont pas pu être envoyées. Réessaie.');
+        return;
+      }
+      if (isLastQuestion) { await handleFinish(); } else { nextQuestion(); }
+      return;
+    }
+
     if (effectiveSelected === null || effectiveSelected === undefined) {
       Alert.alert('Sélectionne une réponse', 'Choisis une option avant de continuer.');
       return;
@@ -364,11 +385,18 @@ export default function QuizNativePage() {
       console.log('[QuizNative] Final score:', finalScore);
     }
 
-    const xp = calculateXP('quiz', finalScore.correct, finalScore.total).totalXP;
+    const correct = finalScore.correct ?? 0;
+    const total = finalScore.total ?? 0;
+    const elapsedSeconds = Math.round((Date.now() - startTimeRef.current) / 1000);
+    const xp = calculateXP('quiz', correct, total, {
+      perfectScore: correct === total && total > 0,
+      timeSpent: elapsedSeconds,
+      streak,
+    }).totalXP;
     const resultParams = new URLSearchParams({
       activity: 'Quiz',
-      score: String(finalScore.correct),
-      total: String(finalScore.total),
+      score: String(correct),
+      total: String(total),
       xp: String(xp),
       moduleId: String(cmid),
       instanceId: String(instanceId || cmid),
@@ -503,19 +531,70 @@ export default function QuizNativePage() {
             />
           )}
 
+          {/* Matching — liste de sous-questions avec choix par ligne */}
+          {currentQuestion.type === 'matching' &&
+            currentQuestion.matchingData && (
+              <View>
+                {currentQuestion.matchingData.subQuestions.map((sub, si) => {
+                  const chosen = matchingAnswers[sub.inputName];
+                  return (
+                    <View key={sub.inputName} style={{ marginBottom: 16 }}>
+                      <Text style={{ fontWeight: '600', color: '#1F2937', marginBottom: 8 }}>
+                        {si + 1}. {sub.text}
+                      </Text>
+                      {currentQuestion.matchingData!.choices.map((choice) => {
+                        const isSel = chosen === choice.value;
+                        return (
+                          <Pressable
+                            key={choice.value}
+                            onPress={() => selectMatchingAnswer(sub.inputName, choice.value)}
+                            disabled={isSaving}
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              padding: 12,
+                              borderRadius: 10,
+                              borderWidth: 2,
+                              marginBottom: 6,
+                              borderColor: isSel ? '#4a90e2' : '#E5E7EB',
+                              backgroundColor: isSel ? '#EFF6FF' : '#FFFFFF',
+                            }}
+                          >
+                            <View style={{
+                              width: 20, height: 20, borderRadius: 9999,
+                              borderWidth: 2, alignItems: 'center', justifyContent: 'center',
+                              marginRight: 10,
+                              borderColor: isSel ? '#4a90e2' : '#D1D5DB',
+                              backgroundColor: isSel ? '#4a90e2' : 'transparent',
+                            }}>
+                              {isSel && <Feather name="check" size={12} color="white" />}
+                            </View>
+                            <Text style={{ flex: 1, color: isSel ? '#4a90e2' : '#374151' }}>
+                              {choice.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
           {/* Type non géré côté UI native */}
           {currentQuestion.type !== 'multichoice' &&
             currentQuestion.type !== 'truefalse' &&
             currentQuestion.type !== 'shortanswer' &&
-            currentQuestion.type !== 'numerical' && (
+            currentQuestion.type !== 'numerical' &&
+            currentQuestion.type !== 'matching' && (
               <View style={styles.bgamber50_p4_roundedxl_border_}>
                 <View style={styles.flexrow_itemsstart}>
                   <Feather name="info" size={20} color="#F59E0B" />
                   <Text style={styles.ml2_flex1_textsm_textamber800}>
                     Ce type de question (
                     <Text style={styles.fontbold}>{currentQuestion.type}</Text>
-                    ) n'est pas encore pris en charge par l'UI native.
-                    Tu peux la passer pour continuer le quiz.
+                    ) n'est pas encore pris en charge.
+                    Tu peux la passer pour continuer .
                   </Text>
                 </View>
               </View>

@@ -3,11 +3,13 @@ import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { getAllBadgesWithStatus } from "../../../constants/badges";
 import { useLives } from "../../../hooks/useLives";
 import { useLogin } from "../../../hooks/useLogin";
-import { useMoodleCourses } from "../../../hooks/useMoodleCourses";
 import { useUserStats } from "../../../hooks/useUserStats";
+import { getQuizStats, QuizStats } from "../../../services/storage/activity-progress";
 import { CourseProgressData, getAllCourseProgress } from "../../../services/storage/course-progress";
+import { useStreak } from "../../../services/storage/streak";
 import { getLevelFromXP } from "../../../utils/levelCalculator";
 
 function formatHeartCountdown(nextHeartTime: string | null): string | null {
@@ -25,6 +27,10 @@ export default function ProgressScreen() {
   const { stats: userStats, refetch: refetchUserStats } = useUserStats();
   const { lives, coins, maxLives, canBuyLife, isBuying, lifeCost, error, buyLife } = useLives(refetchUserStats);
   const [courseProgress, setCourseProgress] = useState<CourseProgressData[]>([]);
+  const [quizStats, setQuizStats] = useState<QuizStats>({ quizPassed: 0, perfectScores: 0 });
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isLoadingProgress, setIsLoadingProgress] = useState(true);
+  const { streak } = useStreak(user?.id ?? null);
 
   // Refresh countdown every minute when lives < max
   const [, forceRender] = useState(0);
@@ -37,25 +43,33 @@ export default function ProgressScreen() {
   const loadCourseProgress = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const data = await getAllCourseProgress(user.id);
+      const [data, qs] = await Promise.all([
+        getAllCourseProgress(user.id),
+        getQuizStats(user.id),
+      ]);
       setCourseProgress(data);
+      setQuizStats(qs);
     } catch (err) {
       console.warn('[Progress] Failed to load course progress:', err);
+    } finally {
+      setIsLoadingProgress(false);
     }
   }, [user?.id]);
 
   useEffect(() => { loadCourseProgress(); }, [loadCourseProgress]);
 
-  // Badges — useMoodleCourses avec [] : seules les badges nécessitent ce hook
-  const { loading, badgesWithStatus, reload } = useMoodleCourses([], user?.id || null);
+  const reload = useCallback(async () => {
+    setIsRefreshing(true);
+    await Promise.all([refetchUserStats(), loadCourseProgress()]);
+    setIsRefreshing(false);
+  }, [refetchUserStats, loadCourseProgress]);
 
   // Reload à chaque focus et après changement XP
   useFocusEffect(
     useCallback(() => {
       refetchUserStats();
-      reload();
       loadCourseProgress();
-    }, [refetchUserStats, reload, loadCourseProgress])
+    }, [refetchUserStats, loadCourseProgress])
   );
 
   useEffect(() => {
@@ -78,6 +92,15 @@ export default function ProgressScreen() {
   ).length;
 
   const totalCompleted = courseProgress.reduce((sum, c) => sum + (c.completedActivities || 0), 0);
+
+  const badgesWithStatus = getAllBadgesWithStatus({
+    completedLessons: totalCompleted,
+    currentStreak: streak?.currentStreak ?? displayStreak,
+    totalXP: displayXP,
+    quizPassed: quizStats.quizPassed,
+    perfectScores: quizStats.perfectScores,
+    daysActive: streak?.totalDaysActive ?? displayStreak,
+  });
 
   const globalProgress = courseProgress.length > 0
     ? Math.round(
@@ -102,7 +125,7 @@ export default function ProgressScreen() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={loading && courseProgress.length > 0} onRefresh={reload} />
+          <RefreshControl refreshing={isRefreshing} onRefresh={reload} />
         }
       >
         {/* Profile card */}
@@ -185,7 +208,7 @@ export default function ProgressScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Statistiques des Cours</Text>
           <View style={styles.card}>
-            {loading && courseProgress.length === 0 ? (
+            {(isLoadingProgress || isRefreshing) && courseProgress.length === 0 ? (
               <View style={styles.loadingContainer}><ActivityIndicator size="small" color="#002366" /></View>
             ) : (
               <>

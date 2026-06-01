@@ -1,4 +1,5 @@
 import { FontAwesome5 } from "@expo/vector-icons";
+import { setAudioModeAsync } from "expo-audio";
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -19,6 +20,19 @@ getCurrentLocale();
 
 function AuthRestoreWrapper() {
   useAuthRestore();
+  return null;
+}
+
+function AudioSessionInitializer() {
+  useEffect(() => {
+    setAudioModeAsync({
+      playsInSilentMode: true,
+      shouldPlayInBackground: false,
+      shouldRouteThroughEarpiece: false,
+      allowsRecording: false,
+      interruptionMode: 'duckOthers',
+    }).catch(() => {});
+  }, []);
   return null;
 }
 
@@ -80,6 +94,7 @@ export default function RootLayout() {
 
   return (
     <Provider store={store}>
+      <AudioSessionInitializer />
       <DatabaseInitializer />
       <AuthRestoreWrapper />
       <BackgroundSyncInitializer />

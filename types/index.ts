@@ -96,6 +96,7 @@ export interface IPELANUser {
   sons?: boolean;
   avatarUrl?: string;
   token?: string;
+  phone?: string;
 }
 
 export interface TokenResponse {

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { generateIdRetryOrder, identifyActivityType, validateActivityIds } from '../services/activity/activityIdentifier';
 import { moodleFetch } from '../services/api/moodleClient';
-import { shuffle } from '../utils/shuffle';
 
 const IS_DEV = process.env.NODE_ENV === "development";
 const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN;
@@ -153,7 +152,7 @@ export function useActivityContent(
           await loadDictationWithRetry(activityToken, moduleId, instanceId, cmid, courseId || 0, setDictation, setError);
           break;
         case 'listening':
-          await loadListeningWithRetry(activityToken, moduleId, instanceId, cmid, setListening, setError);
+          await loadListeningWithRetry(activityToken, moduleId, instanceId, cmid, courseId || 0, setListening, setError);
           break;
         case 'association':
           await loadGlossaryWithRetry(activityToken, moduleId, instanceId, cmid || 0, courseId || 0, setAssociation, setWordOrder, setError, 'association');
@@ -284,10 +283,10 @@ async function loadQuizWithRetry(
       const questionsResult = await moodleFetch('/webservice/rest/server.php', questionsParams);
 
       if (questionsResult?.exception || !questionsResult?.data?.node) {
-        if (IS_DEV) console.warn(`[loadQuizWithRetry] Get questions failed:`, questionsResult?.message);
-
-        if (IS_DEV) console.log(`[loadQuizWithRetry] Generating fallback questions`);
-        console.log("[useActivityContent] Failed to fetch quiz content, using fallback questions. Params:", { moduleId, instanceId, cmid });
+        if (IS_DEV) console.warn(`[loadQuizWithRetry] Get questions failed for ${type}=${id}:`, questionsResult?.message);
+        // Ce quiz utilise le format HTML natif (mod_quiz_get_attempt_data → questions[].html)
+        // → l'écran quiz-native gère ce cas via useQuiz. Signaler l'erreur clairement.
+        setError('Ce quiz utilise le format natif Moodle. Il sera chargé via l\'écran de quiz dédié.');
         return;
       }
 
@@ -328,6 +327,7 @@ async function loadQuizWithRetry(
     }
   }
 
+  setError('Impossible de charger les questions du quiz. Vérifie que le quiz est bien configuré dans Moodle.');
   setQuestions([]);
 }
 
@@ -404,9 +404,10 @@ async function loadDictationWithRetry(
   setDictation: (d: DictationData | null) => void,
   setError: (e: string) => void
 ) {
-  const idsToTry = [courseId];
+  const AUDIO_RE = /\.(mp3|wav|m4a|ogg|opus|aac)(\?|$)/i;
+  const MOODLE_URL = (process.env.EXPO_PUBLIC_MOODLE_API_URL || '').replace(/\/$/, '');
 
-  for (const id of idsToTry) {
+  for (const id of [courseId]) {
     try {
       if (IS_DEV) console.log(`[loadDictationWithRetry] Trying courseId:`, id);
 
@@ -414,41 +415,81 @@ async function loadDictationWithRetry(
         wstoken: token,
         wsfunction: 'mod_assign_get_assignments',
         moodlewsrestformat: 'json',
+        'courseids[0]': id,
       };
 
-      params['courseids[0]'] = id;
-
-      const result = await moodleFetch('/webservice/rest/server.php', params);
+      // Use fallback to admin token if user token has restricted permissions
+      const result = await moodleFetchWithFallback('/webservice/rest/server.php', params, token);
 
       if (result?.exception) {
-        if (IS_DEV) {
-          console.warn(`[loadDictationWithRetry] courseId ${id} failed:`, result.message);
-        }
+        if (IS_DEV) console.warn(`[loadDictationWithRetry] courseId ${id} failed:`, result.message);
         continue;
       }
 
       // Rechercher l'assignment par instanceId
       const courses = result?.courses || [];
       let assignment: any = null;
-
       for (const course of courses) {
-        const assignments = course.assignments || [];
-        assignment = assignments.find((a: any) => a.id === instanceId);
+        assignment = (course.assignments || []).find((a: any) => a.id === instanceId);
         if (assignment) break;
       }
 
       if (!assignment) {
-        if (IS_DEV) console.warn(`[loadDictationWithRetry] No assignment ${instanceId} in course ${id}`);
+        if (IS_DEV) console.warn(`[loadDictationWithRetry] Assignment ${instanceId} not found in course ${id}`);
         continue;
       }
 
-      const introFiles: any[] = assignment.introfiles || [];
-      const audioFile = introFiles.find((f: any) =>
-        f?.filename && /\.(mp3|wav|ogg|m4a|aac)$/i.test(f.filename)
+      // Debug : voir exactement ce que Moodle retourne
+      if (IS_DEV) {
+        console.log(`[loadDictationWithRetry] Assignment keys:`, Object.keys(assignment));
+        console.log(`[loadDictationWithRetry] introfiles (${(assignment.introfiles || []).length}):`,
+          JSON.stringify((assignment.introfiles || []).map((f: any) => ({ name: f.filename, url: f.fileurl }))));
+        console.log(`[loadDictationWithRetry] introattachments (${(assignment.introattachments || []).length}):`,
+          JSON.stringify((assignment.introattachments || []).map((f: any) => ({ name: f.filename, url: f.fileurl }))));
+        console.log(`[loadDictationWithRetry] intro (100 chars):`, (assignment.intro || '').substring(0, 100));
+      }
+
+      // Cherche dans introfiles + introattachments par filename OU fileurl
+      const allFiles: any[] = [
+        ...(assignment.introfiles || []),
+        ...(assignment.introattachments || []),
+      ];
+      const audioFile = allFiles.find((f: any) =>
+        AUDIO_RE.test(f?.filename || '') || AUDIO_RE.test(f?.fileurl || '')
       );
-      const audioUrl = audioFile?.fileurl
-        ? `${audioFile.fileurl.replace('/pluginfile.php/', '/webservice/pluginfile.php/')}?token=${token}`
-        : undefined;
+      let rawAudioUrl: string = audioFile?.fileurl || '';
+
+      // Fallback 1 : parser le HTML intro pour <audio src=...> ou href direct
+      if (!rawAudioUrl && assignment.intro) {
+        const m = assignment.intro.match(/<(?:audio|source)[^>]*src=["']([^"']+)["']/i)
+          || assignment.intro.match(/(https?:\/\/[^"'\s]+\.(?:mp3|wav|m4a|ogg|opus|aac)(?:\?[^"'\s]*)?)/i);
+        if (m) rawAudioUrl = m[1];
+      }
+
+      // Fallback 2 : si Moodle renvoie @@PLUGINFILE@@ (stockage interne TinyMCE)
+      // → construire l'URL avec le contextId du module (assignment.cmid = contextId de type module)
+      if (!rawAudioUrl && assignment.intro && assignment.intro.includes('@@PLUGINFILE@@')) {
+        const pluginMatch = assignment.intro.match(/@@PLUGINFILE@@([^"'<\s]+)/i);
+        if (pluginMatch) {
+          // contextId pour un assign = id du course_modules context (≈ cmid + offset)
+          // On utilise introattachment filearea + instanceId comme approximation
+          rawAudioUrl = `${MOODLE_URL}/webservice/pluginfile.php/${assignment.cmid || cmid}/mod_assign/intro${pluginMatch[1]}`;
+        }
+      }
+
+      if (IS_DEV) console.log(`[loadDictationWithRetry] rawAudioUrl:`, rawAudioUrl || 'NONE');
+
+      // Convertir pluginfile.php → webservice/pluginfile.php SEULEMENT si pas déjà fait
+      // (Moodle retourne déjà /webservice/pluginfile.php/ via les WS — ne pas doubler)
+      // Ne pas ajouter le token s'il est déjà présent dans l'URL (évite le double-token → 403)
+      let audioUrl: string | undefined;
+      if (rawAudioUrl) {
+        const wsUrl = rawAudioUrl.includes('/webservice/pluginfile.php/')
+          ? rawAudioUrl
+          : rawAudioUrl.replace('/pluginfile.php/', '/webservice/pluginfile.php/');
+        const hasToken = wsUrl.includes('token=') || wsUrl.includes('wstoken=');
+        audioUrl = hasToken ? wsUrl : wsUrl + (wsUrl.includes('?') ? '&' : '?') + `token=${token}`;
+      }
 
       const words = parseDictationWordsFromIntro(assignment.intro || '');
 
@@ -487,9 +528,11 @@ async function loadListeningWithRetry(
   moduleId: number,
   instanceId: number,
   cmid: number | undefined,
+  courseId: number,
   setListening: (l: ListeningData | null) => void,
   setError: (e: string) => void
 ) {
+  const AUDIO_RE = /\.(mp3|wav|m4a|ogg|opus|aac)(\?|$)/i;
   const idsToTry = generateIdRetryOrder(instanceId, cmid, moduleId);
 
   for (const { id, type } of idsToTry) {
@@ -525,17 +568,54 @@ async function loadListeningWithRetry(
         continue;
       }
 
+      // Récupérer l'URL audio depuis core_course_get_contents
+      let audioUrl: string | undefined;
+      if (courseId > 0) {
+        try {
+          const contents = await moodleFetch('/webservice/rest/server.php', {
+            wstoken: token,
+            wsfunction: 'core_course_get_contents',
+            moodlewsrestformat: 'json',
+            courseid: courseId,
+          });
+          if (Array.isArray(contents)) {
+            outer: for (const section of contents) {
+              for (const mod of section.modules || []) {
+                if (mod.modname === 'choice' && (mod.instance === id || mod.id === cmid)) {
+                  const allFiles = [...(mod.introfiles || []), ...(mod.contents || [])];
+                  const audioFile = allFiles.find((f: any) =>
+                    AUDIO_RE.test(f?.filename || '') || AUDIO_RE.test(f?.fileurl || '')
+                  );
+                  if (audioFile?.fileurl) {
+                    const raw = audioFile.fileurl as string;
+                    const wsUrl = raw.includes('/webservice/pluginfile.php/')
+                      ? raw
+                      : raw.replace('/pluginfile.php/', '/webservice/pluginfile.php/');
+                    const hasToken = wsUrl.includes('token=') || wsUrl.includes('wstoken=');
+                    audioUrl = hasToken ? wsUrl : wsUrl + (wsUrl.includes('?') ? '&' : '?') + `token=${token}`;
+                  }
+                  break outer;
+                }
+              }
+            }
+          }
+        } catch {
+          if (IS_DEV) console.warn('[loadListeningWithRetry] Failed to fetch audio URL from course contents');
+        }
+      }
+
+      if (IS_DEV) {
+        console.log(`[loadListeningWithRetry] ✅ SUCCESS with ${type}:`, id, `- ${options.length} options, audio=${audioUrl ? 'oui' : 'non'}`);
+      }
+
       const listening: ListeningData = {
         id,
         title: result?.choice?.name || 'Compréhension orale',
+        audioUrl,
         question: 'Écoutez et choisissez la bonne réponse',
         options: options.map((o: any) => o.text || ''),
         correctIndex: 0,
       };
-
-      if (IS_DEV) {
-        console.log(`[loadListeningWithRetry] ✅ SUCCESS with ${type}:`, id, `- ${options.length} options`);
-      }
 
       setListening(listening);
       return;
@@ -546,8 +626,7 @@ async function loadListeningWithRetry(
     }
   }
 
-
-
+  setError('Impossible de charger cet exercice d\'écoute. Vérifie ta connexion et la configuration du module Moodle.');
   setListening(null);
 }
 
@@ -589,13 +668,50 @@ async function loadLessonWithRetry(
       if (targetLesson) {
         if (IS_DEV) console.log(`[loadLessonWithRetry] Found lesson:`, targetLesson.id, targetLesson.name);
 
+        // Lancer une tentative pour créer le lesson_timer (requis par mod_lesson_get_page_data)
+        if (expectedType === 'wordOrder') {
+          const launchResult = await moodleFetch('/webservice/rest/server.php', {
+            wstoken: token,
+            wsfunction: 'mod_lesson_launch_attempt',
+            lessonid: targetLesson.id,
+            moodlewsrestformat: 'json',
+          });
+          if (IS_DEV) {
+            if (launchResult?.exception) {
+              console.warn(`[loadLessonWithRetry] launch_attempt warning:`, launchResult.message);
+            } else {
+              console.log(`[loadLessonWithRetry] Attempt launched for lesson:`, targetLesson.id);
+            }
+          }
+        }
+
         // Charger les pages de la lesson
-        const pagesResult = await moodleFetch('/webservice/rest/server.php', {
+        let pagesResult = await moodleFetch('/webservice/rest/server.php', {
           wstoken: token,
           wsfunction: 'mod_lesson_get_pages',
           lessonid: targetLesson.id,
           moodlewsrestformat: 'json',
         });
+
+        if (!pagesResult?.exception &&  (pagesResult?.pages?.length ?? 0) > 0) {
+          const userPages: any[] = pagesResult.pages;
+          const allMissingContent = userPages.every((p: any) => {
+            const pg = p.page ?? p;
+            return !pg?.contents && !pg?.content && !pg?.title;
+          });
+          if (allMissingContent) {
+            if (IS_DEV) console.log('[loadLessonWithRetry] User token returned no content — retrying with admin token');
+            const adminResult = await moodleFetch('/webservice/rest/server.php', {
+              wstoken: ADMIN_TOKEN,
+              wsfunction: 'mod_lesson_get_pages',
+              lessonid: targetLesson.id,
+              moodlewsrestformat: 'json',
+            });
+            if (!adminResult?.exception && (adminResult?.pages?.length ?? 0) > 0) {
+              pagesResult = adminResult;
+            }
+          }
+        }
 
         const pages = pagesResult?.pages || [];
 
@@ -606,20 +722,74 @@ async function loadLessonWithRetry(
           if (expectedType === 'wordOrder') {
             const sentences: WordOrderSentence[] = [];
 
-            for (const page of pages.slice(0, 5)) {
-              const content = page.content || '';
-              const cleanContent = content
-                .replace(/<[^>]*>/g, '')
-                .replace(/&[^;]+;/g, ' ')
-                .trim();
-              const words: string[] = String(cleanContent).split(/\s+/).filter((w: string) => w.length > 2);
+            // Strip HTML and decode common HTML entities
+            const clean = (s: string) => String(s)
+              .replace(/<[^>]*>/g, '')
+              .replace(/&nbsp;/g, ' ')
+              .replace(/&amp;/g, '&')
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .replace(/&[^;]+;/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
 
-              if (words.length >= 2 && words.length <= 8) {
-                const shuffled = shuffle(words);
+            for (const page of pages.slice(0, 10)) {
+              // mod_lesson_get_pages returns { page: {...}, answerids: [...] }
+              // In Moodle 4.x, page.contents/title are VALUE_OPTIONAL and omitted for student tokens.
+              // We fall back to mod_lesson_get_page_data which is designed for students.
+              const pageObj = page.page ?? page;
+              const pageId = pageObj?.id;
+
+              let rawContent = pageObj?.contents ?? pageObj?.content ?? '';
+              let rawTitle = pageObj?.title ?? '';
+
+              if (!rawContent && pageId) {
+                if (IS_DEV) console.log(`[loadLessonWithRetry] contents missing — calling mod_lesson_get_page_data for page ${pageId}`);
+                const pageDataResult = await moodleFetch('/webservice/rest/server.php', {
+                  wstoken: token,
+                  wsfunction: 'mod_lesson_get_page_data',
+                  lessonid: targetLesson.id,
+                  pageid: pageId,
+                  moodlewsrestformat: 'json',
+                });
+
+                if (pageDataResult && !pageDataResult.exception) {
+                  // page.contents is the raw HTML; pagecontent is the rendered version
+                  rawContent = pageDataResult.page?.contents ?? pageDataResult.pagecontent ?? '';
+                  rawTitle = pageDataResult.page?.title ?? '';
+                  if (IS_DEV) console.log(`[loadLessonWithRetry] page_data:`, {
+                    contentsSnippet: String(rawContent).slice(0, 150),
+                    title: rawTitle,
+                  });
+                } else if (IS_DEV) {
+                  console.warn(`[loadLessonWithRetry] mod_lesson_get_page_data failed:`, pageDataResult?.message);
+                }
+              }
+
+              const cleanContent = clean(rawContent) || clean(rawTitle);
+              if (!cleanContent) {
+                if (IS_DEV) console.warn(`[loadLessonWithRetry] Page ${pageId}: no content after clean`);
+                continue;
+              }
+
+              // Support pipe/comma separators OR plain whitespace
+              let words: string[];
+              if (/[|,]/.test(cleanContent)) {
+                words = cleanContent.split(/[|,]/).map((w: string) => w.trim()).filter((w: string) => w.length > 0);
+              } else {
+                words = cleanContent.split(/\s+/).filter((w: string) => w.length > 0);
+              }
+
+              if (IS_DEV) console.log(`[loadLessonWithRetry] Page ${pageId} words:`, { cleanContent, words, count: words.length });
+
+              if (words.length >= 2 && words.length <= 20) {
                 sentences.push({
-                  words: shuffled,
+                  words,
+                  correctOrder: words,
                   translation: cleanContent,
                 });
+              } else if (IS_DEV) {
+                console.warn(`[loadLessonWithRetry] Page ${pageId} skipped: word count=${words.length} (need 2–20)`);
               }
             }
 
@@ -629,7 +799,7 @@ async function loadLessonWithRetry(
               setWordOrder({
                 id: targetLesson.id,
                 title: targetLesson.name || 'Ordre des mots',
-                sentences: sentences.map(s => ({ words: s.words })),
+                sentences,
               });
               setAssociation(null);
               return;

@@ -62,7 +62,7 @@ export async function setStreak(userId: number, streak: number, best?: number): 
     const db = await getDBConnection();
     await db.runAsync(
       `UPDATE users SET streak = ?, last_activity = ? WHERE id = ?`,
-      [Math.max(1, streak), localDate, userId]
+      [Math.max(0, streak), localDate, userId]
     );
   } catch (err) {
     console.warn('[userProgressService] setStreak error:', err);
@@ -93,19 +93,37 @@ export async function setLives(userId: number, lives: number): Promise<void> {
   }
 }
 
+export async function setUserGamificationStats(
+  userId: number,
+  xp: number,
+  coins: number,
+  lives: number,
+  streak: number,
+): Promise<void> {
+  const db = await getDBConnection();
+  const d = new Date();
+  const today = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  await db.runAsync(
+    `UPDATE users SET ipelan_xp = ?, coins = ?, lives = ?, streak = ?, last_activity = ? WHERE id = ?`,
+    [Math.max(0, xp), Math.max(0, coins), Math.max(0, Math.min(6, lives)), Math.max(1, streak), today, userId]
+  );
+}
+
 export async function addXP(userId: number, xpToAdd: number): Promise<number> {
+  if (xpToAdd <= 0) {
+    const db = await getDBConnection();
+    const row = await db.getFirstAsync<{ xp: number }>('SELECT ipelan_xp as xp FROM users WHERE id = ?', [userId]);
+    return row?.xp ?? 0;
+  }
   try {
     const db = await getDBConnection();
-    const row = await db.getFirstAsync('SELECT ipelan_xp as xp FROM users WHERE id = ?', [userId]) as { xp: number } | null;
-
-    const currentXP = (row?.xp ?? 0) + xpToAdd;
-
+    // Atomic increment — avoids read-modify-write race condition
     await db.runAsync(
-      `UPDATE users SET ipelan_xp = ? WHERE id = ?`,
-      [currentXP, userId]
+      `UPDATE users SET ipelan_xp = ipelan_xp + ? WHERE id = ?`,
+      [xpToAdd, userId]
     );
-
-    return currentXP;
+    const row = await db.getFirstAsync<{ xp: number }>('SELECT ipelan_xp as xp FROM users WHERE id = ?', [userId]);
+    return row?.xp ?? xpToAdd;
   } catch (err) {
     console.warn('[userProgressService] addXP error:', err);
     return xpToAdd;
@@ -113,21 +131,45 @@ export async function addXP(userId: number, xpToAdd: number): Promise<number> {
 }
 
 export async function addCoins(userId: number, coinsToAdd: number): Promise<number> {
+  if (coinsToAdd <= 0) {
+    const db = await getDBConnection();
+    const row = await db.getFirstAsync<{ coins: number }>('SELECT coins FROM users WHERE id = ?', [userId]);
+    return row?.coins ?? 0;
+  }
   try {
     const db = await getDBConnection();
-    const row = await db.getFirstAsync('SELECT coins FROM users WHERE id = ?', [userId]) as { coins: number } | null;
-
-    const currentCoins = (row?.coins ?? 0) + coinsToAdd;
-
+    // Atomic increment — avoids read-modify-write race condition
     await db.runAsync(
-      `UPDATE users SET coins = ? WHERE id = ?`,
-      [currentCoins, userId]
+      `UPDATE users SET coins = MIN(1000, coins + ?) WHERE id = ?`,
+      [coinsToAdd, userId]
     );
-
-    return currentCoins;
+    const row = await db.getFirstAsync<{ coins: number }>('SELECT coins FROM users WHERE id = ?', [userId]);
+    return row?.coins ?? coinsToAdd;
   } catch (err) {
     console.warn('[userProgressService] addCoins error:', err);
     return coinsToAdd;
+  }
+}
+
+/**
+ * Vérifie le streak au premier plan et met à jour le miroir dans users.
+ * Délègue à streak.checkStreakOnForeground puis synchronise users.streak.
+ */
+export async function checkStreakOnForeground(userId: number): Promise<number> {
+  try {
+    const { checkStreakOnForeground: checkStreak } = await import('../storage/streak');
+    const newStreak = await checkStreak(userId);
+
+    const db = await getDBConnection();
+    await db.runAsync(
+      `UPDATE users SET streak = ? WHERE id = ?`,
+      [newStreak, userId]
+    );
+
+    return newStreak;
+  } catch (err) {
+    console.warn('[userProgressService] checkStreakOnForeground error:', err);
+    return 0;
   }
 }
 
@@ -177,7 +219,7 @@ export async function submitGradeToMoodle(params: {
 }): Promise<boolean> {
   const { moduleId, score, total, token } = params;
   const percentage = Math.round((score / Math.max(total, 1)) * 100);
-  const passed = percentage >= 50;
+  const passed = percentage >= 60;
 
   if (!token || token.length < 10) {
     console.warn('[Grade] Missing token, cannot submit completion to Moodle');

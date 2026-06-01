@@ -157,6 +157,7 @@ export default function EditProfileScreen() {
       setNom(user.lastname || "");
       setPrenom(user.firstname || "");
       setEmail(user.email || "");
+      setNumero(user.phone || "");
     }
   }, [user]);
 
@@ -180,6 +181,7 @@ export default function EditProfileScreen() {
         lastname: nom.trim(),
         email: email.trim() || user?.email || '',
         fullname: `${prenom.trim()} ${nom.trim()}`,
+        phone: numero.trim() || undefined,
       };
       
       await saveUserData(updatedUser);
@@ -188,7 +190,7 @@ export default function EditProfileScreen() {
       if (user?.id && token) {
         try {
           const moodleToken = getAuthToken(token);
-          await moodleFetch('/webservice/rest/server.php', {
+          const moodlePayload: Record<string, any> = {
             wstoken: moodleToken,
             wsfunction: 'core_user_update_users',
             moodlewsrestformat: 'json',
@@ -196,7 +198,11 @@ export default function EditProfileScreen() {
             'users[0][firstname]': prenom.trim(),
             'users[0][lastname]': nom.trim(),
             'users[0][email]': email.trim() || user.email,
-          });
+          };
+          if (numero.trim()) {
+            moodlePayload['users[0][phone1]'] = numero.trim();
+          }
+          await moodleFetch('/webservice/rest/server.php', moodlePayload);
         } catch (moodleErr) {
           console.warn('[EditProfile] Moodle sync failed:', moodleErr);
         }

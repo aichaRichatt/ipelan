@@ -2,10 +2,7 @@ import { isMoodleOnline } from '@/services/api/moodleClient';
 import {
   getUserProgress,
   initStreakTable,
-  setCoins,
-  setLives,
-  setStreak,
-  setXP,
+  setUserGamificationStats,
 } from '@/services/api/userProgressService';
 import { getUserGamificationFromMoodle } from '@/services/api/xpService';
 import { startLifeBackgroundFetch } from '@/services/background/lifeRegeneration';
@@ -25,6 +22,7 @@ const IS_DEV = process.env.NODE_ENV === 'development';
 // Module-level sync guard — prevents 3 simultaneous tab mounts from each calling Moodle
 let _syncInProgress = false;
 let _lastSyncTimestamp = 0;
+let _lastSyncUserId: number | null = null; // reset cooldown on user change
 const SYNC_COOLDOWN_MS = 8_000;
 
 export interface UserStats {
@@ -95,6 +93,12 @@ export function useUserStats(): UseUserStatsReturn {
       return;
     }
 
+    // Reset cooldown when a different user is active (e.g. after logout/login)
+    if (_lastSyncUserId !== userId) {
+      _lastSyncTimestamp = 0;
+      _lastSyncUserId = userId;
+    }
+
     setIsLoading(true);
 
     // ✅ Vérifier et régénérer les vies automatiquement (même si app était fermée)
@@ -102,6 +106,13 @@ export function useUserStats(): UseUserStatsReturn {
     const lifeResult = await recalculateLivesOnForeground(userId);
     if (lifeResult.livesRegenerated > 0 && IS_DEV) {
       console.log('[useUserStats] Auto-regenerated', lifeResult.livesRegenerated, 'lives on foreground');
+    }
+
+    // ✅ Vérifier le streak au premier plan — reset si jours manqués (comportement Duolingo)
+    const { checkStreakOnForeground } = await import('@/services/api/userProgressService');
+    const streakAfterCheck = await checkStreakOnForeground(userId);
+    if (IS_DEV && streakAfterCheck === 0) {
+      console.log('[useUserStats] Streak reset on foreground check');
     }
 
     // ✅ Démarrer le background fetch pour régénération future
@@ -275,12 +286,13 @@ export function useUserStats(): UseUserStatsReturn {
 
           setStats(mergedStats);
 
-          await Promise.all([
-            setXP(userId, mergedStats.xp),
-            setCoins(userId, mergedStats.coins),
-            setLives(userId, mergedStats.lives),
-            setStreak(userId, mergedStats.streak),
-          ]);
+          await setUserGamificationStats(
+            userId,
+            mergedStats.xp,
+            mergedStats.coins,
+            mergedStats.lives,
+            mergedStats.streak,
+          );
 
           // Sauvegarder aussi les badges fusionnés
           const { saveBadge } = await import('@/services/storage/badge-storage');
@@ -309,12 +321,31 @@ export function useUserStats(): UseUserStatsReturn {
             syncQueue.syncGamification(userId, token);
           }
 
-          // ✅ Background non-blocking: rebuild activity_progress from Moodle completion statuses
+          // ✅ Background non-blocking: rebuild activity_progress + course_progress from Moodle
           // Runs silently after UI is updated — INSERT OR IGNORE never overwrites local scores
           ;(async () => {
             try {
               const { fetchAndPopulateActivityProgressFromMoodle } = await import('@/services/sync/progressSync');
               await fetchAndPopulateActivityProgressFromMoodle(userId, token);
+
+              // Refresh course counts now that course_progress has been seeded
+              if (isMountedRef.current) {
+                const refreshed = await getAllCourseProgress(userId);
+                const updatedInProgress = refreshed.filter(c => {
+                  const p = c.totalActivities > 0 ? Math.round((c.completedActivities / c.totalActivities) * 100) : 0;
+                  return p > 0 && p < 100;
+                }).length;
+                const updatedCompleted = refreshed.filter(c => {
+                  const p = c.totalActivities > 0 ? Math.round((c.completedActivities / c.totalActivities) * 100) : 0;
+                  return p === 100;
+                }).length;
+                setStats(prev => ({
+                  ...prev,
+                  coursesInProgress: Math.max(prev.coursesInProgress, updatedInProgress),
+                  coursesCompleted: Math.max(prev.coursesCompleted, updatedCompleted),
+                }));
+                if (IS_DEV) console.log('[useUserStats] Course counts refreshed after seed:', { updatedInProgress, updatedCompleted });
+              }
             } catch {}
           })();
         } catch (syncErr) {

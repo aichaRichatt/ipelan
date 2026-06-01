@@ -73,15 +73,13 @@ export async function resolveActivityInstanceId(
             name: mod.name
           });
 
-          const audioUrl = extractAudioUrl(mod.description || mod.intro || '');
-
           return {
             cmid: mod.id,
             instanceId: mod.instance,
             modname: mod.modname,
             name: mod.name || mod.instancename || 'Unknown',
             description: mod.description || mod.intro || '',
-            audioUrl,
+            audioUrl: extractAudioUrlFromModule(mod),
           };
         }
       }
@@ -122,14 +120,13 @@ export async function getModulesByType(
     for (const section of sections) {
       for (const mod of section.modules || []) {
         if (mod.modname === modname) {
-          const audioUrl = extractAudioUrl(mod.description || mod.intro || '');
           results.push({
             cmid: mod.id,
             instanceId: mod.instance,
             modname: mod.modname,
             name: mod.name || mod.instancename || 'Unknown',
             description: mod.description || mod.intro || '',
-            audioUrl,
+            audioUrl: extractAudioUrlFromModule(mod),
           });
         }
       }
@@ -145,21 +142,40 @@ export async function getModulesByType(
 }
 
 
+const AUDIO_EXT_RE = /\.(mp3|wav|m4a|ogg|opus|aac)(\?|$)/i;
+const AUDIO_SRC_RE = /<(?:audio|source)[^>]*src=["']([^"']+)["']/i;
+// matches <a href="...mp3"> links Moodle generates when a file is inserted via TinyMCE
+const AUDIO_HREF_RE = /<a[^>]+href=["']([^"']+\.(?:mp3|wav|m4a|ogg|opus|aac)[^"']*)["']/i;
+const AUDIO_LINK_RE = /(https?:\/\/[^"'\s]+\.(?:mp3|wav|m4a|ogg|opus|aac)(?:\?[^"'\s]*)?)/i;
+
 export function extractAudioUrl(html: string): string | undefined {
   if (!html) return undefined;
+  const m = html.match(AUDIO_SRC_RE) || html.match(AUDIO_HREF_RE) || html.match(AUDIO_LINK_RE);
+  return m ? m[1] : undefined;
+}
 
-  const audioMatch = html.match(/<audio[^>]*src=["']([^"']+)["']/i);
-  if (audioMatch) return audioMatch[1];
+export function extractAudioUrlFromModule(mod: any): string | undefined {
+  // 1. Check introfiles / introattachments / contents (most reliable)
+  for (const list of [mod.introfiles, mod.introattachments, mod.contents, mod.contentsinfo?.files]) {
+    if (!Array.isArray(list)) continue;
+    for (const f of list) {
+      const url: string = f?.fileurl || f?.url || '';
+      if (url && AUDIO_EXT_RE.test(url)) return url;
+    }
+  }
+  // 2. Fallback: parse HTML description/intro (<audio src>, <a href>, or bare HTTPS link)
+  const fromHtml = extractAudioUrl(mod.description || mod.intro || '');
+  if (fromHtml) return fromHtml;
 
-  const sourceMatch = html.match(/<source[^>]*src=["']([^"']+\.(mp3|wav|m4a|ogg))["']/i);
-  if (sourceMatch) return sourceMatch[1];
-
-  const linkMatch = html.match(/(https?:\/\/[^"']+\.(mp3|wav|m4a|ogg))/i);
-  if (linkMatch) return linkMatch[1];
-
-  const pluginMatch = html.match(/(https?:\/\/[^"']+pluginfile\.php[^"']+\.(mp3|wav|m4a|ogg))/i);
-  if (pluginMatch) return pluginMatch[1];
-
+  if (IS_DEV) {
+    console.log('[extractAudioUrlFromModule] no audio found in mod:', {
+      name: mod.name,
+      modname: mod.modname,
+      introfilesCount: mod.introfiles?.length ?? 0,
+      contentsCount: mod.contents?.length ?? 0,
+      descriptionSnippet: (mod.description || mod.intro || '').slice(0, 200),
+    });
+  }
   return undefined;
 }
 
@@ -171,8 +187,10 @@ export function convertFileUrlForAuth(fileUrl: string, token: string): string {
 
   let url = fileUrl;
 
-  // Remplacer pluginfile.php → webservice/pluginfile.php
-  url = url.replace('/pluginfile.php/', '/webservice/pluginfile.php/');
+  // Remplacer pluginfile.php → webservice/pluginfile.php (seulement si pas déjà fait)
+  if (!url.includes('/webservice/pluginfile.php/')) {
+    url = url.replace('/pluginfile.php/', '/webservice/pluginfile.php/');
+  }
 
   if (!url.includes('token=') && !url.includes('wstoken=')) {
     const separator = url.includes('?') ? '&' : '?';
@@ -240,7 +258,7 @@ export async function getCourseModulesCached(
           modname: mod.modname,
           name: mod.name || 'Unknown',
           description: mod.description || mod.intro || '',
-          audioUrl: extractAudioUrl(mod.description || mod.intro || ''),
+          audioUrl: extractAudioUrlFromModule(mod),
         });
       }
     }

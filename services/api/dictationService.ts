@@ -8,9 +8,10 @@ export interface DictationExercise {
 }
 
 function buildAudioUrl(fileurl: string, token: string): string {
-  return fileurl
-    .replace('/pluginfile.php/', '/webservice/pluginfile.php/')
-    + `?token=${token}`;
+  const url = fileurl.includes('/webservice/pluginfile.php/')
+    ? fileurl
+    : fileurl.replace('/pluginfile.php/', '/webservice/pluginfile.php/');
+  return url + (url.includes('?') ? '&' : '?') + `token=${token}`;
 }
 
 export async function getDictationExercise(

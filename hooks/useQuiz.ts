@@ -45,6 +45,8 @@ export interface UseQuizState {
   // Réponses (inputName → value)
   answers: Record<string, string>;
   selectedValue: string | null;
+  /** Pour les questions matching : { subQuestion.inputName → selectedValue } */
+  matchingAnswers: Record<string, string>;
   // États
   isLoading: boolean;
   isSaving: boolean;
@@ -55,7 +57,11 @@ export interface UseQuizState {
 
 export interface UseQuizActions {
   selectAnswer: (value: string) => void;
+  /** Sélectionne la réponse d'une sous-question matching */
+  selectMatchingAnswer: (inputName: string, value: string) => void;
   submitAnswer: () => Promise<boolean>;
+  /** Soumet toutes les réponses de la question matching courante */
+  submitMatchingAnswers: () => Promise<boolean>;
   nextQuestion: () => void;
   prevQuestion: () => void;
   finishQuiz: () => Promise<QuizScore | null>;
@@ -80,6 +86,7 @@ export function useQuiz(
   // Ref pour éviter la closure périmée dans finishQuiz (setAnswers est async)
   const answersRef = useRef<Record<string, string>>({});
   const [selectedValue, setSelectedValue] = useState<string | null>(null);
+  const [matchingAnswers, setMatchingAnswers] = useState<Record<string, string>>({});
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -145,7 +152,10 @@ export function useQuiz(
       }
       setQuestions(qs);
       setCurrentIndex(0);
+      answersRef.current = {};
+      setAnswers({});
       setSelectedValue(null);
+      setMatchingAnswers({});
       if (IS_DEV) {
         console.log('[useQuiz] Loaded', qs.length, 'questions for attempt', aId);
       }
@@ -220,10 +230,54 @@ export function useQuiz(
     }
   }, [token, attemptId, currentQuestion, selectedValue]);
 
+  const selectMatchingAnswer = useCallback((inputName: string, value: string) => {
+    setMatchingAnswers(prev => ({ ...prev, [inputName]: value }));
+  }, []);
+
+  const submitMatchingAnswers = useCallback(async (): Promise<boolean> => {
+    if (!attemptId || !currentQuestion || currentQuestion.type !== 'matching') return false;
+    const subQs = currentQuestion.matchingData?.subQuestions ?? [];
+    if (subQs.length === 0) return false;
+
+    const answersToSave: Record<string, string> = {};
+    for (const sub of subQs) {
+      const val = matchingAnswers[sub.inputName];
+      if (val !== undefined) answersToSave[sub.inputName] = val;
+    }
+    if (Object.keys(answersToSave).length === 0) return false;
+
+    if (IS_DEV) console.log('[useQuiz] submitMatchingAnswers slot', currentQuestion.slot, answersToSave);
+
+    setIsSaving(true);
+    try {
+      const merged = { ...answersRef.current, ...answersToSave };
+      answersRef.current = merged;
+      setAnswers(merged);
+
+      const ok = await saveQuizAnswers(
+        token,
+        attemptId,
+        answersToSave,
+        { [currentQuestion.sequencecheckName]: String(currentQuestion.sequencecheck) }
+      );
+      if (!ok) return false;
+
+      const refreshed = await fetchAllQuizQuestions(token, attemptId);
+      if (refreshed.length > 0) setQuestions(refreshed);
+      return true;
+    } catch (err: any) {
+      if (IS_DEV) console.warn('[useQuiz] submitMatchingAnswers:', err?.message);
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }, [token, attemptId, currentQuestion, matchingAnswers]);
+
   const nextQuestion = useCallback(() => {
     if (currentIndex < questions.length - 1) {
       setCurrentIndex(i => i + 1);
       setSelectedValue(null);
+      setMatchingAnswers({});
     }
   }, [currentIndex, questions.length]);
 
@@ -231,6 +285,7 @@ export function useQuiz(
     if (currentIndex > 0) {
       setCurrentIndex(i => i - 1);
       setSelectedValue(null);
+      setMatchingAnswers({});
     }
   }, [currentIndex]);
 
@@ -260,11 +315,10 @@ export function useQuiz(
 
       if (review) {
         const { sumgrades, maxgrade, percentage } = extractFinalScore(review);
-    
-        const actualCorrect = Math.round((percentage / 100) * (questions.length || maxgrade || 1));
+        const total = questions.length || Math.round(maxgrade) || 1;
         finalScore = {
-          correct: actualCorrect,
-          total: questions.length || Math.round(maxgrade) || 1,
+          correct  : Math.round(sumgrades),   // sumgrades = nombre brut de bonnes réponses
+          total,
           percentage,
           timeSpent: Math.floor((Date.now() - startTime) / 1000),
         };
@@ -300,6 +354,7 @@ export function useQuiz(
     answersRef.current = {};
     setAnswers({});
     setSelectedValue(null);
+    setMatchingAnswers({});
     setIsComplete(false);
     setError(null);
     setScore(null);
@@ -314,13 +369,16 @@ export function useQuiz(
     isLastQuestion: currentIndex === questions.length - 1,
     answers,
     selectedValue,
+    matchingAnswers,
     isLoading,
     isSaving,
     isComplete,
     error,
     score,
     selectAnswer,
+    selectMatchingAnswer,
     submitAnswer,
+    submitMatchingAnswers,
     nextQuestion,
     prevQuestion,
     finishQuiz,

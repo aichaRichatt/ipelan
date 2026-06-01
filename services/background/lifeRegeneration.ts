@@ -10,7 +10,7 @@ const BACKGROUND_LIFE_TASK = 'background-life-regeneration';
 const IS_DEV = process.env.NODE_ENV === 'development';
 
 const MAX_LIVES = 6;
-const REGEN_HOURS = 2;
+const REGEN_HOURS = 6;
 const REGEN_MS = REGEN_HOURS * 60 * 60 * 1000;
 
 /**
@@ -34,7 +34,12 @@ export function registerLifeBackgroundTask() {
 
       const user = users[0];
       const now = Date.now();
-      const lastUpdate = new Date(user.last_lives_update || now).getTime();
+      const rawTs = user.last_lives_update;
+      // Normalize SQLite space-separated format to ISO-8601 UTC before parsing
+      const normalizedTs = rawTs
+        ? (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(rawTs) ? rawTs.replace(' ', 'T') + 'Z' : rawTs)
+        : null;
+      const lastUpdate = normalizedTs ? new Date(normalizedTs).getTime() : now;
       const elapsedMs = now - lastUpdate;
       const livesToRegen = Math.floor(elapsedMs / REGEN_MS);
 

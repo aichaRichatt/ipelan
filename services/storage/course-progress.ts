@@ -1,5 +1,7 @@
 import { getDBConnection } from './db-service';
 
+const IS_DEV = process.env.NODE_ENV === 'development';
+
 export interface CourseProgressData {
   courseId: number;
   completedActivities: number;
@@ -56,12 +58,12 @@ export const saveCourseProgress = async (
         ]
       );
 
-      console.log('[CourseProgress] Saved:', { courseId, completedActivities, totalActivities, totalXP });
+      if (IS_DEV) console.log('[CourseProgress] Saved:', { courseId, completedActivities, totalActivities, totalXP });
       return;
     } catch (error: any) {
       lastError = error;
       const isLockError = error?.message?.includes('database is locked') || error?.code === 'database is locked';
-      console.warn('[CourseProgress] Save attempt', attempt, 'failed:', isLockError ? 'database locked' : error.message);
+      if (IS_DEV) console.warn('[CourseProgress] Save attempt', attempt, 'failed:', isLockError ? 'database locked' : error.message);
 
       if (isLockError && attempt < maxRetries) {
         await new Promise(r => setTimeout(r, 100 * attempt));
@@ -71,7 +73,7 @@ export const saveCourseProgress = async (
     }
   }
 
-  console.error('[CourseProgress] Failed to save after', maxRetries, 'attempts:', lastError);
+  if (IS_DEV) console.error('[CourseProgress] Failed to save after', maxRetries, 'attempts:', lastError);
 };
 
 export const getCourseProgress = async (
@@ -207,7 +209,14 @@ export const updateCourseProgressFromActivities = async (
     const bestScore = result?.best_score || 0;
     const progressPercent = totalActivities > 0 ? Math.min(100, Math.round((completed / totalActivities) * 100)) : 0;
 
-    await saveCourseProgress(courseId, completed, totalActivities, totalXP, bestScore, userId ?? 0);
+    if (userId == null) return {
+      progressPercent: 0,
+      completedActivities: 0,
+      totalActivities: 0,
+      totalXP: 0,
+      avgScore: 0,
+    };
+    await saveCourseProgress(courseId, completed, totalActivities, totalXP, bestScore, userId);
 
     return {
       progressPercent,
@@ -230,13 +239,16 @@ export const updateCourseProgressFromActivities = async (
 
 export const markActivityCompleted = async (
   moduleId: number,
-  courseId: number
+  courseId: number,
+  userId?: number
 ): Promise<void> => {
   try {
     const db = await getDBConnection();
     await db.runAsync(
-      `UPDATE activity_progress SET is_completed = 1, synced_at = NULL WHERE module_id = ? AND course_id = ?`,
-      [moduleId, courseId]
+      userId != null
+        ? `UPDATE activity_progress SET is_completed = 1, synced_at = NULL WHERE module_id = ? AND course_id = ? AND user_id = ?`
+        : `UPDATE activity_progress SET is_completed = 1, synced_at = NULL WHERE module_id = ? AND course_id = ?`,
+      userId != null ? [moduleId, courseId, userId] : [moduleId, courseId]
     );
   } catch (error) {
     console.error('Failed to mark activity completed:', error);
@@ -342,7 +354,7 @@ export async function calculateCourseProgress(
 
   const percentage = Math.round((completedCount / total) * 100);
 
-  console.log('[calculateCourseProgress]', { courseId, total, completed: completedCount, percentage });
+  if (IS_DEV) console.log('[calculateCourseProgress]', { courseId, total, completed: completedCount, percentage });
 
   return { completed: completedCount, total, percentage };
 }

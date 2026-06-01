@@ -86,9 +86,14 @@ const IMAGE_MIMETYPES = [
 
 export function mapModuleToContentType(module: ParsedModule): MappedContent {
   const modname = module.modname?.toLowerCase() || '';
-  
+
+  // lesson modname: route to wordOrder if name contains "jeu", otherwise association
+  const baseType = modname === 'lesson'
+    ? (module.name?.toLowerCase().includes('jeu') ? 'wordOrder' : 'association')
+    : (MODNAME_MAP[modname] || 'html');
+
   const result: MappedContent = {
-    type: MODNAME_MAP[modname] || 'html',
+    type: baseType,
     source: 'moodle',
     module,
   };
@@ -214,4 +219,20 @@ export function isActivity(type: ActivityType): boolean {
 
 export function isContent(type: ActivityType): boolean {
   return ['lesson', 'html'].includes(type);
+}
+
+// Languages where diacritics are phonemically significant — skip NFD stripping
+const TONAL_LANGUAGES = new Set(['pulaar', 'soninke', 'soninké', 'wolof']);
+
+/**
+ * Normalize a dictation answer for comparison.
+ * For tonal languages (Pulaar, Soninké, Wolof), preserve diacritics.
+ * For others (French, etc.), strip accents via NFD decomposition.
+ */
+export function normalizeAnswer(text: string, lang?: string): string {
+  const lower = text.toLowerCase().trim();
+  if (lang && TONAL_LANGUAGES.has(lang.toLowerCase())) {
+    return lower;
+  }
+  return lower.normalize('NFD').replace(/[̀-ͯ]/g, '');
 }

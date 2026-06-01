@@ -1,324 +1,308 @@
 import { useListeningContent } from "@/hooks/useListening";
-import { audioService } from "@/services/audio/audioService";
 import { RootState } from "@/services/redux/store";
 import { calculateXP } from "@/utils/xpCalculator";
 import { Feather } from "@expo/vector-icons";
+import { createAudioPlayer } from "expo-audio";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
 
-const IS_DEV = process.env.NODE_ENV === "development";
+// ── Design tokens (identiques à tous les écrans d'activité) ───────────────
+const T = {
+  bg:          '#FAF9F6',
+  card:        '#FFFFFF',
+  border:      '#E5E7EB',
+  primary:     '#002366',
+  amber:       '#F59E0B',
+  success:     '#10B981',
+  successBg:   '#F0FDF4',
+  successText: '#15803D',
+  error:       '#EF4444',
+  errorBg:     '#FEF2F2',
+  errorText:   '#B91C1C',
+  textMain:    '#111827',
+  textSub:     '#6B7280',
+  textMid:     '#374151',
+  gray100:     '#F3F4F6',
+  gray200:     '#E5E7EB',
+  gray400:     '#9CA3AF',
+} as const;
+
+const RATES      = [1.0, 1.5, 2.0, 0.5] as const;
+type Rate        = typeof RATES[number];
+const WAVE_COUNT = 18;
 
 type OptionState = 'default' | 'selected' | 'correct' | 'wrong' | 'dimmed';
 
 function getOptionState(
-  optionIndex: number,
-  selectedAnswer: number | null,
-  showFeedback: boolean,
-  correctIndex: number | undefined
+  idx: number, selected: number | null, showFeedback: boolean, correct?: number
 ): OptionState {
-  if (!showFeedback) {
-    return selectedAnswer === optionIndex ? 'selected' : 'default';
-  }
-  if (optionIndex === correctIndex) return 'correct';
-  if (optionIndex === selectedAnswer && optionIndex !== correctIndex) return 'wrong';
+  if (!showFeedback) return selected === idx ? 'selected' : 'default';
+  if (idx === correct)                          return 'correct';
+  if (idx === selected && idx !== correct)      return 'wrong';
   return 'dimmed';
 }
 
 export default function ListeningScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
-    moduleId?: string;
-    moduleTitle?: string;
-    courseId?: string;
-    cmid?: string;
-    instanceId?: string
+    moduleId?: string; moduleTitle?: string; courseId?: string;
+    cmid?: string; instanceId?: string;
   }>();
-  const token = useSelector((state: RootState) => state.auth.token);
 
-  const moduleId = parseInt(params.moduleId || "0", 10);
-  const instanceId = parseInt(params.instanceId || params.moduleId || "0", 10);
-  const cmid = parseInt(params.cmid || "0", 10);
-  const courseId = parseInt(params.courseId || "0", 10);
+  const token  = useSelector((state: RootState) => state.auth.token);
+  const streak = useSelector((state: RootState) => state.auth.user?.streak ?? 0);
+  const startTimeRef = useRef(Date.now());
 
-  const { exercises, isLoading, error, refetch } = useListeningContent(
-    token || '',
-    moduleId,
-    instanceId,
-    courseId,
-    cmid
+  const moduleId   = parseInt(params.moduleId   || '0', 10);
+  const instanceId = parseInt(params.instanceId || params.moduleId || '0', 10);
+  const cmid       = parseInt(params.cmid       || '0', 10);
+  const courseId   = parseInt(params.courseId   || '0', 10);
+
+  const { exercises, isLoading, error } = useListeningContent(
+    token || '', moduleId, instanceId, courseId, cmid
   );
 
   const [currentExercise, setCurrentExercise] = useState(0);
-  const [score, setScore] = useState(0);
-  const [answers, setAnswers] = useState<boolean[]>([]);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [showResult, setShowResult] = useState(false);
-  const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
-  const [showFeedback, setShowFeedback] = useState(false);
-
-  useEffect(() => {
-    return () => {
-      audioService.stop();
-    };
-  }, []);
+  const [score,           setScore]           = useState(0);
+  const [selectedAnswer,  setSelectedAnswer]  = useState<number | null>(null);
+  const [showFeedback,    setShowFeedback]    = useState(false);
 
   const exercise = exercises[currentExercise];
-  const progress = exercises.length > 0 ? ((currentExercise + 1) / exercises.length) * 100 : 0;
+  const progress = exercises.length > 0
+    ? ((currentExercise + 1) / exercises.length) * 100
+    : 0;
 
-  const handlePlayAudio = async () => {
-    if (exercise?.audioUrl) {
-      setIsPlaying(true);
+  // ── Audio player ─────────────────────────────────────────────────────────
+  const playerRef       = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
+  const [isPlaying,      setIsPlaying]      = useState(false);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
+  const [playbackRate,   setPlaybackRate]   = useState<Rate>(1.0);
+
+  // Waveform animée stable
+  const [waveHeights, setWaveHeights] = useState<number[]>(Array(WAVE_COUNT).fill(12));
+  useEffect(() => {
+    if (!isPlaying) { setWaveHeights(Array(WAVE_COUNT).fill(12)); return; }
+    const iv = setInterval(() => {
+      setWaveHeights(Array.from({ length: WAVE_COUNT }, () => Math.floor(Math.random() * 32 + 12)));
+    }, 150);
+    return () => clearInterval(iv);
+  }, [isPlaying]);
+
+  useEffect(() => {
+    if (!exercise?.audioUrl) return;
+    setIsLoadingAudio(true);
+    setIsPlaying(false);
+    const p = createAudioPlayer({ uri: exercise.audioUrl });
+    playerRef.current = p;
+
+    // expo-audio v1.1 : duration disponible une fois chargé
+    const iv = setInterval(() => {
       try {
-        await audioService.playRemoteUrl(exercise.audioUrl, token || '');
-        setIsPlaying(false);
-      } catch (err) {
-        if (IS_DEV) console.error('[Listening] Audio play failed:', err);
-        setIsPlaying(false);
-      }
-    } else {
-      setIsPlaying(true);
-      setTimeout(() => setIsPlaying(false), 2000);
-    }
-  };
+        const dur = (p as any).duration;
+        if (typeof dur === 'number' && dur > 0) setIsLoadingAudio(false);
+        if (!(p as any).playing) setIsPlaying(false);
+      } catch {}
+    }, 200);
+    const timeout = setTimeout(() => setIsLoadingAudio(false), 3000);
 
-  const handleAnswer = (optionIndex: number) => {
+    return () => {
+      clearInterval(iv);
+      clearTimeout(timeout);
+      try { p.remove(); } catch {}
+      if (playerRef.current === p) playerRef.current = null;
+    };
+  }, [exercise?.audioUrl]);
+
+  const handlePlayPause = useCallback(() => {
+    const p = playerRef.current;
+    if (!p) return;
+    try {
+      if (isPlaying) { p.pause(); setIsPlaying(false); }
+      else           { p.play();  setIsPlaying(true);  }
+    } catch {}
+  }, [isPlaying]);
+
+  const handleReplay = useCallback(() => {
+    const p = playerRef.current;
+    if (!p) return;
+    try { p.seekTo(0); p.play(); setIsPlaying(true); } catch {}
+  }, []);
+
+  const cycleRate = useCallback(() => {
+    const next = RATES[(RATES.indexOf(playbackRate) + 1) % RATES.length];
+    setPlaybackRate(next);
+    const p = playerRef.current;
+    if (p) try { (p as any).setRate?.(next, true); } catch {}
+  }, [playbackRate]);
+
+  // ── Logique activité ─────────────────────────────────────────────────────
+  const handleAnswer = (idx: number) => {
     if (showFeedback) return;
-
-    setSelectedAnswer(optionIndex);
+    setSelectedAnswer(idx);
     setShowFeedback(true);
-
-    const isCorrect = optionIndex === exercise?.correctIndex;
-    const newAnswers = [...answers, isCorrect];
-    setAnswers(newAnswers);
-
-    if (isCorrect) {
-      setScore(prev => prev + 1);
-    }
+    if (idx === exercise?.correctIndex) setScore(prev => prev + 1);
   };
 
   const handleContinue = () => {
     if (currentExercise < exercises.length - 1) {
-      setTimeout(() => {
-        setCurrentExercise(prev => prev + 1);
-        setSelectedAnswer(null);
-        setShowFeedback(false);
-      }, 1500);
+      setCurrentExercise(prev => prev + 1);
+      setSelectedAnswer(null);
+      setShowFeedback(false);
     } else {
-      setShowResult(true);
+      navigateToResult();
     }
   };
 
-  const handleFinish = () => {
+  const navigateToResult = () => {
+    const elapsedSeconds = Math.round((Date.now() - startTimeRef.current) / 1000);
+    const earnedXp = calculateXP('listening', score, exercises.length, {
+      perfectScore: score === exercises.length && exercises.length > 0,
+      timeSpent: elapsedSeconds, streak,
+    }).totalXP;
     const iId = params.instanceId || params.moduleId || '0';
-    const earnedXp = calculateXP('listening', score, exercises.length).totalXP;
-    const resultParams = `?activity=Listening&score=${score}&total=${exercises.length}&xp=${earnedXp}&moduleId=${params.moduleId || ''}&instanceId=${iId}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Compréhension Orale')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}`;
-    router.push(`/(stacks)/(cours)/result${resultParams}` as any);
-  };
-
-  const handleRetry = () => {
-    setCurrentExercise(0);
-    setScore(0);
-    setAnswers([]);
-    setShowResult(false);
-    setSelectedAnswer(null);
-    setShowFeedback(false);
-    refetch();
-  };
-
-  const getScoreEmoji = () => {
-    const percentage = (score / (exercises.length || 1)) * 100;
-    if (percentage === 100) return "🏆";
-    if (percentage >= 80) return "🌟";
-    if (percentage >= 60) return "👏";
-    if (percentage >= 40) return "💪";
-    return "📚";
-  };
-
-  if (isLoading) {
-    return (
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.backButton}>
-            <Feather name="arrow-left" size={24} color="black" />
-          </Pressable>
-          <Text style={styles.headerTitle}>Compréhension Orale</Text>
-        </View>
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#002366" />
-          <Text style={styles.loadingText}>Chargement des exercices...</Text>
-        </View>
-      </SafeAreaView>
+    router.push(
+      `/(stacks)/(cours)/result?activity=Listening&score=${score}&total=${exercises.length}&xp=${earnedXp}&moduleId=${params.moduleId || ''}&instanceId=${iId}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Compréhension Orale')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}` as any
     );
-  }
+  };
 
-  if (error) {
-    return (
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.backButton}>
-            <Feather name="arrow-left" size={24} color="black" />
-          </Pressable>
-          <Text style={styles.headerTitle}>Compréhension Orale</Text>
-        </View>
-        <View style={styles.centeredPadded}>
-          <View style={styles.errorCard}>
-            <Feather name="alert-circle" size={64} color="#EF4444" />
-            <Text style={styles.errorTitle}>Impossible de charger les exercices</Text>
-            <Text style={styles.errorBody}>{error}</Text>
-            <Pressable onPress={() => router.back()} style={styles.errorButton}>
-              <Text style={styles.errorButtonText}>Retour</Text>
-            </Pressable>
+  // ── États chargement / erreur / vide ─────────────────────────────────────
+  if (isLoading) return (
+    <SafeAreaView style={s.screen} edges={['top']}>
+      <ActivityHeader title="Compréhension Orale" onBack={() => router.back()} />
+      <View style={s.centered}>
+        <ActivityIndicator size="large" color={T.amber} />
+        <Text style={s.loadingText}>Chargement des exercices…</Text>
+      </View>
+    </SafeAreaView>
+  );
+
+  if (error) return (
+    <SafeAreaView style={s.screen} edges={['top']}>
+      <ActivityHeader title="Compréhension Orale" onBack={() => router.back()} />
+      <View style={s.centeredPad}>
+        <View style={s.errorCard}>
+          <View style={s.errorIconWrap}>
+            <Feather name="alert-circle" size={32} color={T.error} />
           </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (showResult) {
-    const percentage = exercises.length > 0 ? Math.round((score / exercises.length) * 100) : 0;
-    const resultColor = percentage >= 50 ? '#10B981' : '#EF4444';
-
-    return (
-      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
-        <ScrollView contentContainerStyle={styles.resultScrollContent}>
-          <View style={styles.resultContainer}>
-            <View style={styles.resultCard}>
-              <Text style={styles.resultEmoji}>{getScoreEmoji()}</Text>
-              <Text style={styles.resultTitle}>
-                {percentage >= 50 ? "Bravo !" : "Continue tes efforts !"}
-              </Text>
-              <Text style={styles.resultSubtitle}>
-                Tu as obtenu {score} bonnes réponses sur {exercises.length}
-              </Text>
-
-              <View style={[styles.resultCircle, { borderColor: resultColor, backgroundColor: resultColor + '10' }]}>
-                <Text style={[styles.resultPercent, { color: resultColor }]}>{percentage}%</Text>
-              </View>
-
-              <View style={styles.xpTag}>
-                <Text style={styles.xpTagStar}>⭐</Text>
-                <Text style={styles.xpTagText}>+{calculateXP('listening', score, exercises.length).totalXP} XP gagnés</Text>
-              </View>
-
-              <View style={styles.resultButtonRow}>
-                <Pressable onPress={handleFinish} style={styles.continueButton}>
-                  <Text style={styles.continueButtonText}>Continuer</Text>
-                </Pressable>
-                <Pressable onPress={handleRetry} style={styles.retryButton}>
-                  <Text style={styles.retryButtonText}>Recommencer</Text>
-                </Pressable>
-              </View>
-            </View>
-          </View>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  if (!exercise) {
-    return (
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.backButton}>
-            <Feather name="arrow-left" size={24} color="black" />
-          </Pressable>
-          <Text style={styles.headerTitle}>Compréhension Orale</Text>
-        </View>
-        <View style={styles.centered}>
-          <Feather name="music" size={64} color="#D1D5DB" />
-          <Text style={styles.loadingText}>Aucun exercice disponible</Text>
-          <Pressable onPress={() => router.back()} style={styles.retryButton}>
-            <Text style={styles.retryButtonText}>Retour</Text>
+          <Text style={s.errorTitle}>Impossible de charger les exercices</Text>
+          <Text style={s.errorBody}>{error}</Text>
+          <Pressable onPress={() => router.back()} style={s.errorBtn}>
+            <Text style={s.errorBtnText}>Retour au cours</Text>
           </Pressable>
         </View>
-      </SafeAreaView>
-    );
-  }
+      </View>
+    </SafeAreaView>
+  );
+
+  if (!exercise) return (
+    <SafeAreaView style={s.screen} edges={['top']}>
+      <ActivityHeader title="Compréhension Orale" onBack={() => router.back()} />
+      <View style={s.centered}>
+        <Feather name="music" size={56} color={T.gray200} />
+        <Text style={s.loadingText}>Aucun exercice disponible</Text>
+        <Pressable onPress={() => router.back()} style={[s.errorBtn, { marginTop: 24 }]}>
+          <Text style={s.errorBtnText}>Retour</Text>
+        </Pressable>
+      </View>
+    </SafeAreaView>
+  );
+
+  // ── Écran principal ───────────────────────────────────────────────────────
+  const audioDisabled = isLoadingAudio || !exercise.audioUrl;
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backButton}>
-          <Feather name="arrow-left" size={24} color="black" />
-        </Pressable>
-        <View style={styles.headerInfo}>
-          <Text style={styles.headerTitle}>{params.moduleTitle || 'Compréhension Orale'}</Text>
-          <Text style={styles.headerSubtitle}>Exercice {currentExercise + 1}/{exercises.length}</Text>
-        </View>
-        <View style={styles.scoreBadge}>
-          <Text style={styles.scoreBadgeText}>{score} pts</Text>
-        </View>
-      </View>
+    <SafeAreaView style={s.screen} edges={['top']}>
+      <ActivityHeader
+        title={params.moduleTitle || 'Compréhension Orale'}
+        subtitle={`Exercice ${currentExercise + 1} / ${exercises.length}`}
+        onBack={() => router.back()}
+      />
 
-      <View style={styles.progressBarSection}>
-        <View style={styles.progressBarBg}>
-          <View style={[styles.progressBarFill, { width: `${progress}%` as any }]} />
+      {/* Barre de progression */}
+      <View style={s.progressWrap}>
+        <View style={s.progressBg}>
+          <View style={[s.progressFill, { width: `${progress}%` as any }]} />
         </View>
       </View>
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
-        <View style={styles.audioCard}>
-          <Text style={styles.audioInstruction}>Écoute le mot et choisis la bonne traduction</Text>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll}>
 
-          <View style={styles.waveformRow}>
-            {[...Array(18)].map((_, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.waveBar,
-                  { backgroundColor: isPlaying ? '#4a90e2' : '#d1d5db', height: isPlaying ? Math.floor(Math.random() * 32 + 12) : 12 }
-                ]}
-              />
+        {/* Carte audio */}
+        <View style={s.audioCard}>
+          <Text style={s.audioInstruction}>Écoute et choisis la bonne traduction</Text>
+
+          {/* Waveform */}
+          <View style={s.waveRow}>
+            {waveHeights.map((h, i) => (
+              <View key={i} style={[s.waveBar, { height: h, backgroundColor: isPlaying ? T.amber : T.gray200 }]} />
             ))}
           </View>
 
-          <Pressable onPress={handlePlayAudio} style={styles.playButton}>
-            <Feather name={isPlaying ? "pause" : "play"} size={24} color="white" />
-          </Pressable>
+          {/* Contrôles audio */}
+          <View style={s.audioControls}>
+            <Pressable onPress={handleReplay} disabled={audioDisabled}
+              style={[s.ctrlBtn, audioDisabled && s.ctrlDisabled]}>
+              <Feather name="rotate-ccw" size={20} color={T.textMid} />
+            </Pressable>
 
-          <Text style={styles.wordText}>&ldquo;{exercise.word}&rdquo;</Text>
-          <Text style={styles.courseNameText}>{exercise.courseName}</Text>
+            <Pressable onPress={handlePlayPause} disabled={audioDisabled}
+              style={[s.playBtn, audioDisabled && s.playBtnDisabled]}>
+              {isLoadingAudio
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Feather name={isPlaying ? 'pause' : 'play'} size={26} color="#fff" />}
+            </Pressable>
+
+            <Pressable onPress={cycleRate} disabled={audioDisabled}
+              style={[s.ctrlBtn, audioDisabled && s.ctrlDisabled]}>
+              <Text style={s.rateText}>{playbackRate}×</Text>
+            </Pressable>
+          </View>
+
+          {exercise.word ? (
+            <Text style={s.wordText}>&ldquo;{exercise.word}&rdquo;</Text>
+          ) : null}
         </View>
 
-        <Text style={styles.questionText}>Quelle est la bonne traduction en français ?</Text>
+        {/* Question */}
+        <Text style={s.sectionLabel}>Quelle est la bonne traduction ?</Text>
 
-        <View style={styles.optionsList}>
-          {exercise.options.map((option, index) => {
-            const state = getOptionState(index, selectedAnswer, showFeedback, exercise?.correctIndex);
+        {/* Options */}
+        <View style={s.optionsList}>
+          {exercise.options.map((option, idx) => {
+            const state = getOptionState(idx, selectedAnswer, showFeedback, exercise?.correctIndex);
             return (
               <Pressable
-                key={index}
-                onPress={() => handleAnswer(index)}
+                key={idx}
+                onPress={() => handleAnswer(idx)}
                 style={[
-                  styles.optionButton,
-                  state === 'default' && styles.optionDefault,
-                  state === 'selected' && styles.optionSelected,
-                  state === 'correct' && styles.optionCorrect,
-                  state === 'wrong' && styles.optionWrong,
-                  state === 'dimmed' && styles.optionDimmed,
+                  s.optionBtn,
+                  state === 'default'   && s.optDefault,
+                  state === 'selected'  && s.optSelected,
+                  state === 'correct'   && s.optCorrect,
+                  state === 'wrong'     && s.optWrong,
+                  state === 'dimmed'    && s.optDimmed,
                 ]}
               >
-                <View style={styles.optionRow}>
+                <View style={s.optionRow}>
                   <Text style={[
-                    styles.optionText,
-                    state === 'selected' && styles.optionTextSelected,
-                    state === 'correct' && styles.optionTextCorrect,
-                    state === 'wrong' && styles.optionTextWrong,
-                    state === 'dimmed' && styles.optionTextDimmed,
+                    s.optionText,
+                    state === 'selected' && s.optTextSelected,
+                    state === 'correct'  && s.optTextCorrect,
+                    state === 'wrong'    && s.optTextWrong,
+                    state === 'dimmed'   && s.optTextDimmed,
                   ]}>
                     {option}
                   </Text>
-                  {showFeedback && index === exercise?.correctIndex && (
-                    <Feather name="check-circle" size={24} color="#10B981" />
+                  {showFeedback && idx === exercise?.correctIndex && (
+                    <Feather name="check-circle" size={22} color={T.success} />
                   )}
-                  {showFeedback && index === selectedAnswer && index !== exercise?.correctIndex && (
-                    <Feather name="x-circle" size={24} color="#EF4444" />
+                  {showFeedback && idx === selectedAnswer && idx !== exercise?.correctIndex && (
+                    <Feather name="x-circle" size={22} color={T.error} />
                   )}
                 </View>
               </Pressable>
@@ -326,35 +310,41 @@ export default function ListeningScreen() {
           })}
         </View>
 
+        {/* Feedback */}
         {showFeedback && (
-          <View style={[styles.feedbackBox, selectedAnswer === exercise?.correctIndex ? styles.feedbackCorrect : styles.feedbackWrong]}>
-            <View style={styles.feedbackRow}>
-              <Feather
-                name={selectedAnswer === exercise?.correctIndex ? "check-circle" : "x-circle"}
-                size={20}
-                color={selectedAnswer === exercise?.correctIndex ? '#10B981' : '#EF4444'}
-              />
-              <Text style={[styles.feedbackText, selectedAnswer === exercise?.correctIndex ? styles.feedbackTextCorrect : styles.feedbackTextWrong]}>
+          <View style={[s.feedbackBox,
+            selectedAnswer === exercise?.correctIndex ? s.feedbackOk : s.feedbackKo
+          ]}>
+            <Feather
+              name={selectedAnswer === exercise?.correctIndex ? 'check-circle' : 'x-circle'}
+              size={20}
+              color={selectedAnswer === exercise?.correctIndex ? T.success : T.error}
+            />
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text style={[s.feedbackText,
+                { color: selectedAnswer === exercise?.correctIndex ? T.successText : T.errorText }
+              ]}>
                 {selectedAnswer === exercise?.correctIndex ? 'Correct !' : 'Incorrect'}
               </Text>
+              {selectedAnswer !== exercise?.correctIndex && (
+                <Text style={s.feedbackAnswer}>
+                  Bonne réponse : {exercise.options[exercise.correctIndex]}
+                </Text>
+              )}
             </View>
-            {selectedAnswer !== exercise?.correctIndex && (
-              <Text style={styles.feedbackAnswer}>
-                La bonne réponse était : {exercise.options[exercise.correctIndex]}
-              </Text>
-            )}
           </View>
         )}
       </ScrollView>
 
-      <View style={styles.bottomBar}>
+      {/* Barre d'action fixe en bas */}
+      <View style={s.bottomBar}>
         <Pressable
           onPress={handleContinue}
           disabled={!showFeedback}
-          style={[styles.continueBtn, showFeedback ? styles.continueBtnActive : styles.continueBtnDisabled]}
+          style={[s.actionBtn, showFeedback ? s.actionBtnActive : s.actionBtnDisabled]}
         >
-          <Text style={styles.continueBtnText}>
-            {currentExercise < exercises.length - 1 ? "Continuer" : "Voir les résultats"}
+          <Text style={s.actionBtnText}>
+            {currentExercise < exercises.length - 1 ? 'Continuer' : 'Voir les résultats'}
           </Text>
         </Pressable>
       </View>
@@ -362,123 +352,113 @@ export default function ListeningScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#FAF9F6' },
-  header: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FAF9F6',
-  },
-  backButton: { marginRight: 16, padding: 8, marginLeft: -8 },
-  headerInfo: { flex: 1 },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#111827' },
-  headerSubtitle: { color: '#6b7280', fontSize: 12 },
-  scoreBadge: { backgroundColor: '#F59E0B', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20 },
-  scoreBadgeText: { color: '#ffffff', fontWeight: 'bold', fontSize: 14 },
-  progressBarSection: { paddingHorizontal: 20, marginBottom: 16 },
-  progressBarBg: { height: 8, backgroundColor: '#e5e7eb', borderRadius: 4, overflow: 'hidden' },
-  progressBarFill: { height: '100%', backgroundColor: '#F59E0B', borderRadius: 4 },
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 120 },
+// ── Sous-composant header ─────────────────────────────────────────────────
+function ActivityHeader({ title, subtitle, onBack }: { title: string; subtitle?: string; onBack: () => void }) {
+  return (
+    <View style={s.header}>
+      <Pressable onPress={onBack} style={s.backBtn}>
+        <Feather name="arrow-left" size={24} color={T.textMain} />
+      </Pressable>
+      <View style={s.headerInfo}>
+        <Text style={s.headerTitle}>{title}</Text>
+        {subtitle ? <Text style={s.headerSub}>{subtitle}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
+// ── Styles ────────────────────────────────────────────────────────────────
+const s = StyleSheet.create({
+  screen:      { flex: 1, backgroundColor: T.bg },
+  centered:    { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  centeredPad: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
+  loadingText: { marginTop: 16, color: T.textSub },
+
+  // Header
+  header:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 },
+  backBtn:     { padding: 8, marginLeft: -8, marginRight: 12 },
+  headerInfo:  { flex: 1 },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: T.textMain },
+  headerSub:   { fontSize: 12, color: T.textSub, marginTop: 2 },
+
+  // Progress bar
+  progressWrap: { paddingHorizontal: 20, marginBottom: 16 },
+  progressBg:   { height: 8, backgroundColor: T.gray200, borderRadius: 4, overflow: 'hidden' },
+  progressFill: { height: '100%', backgroundColor: T.amber, borderRadius: 4 },
+
+  // Scroll
+  scroll: { paddingHorizontal: 20, paddingBottom: 24 },
+
+  // Audio card
   audioCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 24,
-    padding: 24,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    backgroundColor: T.card, borderRadius: 24, padding: 24,
+    marginBottom: 24, borderWidth: 1, borderColor: T.border,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05, shadowRadius: 4, elevation: 2,
   },
-  audioInstruction: { color: '#6b7280', textAlign: 'center', marginBottom: 16 },
-  waveformRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 64, marginBottom: 16 },
-  waveBar: { width: 4, marginHorizontal: 2, borderRadius: 2 },
-  playButton: {
-    width: 64, height: 64, borderRadius: 32, backgroundColor: '#002366',
-    alignItems: 'center', justifyContent: 'center', alignSelf: 'center',
+  audioInstruction: { color: T.textSub, textAlign: 'center', marginBottom: 16, fontSize: 14 },
+  waveRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 64, marginBottom: 16 },
+  waveBar:  { width: 4, marginHorizontal: 2, borderRadius: 2 },
+  audioControls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 20, marginVertical: 8 },
+  ctrlBtn: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: T.gray100, alignItems: 'center', justifyContent: 'center',
   },
-  wordText: { textAlign: 'center', color: '#4b5563', fontWeight: '500', fontSize: 18, marginTop: 16, marginBottom: 8 },
-  courseNameText: { textAlign: 'center', color: '#9ca3af', fontSize: 14 },
-  questionText: { fontSize: 18, fontWeight: 'bold', color: '#111827', marginBottom: 16, textAlign: 'center' },
-  optionsList: { gap: 12 },
-  optionButton: {
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 2,
-    marginBottom: 12,
+  ctrlDisabled: { opacity: 0.4 },
+  playBtn: {
+    width: 64, height: 64, borderRadius: 32,
+    backgroundColor: T.amber, alignItems: 'center', justifyContent: 'center',
   },
-  optionDefault: { borderColor: '#e5e7eb', backgroundColor: '#ffffff' },
-  optionSelected: { borderColor: '#002366', backgroundColor: 'rgba(0,35,102,0.1)' },
-  optionCorrect: { borderColor: '#22c55e', backgroundColor: '#f0fdf4' },
-  optionWrong: { borderColor: '#ef4444', backgroundColor: '#fef2f2' },
-  optionDimmed: { borderColor: '#e5e7eb', backgroundColor: '#ffffff', opacity: 0.5 },
-  optionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  optionText: { fontSize: 18, fontWeight: '500', color: '#111827' },
-  optionTextSelected: { color: '#002366' },
-  optionTextCorrect: { color: '#15803d' },
-  optionTextWrong: { color: '#b91c1c' },
-  optionTextDimmed: { color: '#6b7280' },
-  feedbackBox: {
-    marginTop: 16, padding: 16, borderRadius: 12, borderWidth: 1,
-  },
-  feedbackCorrect: { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' },
-  feedbackWrong: { backgroundColor: '#fef2f2', borderColor: '#fecaca' },
-  feedbackRow: { flexDirection: 'row', alignItems: 'center' },
-  feedbackText: { marginLeft: 8, fontWeight: '500' },
-  feedbackTextCorrect: { color: '#15803d' },
-  feedbackTextWrong: { color: '#b91c1c' },
-  feedbackAnswer: { color: '#4b5563', fontSize: 14, marginTop: 8 },
+  playBtnDisabled: { opacity: 0.5 },
+  rateText: { fontSize: 13, fontWeight: 'bold', color: T.textMid },
+  wordText: { textAlign: 'center', color: T.textMid, fontWeight: '500', fontSize: 17, marginTop: 14 },
+
+  // Section label
+  sectionLabel: { fontSize: 17, fontWeight: 'bold', color: T.textMain, marginBottom: 16, textAlign: 'center' },
+
+  // Options
+  optionsList: { gap: 12, marginBottom: 16 },
+  optionBtn: { padding: 16, borderRadius: 16, borderWidth: 2 },
+  optDefault:  { borderColor: T.border,   backgroundColor: T.card },
+  optSelected: { borderColor: T.primary,  backgroundColor: 'rgba(0,35,102,0.08)' },
+  optCorrect:  { borderColor: T.success,  backgroundColor: T.successBg },
+  optWrong:    { borderColor: T.error,    backgroundColor: T.errorBg },
+  optDimmed:   { borderColor: T.border,   backgroundColor: T.card, opacity: 0.5 },
+  optionRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  optionText:       { fontSize: 16, fontWeight: '500', color: T.textMain, flex: 1 },
+  optTextSelected:  { color: T.primary },
+  optTextCorrect:   { color: T.successText },
+  optTextWrong:     { color: T.errorText },
+  optTextDimmed:    { color: T.textSub },
+
+  // Feedback
+  feedbackBox:   { flexDirection: 'row', alignItems: 'flex-start', borderRadius: 12, padding: 14, marginBottom: 16 },
+  feedbackOk:    { backgroundColor: T.successBg },
+  feedbackKo:    { backgroundColor: T.errorBg },
+  feedbackText:  { fontWeight: 'bold', fontSize: 15 },
+  feedbackAnswer: { color: T.textMid, fontSize: 13, marginTop: 4 },
+
+  // Bottom bar
   bottomBar: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-    backgroundColor: '#ffffff',
+    paddingHorizontal: 20, paddingVertical: 16,
+    borderTopWidth: 1, borderTopColor: T.border, backgroundColor: T.card,
   },
-  continueBtn: { borderRadius: 16, paddingVertical: 16, alignItems: 'center' },
-  continueBtnActive: { backgroundColor: '#002366' },
-  continueBtnDisabled: { backgroundColor: '#d1d5db' },
-  continueBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 18 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  centeredPadded: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
-  loadingText: { color: '#6b7280', marginTop: 16 },
+  actionBtn:         { borderRadius: 16, paddingVertical: 16, alignItems: 'center' },
+  actionBtnActive:   { backgroundColor: T.primary },
+  actionBtnDisabled: { backgroundColor: T.gray200 },
+  actionBtnText:     { color: '#fff', fontWeight: 'bold', fontSize: 17 },
+
+  // Error
   errorCard: {
-    backgroundColor: '#fef2f2', borderRadius: 24, padding: 32,
-    alignItems: 'center', borderWidth: 1, borderColor: '#fecaca',
+    backgroundColor: T.card, borderRadius: 24, padding: 32,
+    alignItems: 'center', borderWidth: 1, borderColor: T.border, width: '100%',
   },
-  errorTitle: { fontSize: 20, fontWeight: 'bold', color: '#7f1d1d', marginTop: 16, textAlign: 'center' },
-  errorBody: { color: '#b91c1c', textAlign: 'center', marginTop: 8, fontSize: 14 },
-  errorButton: { backgroundColor: '#ef4444', borderRadius: 24, paddingHorizontal: 24, paddingVertical: 12, marginTop: 24 },
-  errorButtonText: { color: '#ffffff', fontWeight: 'bold' },
-  resultScrollContent: { flexGrow: 1, paddingBottom: 120 },
-  resultContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20, paddingVertical: 40 },
-  resultCard: {
-    backgroundColor: '#ffffff', borderRadius: 24, padding: 32,
-    alignItems: 'center', width: '100%', maxWidth: 360,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1, shadowRadius: 8, elevation: 4,
+  errorIconWrap: {
+    width: 64, height: 64, borderRadius: 32,
+    backgroundColor: T.errorBg, alignItems: 'center', justifyContent: 'center', marginBottom: 16,
   },
-  resultEmoji: { fontSize: 56, marginBottom: 16 },
-  resultTitle: { fontSize: 24, fontWeight: 'bold', color: '#111827', marginBottom: 8, textAlign: 'center' },
-  resultSubtitle: { color: '#6b7280', textAlign: 'center', marginBottom: 24 },
-  resultCircle: {
-    width: 128, height: 128, borderRadius: 64, borderWidth: 8,
-    alignItems: 'center', justifyContent: 'center', marginBottom: 24,
-  },
-  resultPercent: { fontSize: 36, fontWeight: '900' },
-  xpTag: {
-    backgroundColor: '#fefce8', borderRadius: 12, paddingHorizontal: 24,
-    paddingVertical: 12, marginBottom: 24, flexDirection: 'row', alignItems: 'center',
-  },
-  xpTagStar: { fontSize: 20, marginRight: 8 },
-  xpTagText: { color: '#a16207', fontWeight: 'bold', fontSize: 18 },
-  resultButtonRow: { flexDirection: 'row', width: '100%' },
-  continueButton: { flex: 1, backgroundColor: '#e5e7eb', paddingVertical: 16, borderRadius: 12, marginRight: 8 },
-  continueButtonText: { color: '#374151', fontWeight: 'bold', textAlign: 'center' },
-  retryButton: { flex: 1, backgroundColor: '#4a90e2', paddingVertical: 16, borderRadius: 12, marginLeft: 8 },
-  retryButtonText: { color: '#ffffff', fontWeight: 'bold', textAlign: 'center' },
+  errorTitle:   { fontSize: 18, fontWeight: 'bold', color: T.textMain, marginBottom: 8, textAlign: 'center' },
+  errorBody:    { color: T.textSub, textAlign: 'center', marginBottom: 24, fontSize: 14 },
+  errorBtn:     { backgroundColor: T.primary, borderRadius: 24, paddingHorizontal: 32, paddingVertical: 12 },
+  errorBtnText: { color: '#fff', fontWeight: 'bold' },
 });

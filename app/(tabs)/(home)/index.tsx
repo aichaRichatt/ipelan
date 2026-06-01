@@ -77,14 +77,14 @@ function useActiveCourse(activeToken: string) {
 
         const moodleCall = (await import('../../../services/api/moodleClient')).moodleCall;
 
-        console.log('[useActiveCourse] Calling Moodle API with token:', activeToken?.substring(0, 10) + '...');
+        if (IS_DEV) console.log('[useActiveCourse] Fetching enrolled courses');
         const result = await moodleCall(
           'core_course_get_enrolled_courses_by_timeline_classification',
           { classification: 'inprogress', limit: 10 },
           activeToken
         );
 
-        console.log('[useActiveCourse] Moodle API result:', result?.courses?.length || 0, 'courses');
+        if (IS_DEV) console.log('[useActiveCourse] API result:', result?.courses?.length || 0, 'courses');
 
         if (result && result.courses && result.courses.length > 0) {
           setCourses(result.courses);
@@ -144,23 +144,18 @@ function useActiveCourse(activeToken: string) {
       }
 
       // Fallback 3: use language+grade preferences from registration
-      console.log('[useActiveCourse] Fallback check - loadedFromCache:', loadedFromCache, 'courses.length:', courses.length);
       if (!loadedFromCache) {
         try {
           const prefsJson = await AsyncStorage.getItem(PREFERENCES_KEY);
-          console.log('[useActiveCourse] Preferences loaded:', prefsJson);
           if (prefsJson) {
             const { language, grade } = JSON.parse(prefsJson);
             if (IS_DEV) console.log('[useActiveCourse] Trying preferences fallback:', language, grade);
             const firstCourse = await getFirstCourseFromLanguageAndGrade(activeToken, language, grade);
-            console.log('[useActiveCourse] First course from preferences:', firstCourse?.fullname || 'null');
             if (firstCourse) {
               if (IS_DEV) console.log('[useActiveCourse] Found course via preferences:', firstCourse.fullname);
               setCourses([firstCourse]);
               loadedFromCache = true;
             }
-          } else {
-            console.log('[useActiveCourse] No preferences found');
           }
         } catch (e) {
           if (IS_DEV) console.warn('[useActiveCourse] Preferences fallback failed:', e);
@@ -228,7 +223,22 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       refetchUserStats();
-    }, [refetchUserStats])
+      // Reload course progress from SQLite so progress bars update immediately on focus
+      if (reduxUser?.id) {
+        getAllCourseProgress(reduxUser.id).then(allCP => {
+          const map: any = {};
+          for (const cp of allCP) {
+            map[cp.courseId] = {
+              completed: cp.completedActivities,
+              total: cp.totalActivities,
+              xp: cp.totalXP,
+              bestScore: cp.bestScore,
+            };
+          }
+          setCourseProgressMap(map);
+        }).catch(() => {});
+      }
+    }, [refetchUserStats, reduxUser?.id])
   );
 
   useEffect(() => {
@@ -329,9 +339,9 @@ export default function HomeScreen() {
   const getCourseProgress = (c: any) => {
     const dbProgress = courseProgressMap[c?.id];
     if (dbProgress && dbProgress.total > 0) {
-      return Math.round((dbProgress.completed / dbProgress.total) * 100);
+      return Math.min(100, Math.round((dbProgress.completed / dbProgress.total) * 100));
     }
-    return c?.progress || 0;
+    return Math.min(100, c?.progress || 0);
   };
 
   const getCourseScore = (courseId: number) => {
@@ -685,7 +695,7 @@ function HomeModuleCard({ module, onPress }: {
 }) {
   const completedLessons = module.completedLessons ?? 0;
   const lessonsCount = module.lessonsCount ?? 0;
-  const progress = lessonsCount > 0 ? Math.round((completedLessons / lessonsCount) * 100) : 0;
+  const progress = lessonsCount > 0 ? Math.min(100, Math.round((completedLessons / lessonsCount) * 100)) : 0;
   const isCompleted = progress === 100;
 
   return (
@@ -704,13 +714,7 @@ function HomeModuleCard({ module, onPress }: {
         <View style={moduleCardStyles.infoContainer}>
           <View style={moduleCardStyles.titleRow}>
             <Text style={moduleCardStyles.title} numberOfLines={1}>{module.title}</Text>
-            {isCompleted ? (
-              <View style={moduleCardStyles.completedBadge}>
-                <Ionicons name="checkmark" size={12} color="#059669" />
-              </View>
-            ) : (
-              <Text style={moduleCardStyles.xpText}>+{module.xp} XP</Text>
-            )}
+            <Text style={moduleCardStyles.xpText}>+{module.xp} XP</Text>
           </View>
           <Text style={moduleCardStyles.description} numberOfLines={1}>{module.description}</Text>
         </View>

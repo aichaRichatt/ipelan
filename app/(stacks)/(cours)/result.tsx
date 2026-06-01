@@ -282,7 +282,7 @@ export default function ResultScreen() {
       let fetchedSections: any[] = [];
       try {
         fetchedSections = await getCourseContents(token || '', courseId);
-        if (fetchedSections && fetchedSections.length > 0) {
+        if (Array.isArray(fetchedSections) && fetchedSections.length > 0) {
           const { getCompletableModules } = await import('@/services/storage/course-progress');
           const completable = getCompletableModules(fetchedSections);
           // Utiliser uniquement les modules avec suivi d'achèvement (source de vérité Moodle)
@@ -293,7 +293,11 @@ export default function ResultScreen() {
         }
       } catch (err) {
         if (IS_DEV) console.warn('[Result] Failed to get course contents:', err);
-        activityCount = 1;
+        try {
+          const { getCourseProgress } = await import('@/services/storage/course-progress');
+          const existingProg = await getCourseProgress(courseId, userId ?? undefined);
+          activityCount = existingProg?.totalActivities ?? 0;
+        } catch { activityCount = 0; }
       }
 
       try {
@@ -351,7 +355,7 @@ export default function ResultScreen() {
             const { getDBConnection } = await import('@/services/storage/db-service');
             const db = await getDBConnection();
             const quizRow = await db.getFirstAsync<{ count: number }>(
-              `SELECT COUNT(*) as count FROM activity_progress WHERE (user_id = ? OR user_id IS NULL) AND type = 'quiz' AND is_completed = 1`,
+              `SELECT COUNT(*) as count FROM activity_progress WHERE user_id = ? AND type = 'quiz' AND is_completed = 1`,
               [userId]
             );
             quizCompletedCount = quizRow?.count || 0;

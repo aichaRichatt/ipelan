@@ -282,7 +282,9 @@ export default function LearningPathScreen() {
           
           for (let i = 0; i < modules.length; i++) {
             const mod = modules[i];
-            const isLocked = i > 0 && allLessons.length === 0;
+            // Lock sequentially: locked if the previous lesson is not yet completed.
+            // Bug: old condition `allLessons.length === 0` was always false after i=0.
+            const isLocked = i > 0 && !allLessons[allLessons.length - 1]?.isCompleted;
             const isCompleted = mod.completed?.[0]?.state === 2;
             
             if (isCompleted) completedCount++;

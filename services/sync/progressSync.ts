@@ -73,29 +73,37 @@ async function updateActivityGrade(
     return;
   }
 
-  // Normaliser le score entre 0 et 100
-  const normalizedGrade = maxScore > 0
-    ? Math.round((score / maxScore) * 100)
-    : score > 0 ? 100 : 0;
+  // Normaliser le score entre 0 et 100 — guard NaN si score/maxScore invalides
+  const safeScore    = isFinite(score)    && score    >= 0 ? score    : 0;
+  const safeMaxScore = isFinite(maxScore) && maxScore >  0 ? maxScore : 0;
+  const normalizedGrade = safeMaxScore > 0
+    ? Math.min(100, Math.round((safeScore / safeMaxScore) * 100))
+    : safeScore > 0 ? 100 : 0;
 
   if (IS_DEV) console.log(`[ProgressSync] Envoi note: modname=${modname}, instanceId=${instanceId}, normalizedGrade=${normalizedGrade}`);
 
   // core_grades_update_grades requiert un token ADMIN (token étudiant = permission refusée)
   const gradeToken = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN || token;
 
+  // activityid and itemnumber are top-level params; userid goes inside grades[]
   const gradeParams: any = {
     wstoken: gradeToken,
     wsfunction: 'core_grades_update_grades',
     source: 'ipelan_app',
     component: `mod_${modname}`,
-    courseid: courseId,
-    'grades[0][activityid]': String(instanceId),
+    activityid: instanceId,
+    itemnumber: 0,
     'grades[0][rawgrade]': String(normalizedGrade),
     moodlewsrestformat: 'json',
   };
 
   if (userId) {
     gradeParams['grades[0][userid]'] = userId;
+  } else {
+    // No userId → can't address a specific student grade, skip grade sync
+    if (IS_DEV) console.warn('[ProgressSync] Pas de userId — grade ignoré, complétion manuelle uniquement');
+    await markManualCompletion(token, cmid);
+    return;
   }
 
   try {
@@ -266,7 +274,7 @@ export async function syncAfterActivity(params: {
 
     // Marquer synced uniquement si Moodle a confirmé (pas si mis en queue)
     if (synced) {
-      await markActivitySynced(params.cmid, params.courseId);
+      await markActivitySynced(params.cmid, params.courseId, params.userId);
     }
   } catch (e: any) {
     if (IS_DEV) console.error('[ProgressSync] Erreur fatale:', e.message);
@@ -409,9 +417,31 @@ export async function fetchAndPopulateActivityProgressFromMoodle(
             }
           }
 
+          // 4. Update course_progress with totals derived from completion statuses
+          const totalActivities = statuses.length;
+          const completedActivities = statuses.filter(s => s.state >= 1).length;
+          if (totalActivities > 0) {
+            const { saveCourseProgress } = await import('../storage/course-progress');
+            const existing = await db.getFirstAsync<{ completed_activities: number; total_activities: number }>(
+              'SELECT completed_activities, total_activities FROM course_progress WHERE course_id = ? AND user_id = ?',
+              [courseId, userId]
+            );
+            // Only update if Moodle has more progress than local (never go backward)
+            if (!existing || existing.total_activities === 0 || completedActivities > existing.completed_activities) {
+              await saveCourseProgress(
+                courseId,
+                Math.max(completedActivities, existing?.completed_activities ?? 0),
+                Math.max(totalActivities, existing?.total_activities ?? 0),
+                0,
+                0,
+                userId
+              );
+            }
+          }
+
           if (IS_DEV) {
             const completed = statuses.filter(s => s.state >= 1).length;
-            console.log(`[ProgressSync] Seeded activity_progress: course=${courseId} completed=${completed}/${statuses.length}`);
+            console.log(`[ProgressSync] Seeded course=${courseId} completed=${completed}/${statuses.length}`);
           }
         } catch (e: any) {
           if (IS_DEV) console.warn(`[ProgressSync] Failed to seed activity_progress for course ${course.id}:`, e.message);

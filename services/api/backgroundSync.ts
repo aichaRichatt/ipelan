@@ -17,7 +17,11 @@ function loadTaskManager(): any | null {
 
 const TaskManager = loadTaskManager();
 
-function defineBackgroundFetchTask(): void {
+// expo-background-task exige que defineTask soit appelé au niveau global du module
+// (pas à l'intérieur d'une fonction async appelée plus tard)
+_defineBackgroundFetchTask();
+
+function _defineBackgroundFetchTask(): void {
   if (!TaskManager || typeof TaskManager.defineTask !== 'function') {
     return;
   }
@@ -57,12 +61,10 @@ function defineBackgroundFetchTask(): void {
 }
 
 
-function loadBackgroundFetch(): any | null {
+function loadBackgroundTask(): any | null {
   try {
-    // Pas de require() littéral pour ne pas bloquer le bundler
-    const moduleName = 'expo-background-fetch';
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require(moduleName);
+    const mod = require('expo-background-task');
     return mod?.default ?? mod ?? null;
   } catch {
     return null;
@@ -70,27 +72,19 @@ function loadBackgroundFetch(): any | null {
 }
 
 export async function registerBackgroundSync(): Promise<boolean> {
-  const BackgroundFetch = loadBackgroundFetch();
-  if (!BackgroundFetch) {
-    console.info('[BackgroundSync] expo-background-fetch non installé — sync arrière-plan désactivée');
+  const BackgroundTask = loadBackgroundTask();
+  if (!BackgroundTask) {
+    console.info('[BackgroundSync] expo-background-task non installé — sync arrière-plan désactivée');
     return false;
   }
   try {
-    defineBackgroundFetchTask();
-    const status = await BackgroundFetch.getStatusAsync();
-
-    if (status === BackgroundFetch.BackgroundFetchStatus.Available) {
-      await BackgroundFetch.registerTaskAsync(TASK_NAME, {
-        minimumInterval: 15 * 60,
-        stopOnTerminate: false,
-        startOnBoot: true,
-      });
-      console.log('[BackgroundSync] Registered successfully');
-      return true;
-    }
-
-    console.log('[BackgroundSync] Not available, status:', status);
-    return false;
+    _defineBackgroundFetchTask();
+    await BackgroundTask.registerTaskAsync(TASK_NAME, {
+      minimumInterval: 15 * 60,
+    });
+    const IS_DEV = process.env.NODE_ENV === 'development';
+    if (IS_DEV) console.log('[BackgroundSync] Registered successfully');
+    return true;
   } catch (err) {
     const IS_DEV = process.env.NODE_ENV === 'development';
     if (IS_DEV) console.warn('[BackgroundSync] Registration failed:', err);
@@ -99,11 +93,12 @@ export async function registerBackgroundSync(): Promise<boolean> {
 }
 
 export async function unregisterBackgroundSync(): Promise<void> {
-  const BackgroundFetch = loadBackgroundFetch();
-  if (!BackgroundFetch) return;
+  const BackgroundTask = loadBackgroundTask();
+  if (!BackgroundTask) return;
   try {
-    await BackgroundFetch.unregisterTaskAsync(TASK_NAME);
-    console.log('[BackgroundSync] Unregistered');
+    await BackgroundTask.unregisterTaskAsync(TASK_NAME);
+    const IS_DEV = process.env.NODE_ENV === 'development';
+    if (IS_DEV) console.log('[BackgroundSync] Unregistered');
   } catch (err) {
     console.warn('[BackgroundSync] Unregister failed:', err);
   }
