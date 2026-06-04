@@ -79,9 +79,9 @@ RAPPORT.md
 rules.md
 rules.md
 dev.txt
-
+docs/
 .graphify*
-
+/docs/
 extracted_epub
 GAMIFICATION_AUDIT.md
 .vscode 
