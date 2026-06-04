@@ -112,8 +112,9 @@ export const getDBConnection = async () => {
  *  v3 : user_id dans sync_queue ; course_progress recréé avec UNIQUE(user_id, course_id)
  *  v4 : token_expiry sur users (détection session expirée)
  *  v5 : gamification_queue (persistance des jobs in-memory entre restarts)
+ *  v6 : epub_sections (cache offline des sections EPUB — HTML + métadonnées)
  */
-const CURRENT_SCHEMA_VERSION = 5;
+const CURRENT_SCHEMA_VERSION = 6;
 
 async function getUserSchemaVersion(db: SQLiteDatabase): Promise<number> {
   try {
@@ -235,6 +236,28 @@ async function runMigrations(db: SQLiteDatabase): Promise<void> {
     }
   }
 
+  // v6 : epub_sections — cache offline des sections EPUB
+  if (fromVersion < 6) {
+    try {
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS epub_sections (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          book_id        TEXT    NOT NULL,
+          section_index  INTEGER NOT NULL,
+          section_id     TEXT,
+          audio_files    TEXT    DEFAULT '[]',
+          text_content   TEXT    DEFAULT '',
+          html_page      TEXT    DEFAULT '',
+          downloaded_at  INTEGER,
+          UNIQUE(book_id, section_index)
+        );
+      `);
+      console.log('[DB] v6: epub_sections créé');
+    } catch (e) {
+      console.warn('[DB] v6: epub_sections migration error:', e);
+    }
+  }
+
   await setUserSchemaVersion(db, CURRENT_SCHEMA_VERSION);
   console.log(`[DB] Schema migré vers v${CURRENT_SCHEMA_VERSION}`);
 }
@@ -342,6 +365,17 @@ export const createTables = async (db: SQLiteDatabase) => {
         chapter_title TEXT,
         content TEXT,
         FOREIGN KEY (book_id) REFERENCES epub_books(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS epub_sections(
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        book_id       TEXT    NOT NULL,
+        section_index INTEGER NOT NULL,
+        section_id    TEXT,
+        audio_files   TEXT    DEFAULT '[]',
+        text_content  TEXT    DEFAULT '',
+        html_page     TEXT    DEFAULT '',
+        downloaded_at INTEGER,
+        UNIQUE(book_id, section_index)
     );
     CREATE TABLE IF NOT EXISTS activity_scores(
         id INTEGER PRIMARY KEY AUTOINCREMENT,

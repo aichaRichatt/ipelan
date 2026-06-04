@@ -4,6 +4,7 @@ import {
   fetchManifest,
   getMainHtmlUrl,
   getFileUrl,
+  getSectionPageUrl,
   buildBookId,
   checkServerHealth,
   EpubManifest,
@@ -33,6 +34,8 @@ export interface UseEpubReaderReturn {
   hasNextSection: boolean;
   hasPreviousSection: boolean;
   mainHtmlUrl: string | null;
+  /** URL de la page HTML d'une seule section — pour le lazy loading section par section */
+  currentSectionPageUrl: string | null;
   currentAudioUrl: string | null;
   getAudioUrl: (audioFilePath: string) => string;
   refetch: () => void;
@@ -140,6 +143,11 @@ export function useEpubReader(
   // ── URLs ──
   const mainHtmlUrl = manifest && bookId ? getMainHtmlUrl(bookId, manifest) : null;
 
+  // URL de la page HTML d'une seule section (lazy loading section par section)
+  const currentSectionPageUrl = (bookId && manifest)
+    ? getSectionPageUrl(bookId, currentSectionIndex)
+    : null;
+
   const currentAudioUrl = (currentSection && bookId && currentSection.audioFiles.length > 0)
     ? getFileUrl(bookId, currentSection.audioFiles[0])
     : null;
@@ -167,6 +175,7 @@ export function useEpubReader(
     hasNextSection    : manifest ? currentSectionIndex < manifest.readingSections.length - 1 : false,
     hasPreviousSection: currentSectionIndex > 0,
     mainHtmlUrl,
+    currentSectionPageUrl,
     currentAudioUrl,
     getAudioUrl,
     refetch  : () => setFetchTrigger(n => n + 1), // incrémente → re-run du useEffect

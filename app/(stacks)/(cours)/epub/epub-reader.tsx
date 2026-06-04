@@ -32,6 +32,11 @@ import {
   EpubReadingSection,
   fetchAlignment,
 } from '../../../../services/epub/epubServerService';
+import {
+  getSectionOffline,
+  prefetchSectionHtml,
+  downloadAudioForSection,
+} from '../../../../services/epub/epubOfflineService';
 import { syncAfterActivity } from '../../../../services/sync/progressSync';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
@@ -80,28 +85,95 @@ export default function EpubReaderScreen() {
     hasNextSection,
     hasPreviousSection,
     mainHtmlUrl,
+    currentSectionPageUrl,
     getAudioUrl,
     refetch,
     serverUrl,
   } = useEpubReader(cmid ?? null, epubUrl ?? null);
 
+  // HTML de la section courante (chargé depuis le cache offline ou depuis le serveur)
+  const [offlineSectionHtml, setOfflineSectionHtml] = useState<string | null>(null);
+
   // Maintenir les refs synchronisées
   useEffect(() => { hasNextSectionRef.current = hasNextSection; }, [hasNextSection]);
   useEffect(() => { nextSectionRef.current    = nextSection;    }, [nextSection]);
 
-  // ── Sections audio : {id, text, audioUrl} — embarquées dans l'injectedJavaScript ──
-  // Même approche que test-reader.html : on utilise section.text du manifest,
-  // pas le DOM de l'EPUB (dont la structure interne est imprévisible).
-  // Une entrée par fichier audio (pas par section) pour que fileToUrl couvre
-  // TOUS les fichiers — ex: p11 a 11.1.opus ET 11.2.opus dans le même manifest.
-  const audioSections = (manifest?.readingSections ?? [])
-    .filter(s => s.audioFiles.length > 0)
-    .flatMap(s => s.audioFiles.map(af => ({
-      id        : s.id,
-      audioUrl  : getAudioUrl(af),
-      // wordTimings[af] = [{word, start, end}] si Whisper est activé, sinon absent
-      timings   : s.wordTimings?.[af] ?? [],
-    })));
+  // ── Reset WebView ready quand on change de section (mode section-par-section) ──
+  // La WebView recharge avec la nouvelle URL → elle reposte pageReady quand prête.
+  useEffect(() => {
+    setWebviewReady(false);
+    setOfflineSectionHtml(null);
+  }, [currentSectionIndex]);
+
+  // ── Offline : tenter de charger depuis SQLite si réseau indisponible ──
+  useEffect(() => {
+    if (!manifest || !cmid) return;
+    const bookId = buildBookId(cmid);
+    let cancelled = false;
+
+    (async () => {
+      const cached = await getSectionOffline(bookId, currentSectionIndex);
+      if (cancelled || !cached?.htmlPage) return;
+      // Utiliser le HTML offline seulement si le serveur n'est pas joignable
+      // (currentSectionPageUrl chargera depuis le serveur si en ligne)
+      if (!serverUrl) {
+        setOfflineSectionHtml(cached.htmlPage);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [currentSectionIndex, manifest, cmid, serverUrl]);
+
+  // ── Pre-fetch : pré-charger la section suivante en arrière-plan ──
+  // Deux actions en parallèle :
+  //   1. Réchauffer le cache serveur (HTTP GET simple → serveur met en mémoire)
+  //   2. Télécharger le HTML avec CSS inliné dans SQLite pour offline
+  useEffect(() => {
+    if (!manifest || !cmid || !currentSectionPageUrl) return;
+    const bookId     = buildBookId(cmid);
+    const nextIdx    = currentSectionIndex + 1;
+    const sections   = manifest.readingSections;
+    if (nextIdx >= sections.length) return;
+
+    const nextSection = sections[nextIdx];
+    if (!nextSection) return;
+
+    let cancelled = false;
+
+    (async () => {
+      // 1. Réchauffer le cache HTTP (requête silencieuse)
+      fetch(currentSectionPageUrl).catch(() => {});
+
+      // 2. Mettre en cache offline la section suivante (avec CSS inliné)
+      if (!cancelled) {
+        await prefetchSectionHtml(
+          bookId,
+          nextIdx,
+          nextSection.id,
+          nextSection.audioFiles ?? [],
+          nextSection.text ?? ''
+        );
+      }
+
+      // 3. Télécharger l'audio de la section courante pour offline
+      if (!cancelled && currentSection?.audioFiles?.length) {
+        await downloadAudioForSection(bookId, currentSection.audioFiles, getAudioUrl);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [currentSectionIndex, manifest, cmid]);
+
+  // ── Sections audio : données injectées dans le JS de la WebView ──
+  // Scopé à la section COURANTE uniquement (mode section-par-section) :
+  //   • Le WebView ne contient qu'une section → 1 audio max dans le DOM
+  //   • Payload JS minimal = chargement plus rapide + moins de mémoire
+  // Une entrée par fichier audio pour couvrir les pages multi-audio (p11.1, p11.2…)
+  const audioSections = (currentSection?.audioFiles ?? []).map(af => ({
+    id      : currentSection?.id ?? '',
+    audioUrl: getAudioUrl(af),
+    timings : currentSection?.wordTimings?.[af] ?? [],
+  }));
 
   // ── CSS injecté ──
   // Principe : ne PAS écraser les styles de l'EPUB original.
@@ -498,7 +570,7 @@ export default function EpubReaderScreen() {
       var _pageWrappers = null;
       function getPageWrappers() {
         if (!_pageWrappers) {
-          var all = document.querySelectorAll('.chapter-wrapper, .page-container, section');
+          var all = document.querySelectorAll('.chapter-wrapper, .page-container, .fixed-page, section');
           _pageWrappers = [];
           for (var i = 0; i < all.length; i++) {
             var el = all[i];
@@ -506,7 +578,7 @@ export default function EpubReaderScreen() {
             var nested = false;
             while (p) {
               if (p.classList &&
-                  (p.classList.contains('chapter-wrapper') || p.classList.contains('page-container'))) {
+                  (p.classList.contains('chapter-wrapper') || p.classList.contains('page-container') || p.classList.contains('fixed-page'))) {
                 nested = true; break;
               }
               if (p.tagName && p.tagName.toUpperCase() === 'SECTION' && p !== el) {
@@ -646,16 +718,11 @@ export default function EpubReaderScreen() {
     } catch {}
   }, [cmid, courseId, addXP, addCoins]); // cmid/courseId/addXP/addCoins stables — refs pour le reste
 
-  // ── Scroll vers la section active quand elle change ──
-  // Utilise __ipelanScrollToIndex (index positionnel) comme méthode principale :
-  // fiable pour TOUTES les sections, avec ou sans id DOM.
+  // ── Auto-play quand la WebView est prête après un changement de section ──
+  // En mode section-par-section, le scroll est inutile (1 seule section dans le DOM).
+  // On attend uniquement que la WebView ait posté pageReady pour démarrer l'audio.
   useEffect(() => {
     if (!currentSection || !webviewReady) return;
-
-    // Scroll positionnel — fonctionne pour toutes les sections
-    webviewRef.current?.injectJavaScript(
-      `window.__ipelanScrollToIndex && window.__ipelanScrollToIndex(${currentSectionIndex}); true;`
-    );
 
     if (autoPlayNextRef.current) {
       autoPlayNextRef.current = false;
@@ -688,10 +755,10 @@ export default function EpubReaderScreen() {
 
     const bookIdStr = buildBookId(cmid);
 
-    // Sections avec audio à aligner : courante + 2 suivantes
+    // Sections avec audio à aligner : courante + 2 suivantes (slice en premier pour respecter l'index courant)
     const toAlign = manifest.readingSections
-      .filter(s => s.audioFiles.length > 0 && (s.text || '').trim().length > 5)
-      .slice(currentSectionIndex, currentSectionIndex + 3);
+      .slice(currentSectionIndex, currentSectionIndex + 3)
+      .filter(s => s.audioFiles.length > 0 && (s.text || '').trim().length > 5);
 
     let cancelled = false;
 
@@ -770,16 +837,9 @@ export default function EpubReaderScreen() {
     setWebviewActiveSectionId(null);
     goToSection(index);
     setShowToc(false);
-    // Injecter le scroll directement après la fermeture du modal (animation ~300ms)
-    // Le useEffect le fait aussi, mais ce setTimeout garantit l'ordre
-    if (webviewReady) {
-      setTimeout(() => {
-        webviewRef.current?.injectJavaScript(
-          `window.__ipelanScrollToIndex && window.__ipelanScrollToIndex(${index}); true;`
-        );
-      }, 320);
-    }
-  }, [goToSection, webviewReady]);
+    // Mode section-par-section : la WebView recharge automatiquement avec la nouvelle
+    // URL de section → pas besoin d'injecter un scroll.
+  }, [goToSection]);
 
   // ── Loading ──
   if (isLoading) {
@@ -856,13 +916,31 @@ export default function EpubReaderScreen() {
         <View style={[styles.progressFill, { width: `${progress}%` }]} />
       </View>
 
-      {/* WebView — charge le XHTML depuis le serveur EpubPlugin */}
+      {/* WebView — charge la section courante (mode section-par-section) */}
       <View style={styles.webviewContainer}>
-        {mainHtmlUrl ? (
+        {(currentSectionPageUrl || mainHtmlUrl || offlineSectionHtml) ? (
           <WebView
             ref={webviewRef}
-            source={{ uri: mainHtmlUrl }}
+            source={
+              offlineSectionHtml
+                ? { html: offlineSectionHtml, baseUrl: serverUrl }
+                : { uri: currentSectionPageUrl ?? mainHtmlUrl ?? '' }
+            }
             style={styles.webview}
+            onLoad={() => {
+              // Mettre en cache la section courante en SQLite pour offline
+              if (cmid && currentSection) {
+                const bookId = buildBookId(cmid);
+                // Télécharger avec inline_css pour offline (en arrière-plan)
+                prefetchSectionHtml(
+                  bookId,
+                  currentSectionIndex,
+                  currentSection.id,
+                  currentSection.audioFiles ?? [],
+                  currentSection.text ?? ''
+                ).catch(() => {});
+              }
+            }}
             injectedJavaScriptBeforeContentLoaded={`
               (function() {
                 // S'exécute AVANT que le HTML soit parsé.

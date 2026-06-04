@@ -277,6 +277,62 @@ export async function checkServerHealth(): Promise<boolean> {
 }
 
 // ─────────────────────────────────────────────────────────────
+// getSectionPageUrl()
+// URL de la page HTML d'une section individuelle.
+// Utilisée comme source={{ uri }} dans la WebView pour le lazy loading.
+//
+// @param bookId       "cmid-42"
+// @param sectionIndex index 0-based de la section
+// @param inlineCss    true → CSS inliné (pour cache offline)
+// ─────────────────────────────────────────────────────────────
+
+export function getSectionPageUrl(
+  bookId: string,
+  sectionIndex: number,
+  inlineCss = false
+): string {
+  const base = `${EPUB_SERVER_URL}/epub/${bookId}/sections/${sectionIndex}/html`;
+  return inlineCss ? `${base}?inline_css=1` : base;
+}
+
+// ─────────────────────────────────────────────────────────────
+// EpubSectionData — métadonnées JSON d'une section
+// Retournées par GET /epub/:bookId/sections/:index
+// ─────────────────────────────────────────────────────────────
+
+export interface EpubSectionData {
+  index: number;
+  id: string;
+  pageNumber: number | null;
+  audioFiles: string[];
+  images: string[];
+  text: string;
+  lines: string[];
+  hasNext: boolean;
+  hasPrev: boolean;
+  totalSections: number;
+}
+
+// ─────────────────────────────────────────────────────────────
+// fetchSectionData()
+// Récupère les métadonnées JSON d'une section (sans HTML).
+// Utilisé pour pré-charger les infos de la section suivante
+// et pour la mise en cache offline dans SQLite.
+// ─────────────────────────────────────────────────────────────
+
+export async function fetchSectionData(
+  bookId: string,
+  sectionIndex: number
+): Promise<EpubSectionData> {
+  if (!EPUB_SERVER_URL) throw new Error('EPUB_SERVER_URL non configuré');
+  const res = await fetch(`${EPUB_SERVER_URL}/epub/${bookId}/sections/${sectionIndex}`);
+  if (!res.ok) {
+    throw new Error(`Section ${sectionIndex} introuvable dans ${bookId} (${res.status})`);
+  }
+  return res.json() as Promise<EpubSectionData>;
+}
+
+// ─────────────────────────────────────────────────────────────
 // buildBookId()
 // Convertir un cmid Moodle en bookId utilisé par le serveur
 // ─────────────────────────────────────────────────────────────
