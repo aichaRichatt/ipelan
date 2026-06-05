@@ -1,15 +1,21 @@
 // services/epub/epubServerService.ts
 // ─────────────────────────────────────────────────────────────────────────────
-// Client pour le serveur EPUB intermédiaire (Node.js plugin EpubPlugin).
-// Ce serveur traite les EPUBs côté serveur et expose l'API suivante :
-//   GET /epub/:bookId/manifest     → manifest + readingSections
-//   GET /epub/:bookId/status       → état du traitement
-//   GET /epub/:bookId/sections     → sections légères
-//   GET /epub/:bookId/file/*       → fichiers (audio, images, HTML)
-//   GET /moodle/catalog            → catalogue IPELAN
+// Client EPUB — deux modes de fonctionnement :
+//
+// Mode A — Moodle WS (plugin PHP local_ipelan_epub) :
+//   fetchManifestMoodle(cmid, token)               → manifest via moodleCall()
+//   fetchSectionHtmlMoodle(cmid, idx, token)       → HTML section via moodleCall()
+//   fetchStatusMoodle(cmid, token)                 → statut de traitement
+//
+// Mode B — Serveur Node.js intermédiaire (EpubPlugin, rétrocompat) :
+//   fetchManifest(bookId)                          → GET /epub/:bookId/manifest
+//   getSectionPageUrl(bookId, idx)                 → URL section HTML
+//   getFileUrl(bookId, path)                       → URL fichier
 //
 // bookId = "cmid-{N}" — N = cmid du module Moodle
 // ─────────────────────────────────────────────────────────────────────────────
+
+import { moodleCall } from '../api/moodleClient';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
 
@@ -58,6 +64,7 @@ export interface EpubManifest {
   metadata: { title?: string; author?: string };
   spine: EpubSpineItem[];
   totalChapters: number;
+  totalSections: number;
   hasAudio: boolean;
   audioType: 'embedded-html' | 'synchronized' | 'separate' | 'none';
   readingSections: EpubReadingSection[];
@@ -339,6 +346,99 @@ export async function fetchSectionData(
 
 export function buildBookId(cmid: number | string): string {
   return `cmid-${cmid}`;
+}
+
+// ═════════════════════════════════════════════════════════════
+// MODE A — Moodle Web Services (plugin PHP local_ipelan_epub)
+// Ces fonctions appellent moodleCall() directement — pas de
+// serveur intermédiaire Node.js requis.
+// ═════════════════════════════════════════════════════════════
+
+/**
+ * Récupère le manifest depuis le plugin PHP via Moodle WS.
+ * Poll automatiquement si le traitement est en cours.
+ *
+ * @param cmid  Course Module ID de la ressource EPUB
+ * @param token wstoken Moodle de l'utilisateur
+ */
+export async function fetchManifestMoodle(
+  cmid    : number,
+  token   : string,
+  options : { timeoutMs?: number; pollIntervalMs?: number; onProcessing?: () => void } = {}
+): Promise<{ manifest: EpubManifest; fileBaseUrl: string }> {
+  const { timeoutMs = 10 * 60 * 1000, pollIntervalMs = 3000, onProcessing } = options;
+  const deadline = Date.now() + timeoutMs;
+  let notifiedProcessing = false;
+
+  while (Date.now() < deadline) {
+    const data = await moodleCall('local_ipelan_epub_get_manifest', { cmid }, token) as any;
+
+    if (data.exception) throw new Error(data.message || data.exception);
+
+    if (data.status === 'ready' && data.manifest) {
+      const manifest: EpubManifest = JSON.parse(data.manifest);
+      if (IS_DEV) console.log(`[EpubWS] Manifest ready: ${manifest.metadata?.title} (${manifest.readingSections?.length} sections)`);
+      return { manifest, fileBaseUrl: data.file_base_url || '' };
+    }
+
+    if (data.status === 'processing') {
+      if (!notifiedProcessing) { onProcessing?.(); notifiedProcessing = true; }
+      await sleep(pollIntervalMs);
+      continue;
+    }
+
+    if (data.status === 'error') throw new Error(data.error || 'EPUB processing failed');
+
+    throw new Error(`Unexpected manifest status: ${data.status}`);
+  }
+
+  throw new Error('[EpubWS] Timeout waiting for EPUB manifest');
+}
+
+/**
+ * Récupère le HTML complet d'une section via Moodle WS.
+ * Utilisé pour le lazy loading et le prefetch offline.
+ *
+ * @param cmid          Course Module ID
+ * @param sectionIndex  Index 0-based de la section
+ * @param token         wstoken Moodle
+ * @param inlineCss     true → CSS inliné pour usage offline
+ */
+export async function fetchSectionHtmlMoodle(
+  cmid         : number,
+  sectionIndex : number,
+  token        : string,
+  inlineCss    = false
+): Promise<{ html: string; sectionId: string; audioFiles: string[] }> {
+  const data = await moodleCall('local_ipelan_epub_get_section_html', {
+    cmid,
+    section_index: sectionIndex,
+    inline_css   : inlineCss ? 1 : 0,
+  }, token) as any;
+
+  if (data.exception) throw new Error(data.message || data.exception);
+
+  return {
+    html      : data.html        || '',
+    sectionId : data.section_id  || '',
+    audioFiles: data.audio_files || [],
+  };
+}
+
+/**
+ * Récupère le statut de traitement depuis le plugin PHP.
+ */
+export async function fetchStatusMoodle(
+  cmid : number,
+  token: string
+): Promise<{ status: 'not_found' | 'processing' | 'ready' | 'error'; totalSections: number }> {
+  try {
+    const data = await moodleCall('local_ipelan_epub_get_status', { cmid }, token) as any;
+    if (data.exception) return { status: 'not_found', totalSections: 0 };
+    return { status: data.status || 'not_found', totalSections: data.total_sections || 0 };
+  } catch {
+    return { status: 'not_found', totalSections: 0 };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────

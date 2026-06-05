@@ -1,6 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { generateIdRetryOrder, identifyActivityType, validateActivityIds } from '../services/activity/activityIdentifier';
 import { moodleFetch } from '../services/api/moodleClient';
+import {
+  cacheActivity,
+  downloadActivityAudio,
+  getActivityOffline,
+  buildAuthAudioUrl,
+} from '../services/activities/activityOfflineService';
+
+/** Retire le token d'une URL Moodle authentifiée pour obtenir le rawAudioUrl persistable. */
+function extractRawUrl(tokenizedUrl?: string): string | null {
+  if (!tokenizedUrl) return null;
+  try {
+    const url = new URL(tokenizedUrl);
+    url.searchParams.delete('token');
+    url.searchParams.delete('wstoken');
+    return url.toString().replace(/[?&]$/, '');
+  } catch {
+    return tokenizedUrl
+      .replace(/[?&]?(?:token|wstoken)=[^&]*/g, '')
+      .replace(/[?&]$/, '') || null;
+  }
+}
 
 const IS_DEV = process.env.NODE_ENV === "development";
 const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN;
@@ -102,8 +123,43 @@ export function useActivityContent(
   const [wordOrder, setWordOrder] = useState<WordOrderData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const isMountedRef = useRef(true);
+  const isMountedRef   = useRef(true);
+  const cachedCmidRef  = useRef<number | null>(null);  // évite le double-cache
   useEffect(() => () => { isMountedRef.current = false; }, []);
+
+  // ── Auto-cache après chaque chargement réussi ─────────────────────────────
+  // Chaque effet surveille son état et persiste en SQLite + télécharge l'audio.
+  // Le token dans audioUrl est retiré avant persistance (rawAudioUrl sans token).
+
+  useEffect(() => {
+    if (!dictation || !cmid || cachedCmidRef.current === cmid) return;
+    cachedCmidRef.current = cmid;
+    const rawAudioUrl = extractRawUrl(dictation.audioUrl);
+    cacheActivity(cmid, 'dictation', courseId || 0, dictation, rawAudioUrl).catch(() => {});
+    if (rawAudioUrl && token) {
+      downloadActivityAudio(cmid, rawAudioUrl, token).catch(() => {});
+    }
+  }, [dictation]);
+
+  useEffect(() => {
+    if (!listening || !cmid || cachedCmidRef.current === cmid) return;
+    cachedCmidRef.current = cmid;
+    const rawAudioUrl = extractRawUrl(listening.audioUrl);
+    cacheActivity(cmid, 'listening', courseId || 0, listening, rawAudioUrl).catch(() => {});
+    if (rawAudioUrl && token) {
+      downloadActivityAudio(cmid, rawAudioUrl, token).catch(() => {});
+    }
+  }, [listening]);
+
+  useEffect(() => {
+    if (!association || !cmid) return;
+    cacheActivity(cmid, 'association', courseId || 0, association, null).catch(() => {});
+  }, [association]);
+
+  useEffect(() => {
+    if (!wordOrder || !cmid) return;
+    cacheActivity(cmid, 'word_order', courseId || 0, wordOrder, null).catch(() => {});
+  }, [wordOrder]);
 
   const fetchActivity = useCallback(async () => {
     const idToUse = moduleId || instanceId;
@@ -519,6 +575,15 @@ async function loadDictationWithRetry(
     }
   }
 
+  if (cmid) {
+    const cached = await getActivityOffline(cmid);
+    const d = cached?.data as DictationData | undefined;
+    if (d?.words !== undefined) {
+      const au = cached!.rawAudioUrl ? buildAuthAudioUrl(cached!.rawAudioUrl, token) : undefined;
+      setDictation({ ...d, audioUrl: au });
+      return;
+    }
+  }
   setDictation(null);
 }
 
@@ -626,6 +691,15 @@ async function loadListeningWithRetry(
     }
   }
 
+  if (cmid) {
+    const cached = await getActivityOffline(cmid);
+    const l = cached?.data as ListeningData | undefined;
+    if (l?.options !== undefined) {
+      const au = cached!.rawAudioUrl ? buildAuthAudioUrl(cached!.rawAudioUrl, token) : undefined;
+      setListening({ ...l, audioUrl: au });
+      return;
+    }
+  }
   setError('Impossible de charger cet exercice d\'écoute. Vérifie ta connexion et la configuration du module Moodle.');
   setListening(null);
 }
@@ -843,6 +917,24 @@ async function loadLessonWithRetry(
     if (IS_DEV) console.error(`[loadLessonWithRetry] Error fetching lessons:`, err.message);
   }
 
+  if (cmid) {
+    const cached = await getActivityOffline(cmid);
+    if (expectedType === 'wordOrder') {
+      const w = cached?.data as WordOrderData | undefined;
+      if (w?.sentences?.length) {
+        setWordOrder(w);
+        setAssociation(null);
+        return;
+      }
+    } else {
+      const a = cached?.data as AssociationData | undefined;
+      if (a?.pairs?.length) {
+        setAssociation(a);
+        setWordOrder(null);
+        return;
+      }
+    }
+  }
   if (expectedType === 'wordOrder') {
     setWordOrder(null);
   } else {
@@ -958,11 +1050,29 @@ async function loadGlossaryWithRetry(
       }
     }
 
+    if (cmid > 0) {
+      const cached = await getActivityOffline(cmid);
+      const a = cached?.data as AssociationData | undefined;
+      if (a?.pairs?.length) {
+        setAssociation(a);
+        setWordOrder(null);
+        return;
+      }
+    }
     if (IS_DEV) console.warn(`[loadGlossaryWithRetry] No glossary data found`);
     setError('Aucune donnée de glossaire trouvée');
 
   } catch (err: any) {
     if (IS_DEV) console.error(`[loadGlossaryWithRetry] Fatal error:`, err?.message || err);
+    if (cmid > 0) {
+      const cached = await getActivityOffline(cmid);
+      const a = cached?.data as AssociationData | undefined;
+      if (a?.pairs?.length) {
+        setAssociation(a);
+        setWordOrder(null);
+        return;
+      }
+    }
     setError('Erreur lors du chargement du glossaire');
   }
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCourseContents } from '../services/api/courseService';
 import {
   parseCourseContent,
@@ -10,6 +11,7 @@ import { mapModuleToContentType, MappedContent, ParsedModule } from '../utils/co
 import { ActivityType } from '../utils/xpCalculator';
 
 const IS_DEV = process.env.NODE_ENV === "development";
+const courseContentKey = (id: number) => `@ipelan_course_content_${id}`;
 
 export interface UseCourseContentReturn {
   sections: ParsedSection[];
@@ -71,6 +73,9 @@ export function useCourseContent(
         }
       }
 
+      // Persist raw sections for offline use
+      AsyncStorage.setItem(courseContentKey(courseId), JSON.stringify(rawContents)).catch(() => {});
+
       const parsedSections = parseMoodleSections(rawContents);
       const parsedCourse = parseCourseContent(courseId, rawContents);
 
@@ -87,6 +92,16 @@ export function useCourseContent(
       setCourseContent(parsedCourse);
     } catch (err: any) {
       if (IS_DEV) console.error("[useCourseContent] Error:", err.message);
+      try {
+        const cached = await AsyncStorage.getItem(courseContentKey(courseId));
+        if (cached) {
+          const rawContents = JSON.parse(cached);
+          setSections(parseMoodleSections(rawContents));
+          setCourseContent(parseCourseContent(courseId, rawContents));
+          if (IS_DEV) console.log('[useCourseContent] Loaded from offline cache:', courseId);
+          return;
+        }
+      } catch {}
       setError(err.message || "Erreur lors du chargement du contenu");
       setSections([]);
       setCourseContent(null);

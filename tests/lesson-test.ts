@@ -1,4 +1,6 @@
-const MOODLE_URL = "https://moodle.richatt.com";
+import ENV from "@/constants/env";
+
+const MOODLE_URL = ENV.API.MOODLE_URL;
 const ADMIN_TOKEN = process.env.MOODLE_ADMIN_TOKEN || "";
 
 async function testLessonAPI() {

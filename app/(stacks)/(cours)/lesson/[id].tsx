@@ -9,9 +9,10 @@ import { getCourseContents } from "../../../../services/api/courseService";
 import { getMoodleLesson, getMoodleLessonPages } from "../../../../services/contentLoader";
 import { RootState } from "../../../../services/redux/store";
 import { mapModuleToContentType } from "../../../../utils/contentMapper";
+import ENV from "@/constants/env";
 
 const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN;
-const MOODLE_URL = process.env.EXPO_PUBLIC_MOODLE_API_URL || "https://moodle.richatt.com";
+const MOODLE_URL = ENV.API.MOODLE_URL;
 
 const IS_DEV = process.env.NODE_ENV === "development";
 

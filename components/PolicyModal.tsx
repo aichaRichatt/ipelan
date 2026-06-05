@@ -15,7 +15,7 @@ export const PolicyModal: React.FC<PolicyModalProps> = ({ visible, onAccept, onC
           <Text style={styles.title}>Conditions d&apos;utilisation</Text>
           <ScrollView style={styles.scrollView}>
             <Text style={styles.policyText}>
-              En utilisant l&apos;application Ipelan et en accédant aux contenus de Moodle Richatt, vous acceptez d&apos;être inscrit aux cours correspondants et de partager vos informations de profil (nom, prénom, email) avec la plateforme. {"\n\n"}
+              En utilisant l&apos;application Ipelan et en accédant aux contenus de Moodle , vous acceptez d&apos;être inscrit aux cours correspondants et de partager vos informations de profil (nom, prénom, email) avec la plateforme. {"\n\n"}
               Ces données sont utilisées uniquement pour le suivi de votre progression pédagogique et la gestion de vos récompenses (coins, streak, xp). {"\n\n"}
               Vous acceptez également de respecter les règles de conduite de la plateforme Moodle.
             </Text>

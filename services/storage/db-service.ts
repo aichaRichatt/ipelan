@@ -113,8 +113,10 @@ export const getDBConnection = async () => {
  *  v4 : token_expiry sur users (détection session expirée)
  *  v5 : gamification_queue (persistance des jobs in-memory entre restarts)
  *  v6 : epub_sections (cache offline des sections EPUB — HTML + métadonnées)
+ *  v7 : quiz_cache + offline_quiz_attempts (quiz offline — pre-start + sync)
+ *  v8 : activity_cache (dictée, écoute, association, jeu de mots — données + audio local)
  */
-const CURRENT_SCHEMA_VERSION = 6;
+const CURRENT_SCHEMA_VERSION = 8;
 
 async function getUserSchemaVersion(db: SQLiteDatabase): Promise<number> {
   try {
@@ -255,6 +257,67 @@ async function runMigrations(db: SQLiteDatabase): Promise<void> {
       console.log('[DB] v6: epub_sections créé');
     } catch (e) {
       console.warn('[DB] v6: epub_sections migration error:', e);
+    }
+  }
+
+  // v7 : quiz_cache + offline_quiz_attempts
+  if (fromVersion < 7) {
+    try {
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS quiz_cache (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          cmid           INTEGER NOT NULL UNIQUE,
+          quiz_id        INTEGER NOT NULL,
+          course_id      INTEGER NOT NULL,
+          attempt_id     INTEGER,
+          quiz_name      TEXT DEFAULT '',
+          time_limit     INTEGER DEFAULT 0,
+          questions_json TEXT DEFAULT '[]',
+          attempt_state  TEXT DEFAULT 'notstarted',
+          cached_at      INTEGER,
+          expires_at     INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS offline_quiz_attempts (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id     INTEGER NOT NULL,
+          cmid        INTEGER NOT NULL,
+          quiz_id     INTEGER NOT NULL,
+          attempt_id  INTEGER NOT NULL,
+          answers_json TEXT NOT NULL DEFAULT '[]',
+          score       REAL DEFAULT 0,
+          max_score   REAL DEFAULT 0,
+          started_at  INTEGER,
+          finished_at INTEGER,
+          synced      INTEGER DEFAULT 0,
+          sync_error  TEXT,
+          UNIQUE(user_id, attempt_id)
+        );
+      `);
+      console.log('[DB] v7: quiz_cache + offline_quiz_attempts créés');
+    } catch (e) {
+      console.warn('[DB] v7: migration error:', e);
+    }
+  }
+
+  // v8 : activity_cache — cache offline pour toutes les activités
+  if (fromVersion < 8) {
+    try {
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS activity_cache (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          cmid              INTEGER NOT NULL UNIQUE,
+          activity_type     TEXT NOT NULL,
+          course_id         INTEGER NOT NULL,
+          data_json         TEXT NOT NULL DEFAULT '{}',
+          raw_audio_url     TEXT,
+          local_audio_path  TEXT,
+          audio_downloaded  INTEGER DEFAULT 0,
+          cached_at         INTEGER
+        );
+      `);
+      console.log('[DB] v8: activity_cache créé');
+    } catch (e) {
+      console.warn('[DB] v8: migration error:', e);
     }
   }
 
@@ -467,6 +530,45 @@ export const createTables = async (db: SQLiteDatabase) => {
         created_at TEXT DEFAULT (datetime('now')),
         attempts   INTEGER DEFAULT 0,
         UNIQUE(user_id, job_type)
+    );
+    CREATE TABLE IF NOT EXISTS quiz_cache (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        cmid           INTEGER NOT NULL UNIQUE,
+        quiz_id        INTEGER NOT NULL,
+        course_id      INTEGER NOT NULL,
+        attempt_id     INTEGER,
+        quiz_name      TEXT DEFAULT '',
+        time_limit     INTEGER DEFAULT 0,
+        questions_json TEXT DEFAULT '[]',
+        attempt_state  TEXT DEFAULT 'notstarted',
+        cached_at      INTEGER,
+        expires_at     INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS offline_quiz_attempts (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id      INTEGER NOT NULL,
+        cmid         INTEGER NOT NULL,
+        quiz_id      INTEGER NOT NULL,
+        attempt_id   INTEGER NOT NULL,
+        answers_json TEXT NOT NULL DEFAULT '[]',
+        score        REAL DEFAULT 0,
+        max_score    REAL DEFAULT 0,
+        started_at   INTEGER,
+        finished_at  INTEGER,
+        synced       INTEGER DEFAULT 0,
+        sync_error   TEXT,
+        UNIQUE(user_id, attempt_id)
+    );
+    CREATE TABLE IF NOT EXISTS activity_cache (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        cmid             INTEGER NOT NULL UNIQUE,
+        activity_type    TEXT NOT NULL,
+        course_id        INTEGER NOT NULL,
+        data_json        TEXT NOT NULL DEFAULT '{}',
+        raw_audio_url    TEXT,
+        local_audio_path TEXT,
+        audio_downloaded INTEGER DEFAULT 0,
+        cached_at        INTEGER
     );
   `);
 

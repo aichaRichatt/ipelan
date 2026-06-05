@@ -7,11 +7,12 @@ export interface ListeningOption {
 }
 
 export interface ListeningExercise {
-  choiceId: number;
-  name: string;
-  audioUrl: string;
-  options: ListeningOption[];
-  correctIndex: number; 
+  choiceId    : number;
+  name        : string;
+  audioUrl    : string;      // URL authentifiée (avec token) — pour lecture immédiate
+  rawAudioUrl : string;      // fileurl Moodle brut (sans token) — pour cache/download
+  options     : ListeningOption[];
+  correctIndex: number;
 }
 
 function buildAudioUrl(fileurl: string, token: string): string {
@@ -71,9 +72,10 @@ export async function getListeningExercise(
     }
 
     return {
-      choiceId: mod.instance,
-      name: mod.name,
-      audioUrl: buildAudioUrl(audioFile.fileurl, token),
+      choiceId    : mod.instance,
+      name        : mod.name,
+      audioUrl    : buildAudioUrl(audioFile.fileurl, token),
+      rawAudioUrl : audioFile.fileurl,
       options,
       correctIndex,
     };

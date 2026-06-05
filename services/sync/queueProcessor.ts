@@ -9,6 +9,14 @@ import {
   incrementRetry,
   getPendingCount,
 } from '../storage/sync-queue';
+import {
+  getPendingQuizAttempts,
+  syncQuizAttempt,
+  markAttemptSyncError,
+} from '../quiz/quizOfflineService';
+import { getDBConnection } from '../storage/db-service';
+
+const IS_DEV = process.env.NODE_ENV === 'development';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -87,10 +95,38 @@ export async function processQueue(): Promise<{
     else    failed++;
   }
 
+  // Sync tentatives quiz offline
+  await syncPendingQuizAttempts(token);
+
   const remaining = await getPendingCount();
-  console.log('[QueueProcessor] Résultat:', { processed, failed, remaining });
+  if (IS_DEV) console.log('[QueueProcessor] Résultat:', { processed, failed, remaining });
 
   return { processed, failed, remaining };
+}
+
+async function syncPendingQuizAttempts(token: string): Promise<void> {
+  try {
+    // Récupérer tous les user_id distincts qui ont des tentatives en attente
+    const db    = await getDBConnection();
+    const users = await db.getAllAsync<{ user_id: number }>(
+      'SELECT DISTINCT user_id FROM offline_quiz_attempts WHERE synced = 0'
+    );
+
+    for (const { user_id } of users) {
+      const attempts = await getPendingQuizAttempts(user_id);
+      for (const attempt of attempts) {
+        try {
+          await syncQuizAttempt(attempt, token);
+          if (IS_DEV) console.log('[QueueProcessor] Quiz attempt synced:', attempt.attemptId);
+        } catch (e: any) {
+          await markAttemptSyncError(attempt.id, e.message ?? 'sync error');
+          if (IS_DEV) console.warn('[QueueProcessor] Quiz attempt sync failed:', e.message);
+        }
+      }
+    }
+  } catch (e) {
+    if (IS_DEV) console.warn('[QueueProcessor] syncPendingQuizAttempts error:', e);
+  }
 }
 
 // ─── Listeners ───────────────────────────────────────────────────────────────

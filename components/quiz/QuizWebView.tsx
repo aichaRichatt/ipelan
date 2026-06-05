@@ -1,3 +1,4 @@
+import ENV from '@/constants/env';
 import { moodleFetch } from '@/services/api/moodleClient';
 import { getCredentials } from '@/services/storage/tokenStorage';
 import { Feather } from '@expo/vector-icons';
@@ -17,7 +18,7 @@ import { WebView, WebViewNavigation } from 'react-native-webview';
 const IS_DEV = process.env.NODE_ENV === 'development';
 
 // Moodle base URL
-const MOODLE_BASE_URL = 'https://moodle.richatt.com';
+const MOODLE_BASE_URL = ENV.API.MOODLE_URL ;
 
 interface QuizWebViewProps {
   quizId: number;

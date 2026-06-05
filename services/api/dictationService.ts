@@ -1,10 +1,11 @@
 import { moodleFetch } from './moodleClient';
 
 export interface DictationExercise {
-  assignId: number;
-  name: string;
-  audioUrl: string;
-  word: string;
+  assignId    : number;
+  name        : string;
+  audioUrl    : string;      // URL authentifiée (avec token) — pour lecture immédiate
+  rawAudioUrl : string;      // fileurl Moodle brut (sans token) — pour cache/download
+  word        : string;
 }
 
 function buildAudioUrl(fileurl: string, token: string): string {
@@ -47,7 +48,7 @@ export async function getDictationExercise(
     }
 
     const audioFile = assignment.introfiles?.find((f: any) =>
-      f.filename?.match(/\.(mp3|wav|ogg|m4a)$/i)
+      f.filename?.match(/\.(mp3|wav|ogg|m4a|opus|aac)$/i)
     );
 
     if (!audioFile) {
@@ -56,10 +57,11 @@ export async function getDictationExercise(
     }
 
     return {
-      assignId: assignment.id,
-      name: assignment.name,
-      audioUrl: buildAudioUrl(audioFile.fileurl, token),
-      word: assignment.name.replace(/^Dictée[:\s-]*/i, '').trim() || assignment.name,
+      assignId    : assignment.id,
+      name        : assignment.name,
+      audioUrl    : buildAudioUrl(audioFile.fileurl, token),
+      rawAudioUrl : audioFile.fileurl,
+      word        : assignment.name.replace(/^Dictée[:\s-]*/i, '').trim() || assignment.name,
     };
   } catch (err: any) {
     console.warn('[dictationService] Exception:', err.message);

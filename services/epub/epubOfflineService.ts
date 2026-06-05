@@ -4,19 +4,19 @@
 //
 // Architecture :
 //   • Métadonnées + HTML page → SQLite (table epub_sections)
-//   • Fichiers audio          → expo-filesystem (cache persistent)
+//   • Manifest               → AsyncStorage (lecture instantanée)
+//   • Fichiers audio          → expo-filesystem (documentDirectory — persistant)
 //
-// Flux :
-//   1. Online  : WebView charge via URI serveur → section lue → cachée en SQLite
-//   2. Offline : SQLite retourne le html_page → WebView via source={{ html }}
-//
-// Pour que le CSS et les images fonctionnent offline, le html_page est mis en
-// cache avec ?inline_css=1 (CSS inliné) ce qui assure un affichage fidèle
-// même sans réseau. Audio non disponible offline (nécessite un serveur local).
+// Flux (Moodle WS) :
+//   1. Online  : fetchSectionHtmlMoodle() → HTML inliné → SQLite
+//   2. Offline : SQLite → html_page → WebView via source={{ html }}
+//   3. Audio   : downloadAudioFile() → expo-filesystem → source={{ uri: localPath }}
 // ─────────────────────────────────────────────────────────────────────────────
 
 import * as FileSystem from 'expo-file-system/legacy';
 import { getDBConnection } from '../storage/db-service';
+// getSectionPageUrl n'est plus utilisé pour le prefetch (remplacé par fetchSectionHtmlMoodle)
+// On garde l'import pour compatibilité avec le code Node existant
 import { getSectionPageUrl, EPUB_SERVER_URL } from './epubServerService';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
@@ -108,6 +108,10 @@ export async function cacheSectionOffline(
 // @param sectionId     id DOM (ex: "p21")
 // @param audioFiles    liste des fichiers audio de la section
 // @param textContent   texte brut de la section
+//
+// Note : préférer fetchSectionHtmlMoodle() + cacheSectionOffline() dans les
+// nouveaux flux (plugin PHP). Cette fonction reste disponible pour la
+// compatibilité avec le serveur Node.js.
 // ─────────────────────────────────────────────────────────────
 
 export async function prefetchSectionHtml(
@@ -117,6 +121,7 @@ export async function prefetchSectionHtml(
   audioFiles  : string[],
   textContent : string
 ): Promise<void> {
+  if (!EPUB_SERVER_URL) return; // Node server non configuré — utiliser Moodle WS
   try {
     // Vérifier si déjà en cache
     const db  = await getDBConnection();
@@ -171,7 +176,7 @@ export async function getLocalAudioPath(
 ): Promise<string | null> {
   try {
     const filename  = audioFile.replace(/\//g, '_').replace(/^_/, '');
-    const localPath = `${FileSystem.cacheDirectory}epub/${bookId}/audio/${filename}`;
+    const localPath = `${FileSystem.documentDirectory}epub/${bookId}/audio/${filename}`;
     const info      = await FileSystem.getInfoAsync(localPath);
     return info.exists ? localPath : null;
   } catch {
@@ -192,7 +197,7 @@ export async function downloadAudioForSection(
 ): Promise<void> {
   for (const audioFile of audioFiles) {
     const filename  = audioFile.replace(/\//g, '_').replace(/^_/, '');
-    const localPath = `${FileSystem.cacheDirectory}epub/${bookId}/audio/${filename}`;
+    const localPath = `${FileSystem.documentDirectory}epub/${bookId}/audio/${filename}`;
 
     try {
       const info = await FileSystem.getInfoAsync(localPath);
@@ -220,7 +225,7 @@ export async function clearBookOfflineCache(bookId: string): Promise<void> {
     const db = await getDBConnection();
     await db.runAsync('DELETE FROM epub_sections WHERE book_id = ?', [bookId]);
 
-    const audioDir = `${FileSystem.cacheDirectory}epub/${bookId}`;
+    const audioDir = `${FileSystem.documentDirectory}epub/${bookId}`;
     const info     = await FileSystem.getInfoAsync(audioDir);
     if (info.exists) {
       await FileSystem.deleteAsync(audioDir, { idempotent: true });

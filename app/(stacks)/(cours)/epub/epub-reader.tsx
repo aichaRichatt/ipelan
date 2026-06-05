@@ -1,5 +1,4 @@
-// app/(stacks)/(cours)/epub/epub-reader.tsx
-// ─────────────────────────────────────────────────────────────────────────────
+ // ─────────────────────────────────────────────────────────────────────────────
 // Lecteur EPUB — connecté au serveur EpubPlugin (Node.js)
 //
 // Architecture (identique à test-reader.html) :
@@ -25,18 +24,21 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
-import { useUserStats } from '../../../../hooks/useUserStats';
 import { useEpubReader } from '../../../../hooks/useEpubReader';
+import { useUserStats } from '../../../../hooks/useUserStats';
+import {
+  fetchSectionHtmlMoodle,
+} from '../../../../services/epub/epubDownloadService';
+import {
+  cacheSectionOffline,
+  downloadAudioForSection,
+  getSectionOffline,
+} from '../../../../services/epub/epubOfflineService';
 import {
   buildBookId,
   EpubReadingSection,
   fetchAlignment,
 } from '../../../../services/epub/epubServerService';
-import {
-  getSectionOffline,
-  prefetchSectionHtml,
-  downloadAudioForSection,
-} from '../../../../services/epub/epubOfflineService';
 import { syncAfterActivity } from '../../../../services/sync/progressSync';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
@@ -70,6 +72,9 @@ export default function EpubReaderScreen() {
   const hasNextSectionRef = useRef(false);
   const nextSectionRef    = useRef<() => void>(() => {});
 
+  // Compteur de secondes — actif pendant le chargement (feedback visuel)
+  const [loadingSecs, setLoadingSecs] = useState(0);
+
   const {
     isLoading,
     loadingState,
@@ -84,85 +89,59 @@ export default function EpubReaderScreen() {
     previousSection,
     hasNextSection,
     hasPreviousSection,
-    mainHtmlUrl,
-    currentSectionPageUrl,
+    currentSectionHtml,
+    isSectionLoading,
+    fileBaseUrl,
     getAudioUrl,
+    token,
     refetch,
-    serverUrl,
   } = useEpubReader(cmid ?? null, epubUrl ?? null);
-
-  // HTML de la section courante (chargé depuis le cache offline ou depuis le serveur)
-  const [offlineSectionHtml, setOfflineSectionHtml] = useState<string | null>(null);
 
   // Maintenir les refs synchronisées
   useEffect(() => { hasNextSectionRef.current = hasNextSection; }, [hasNextSection]);
   useEffect(() => { nextSectionRef.current    = nextSection;    }, [nextSection]);
 
-  // ── Reset WebView ready quand on change de section (mode section-par-section) ──
-  // La WebView recharge avec la nouvelle URL → elle reposte pageReady quand prête.
-  useEffect(() => {
+   useEffect(() => {
     setWebviewReady(false);
-    setOfflineSectionHtml(null);
   }, [currentSectionIndex]);
 
-  // ── Offline : tenter de charger depuis SQLite si réseau indisponible ──
-  useEffect(() => {
-    if (!manifest || !cmid) return;
-    const bookId = buildBookId(cmid);
-    let cancelled = false;
-
-    (async () => {
-      const cached = await getSectionOffline(bookId, currentSectionIndex);
-      if (cancelled || !cached?.htmlPage) return;
-      // Utiliser le HTML offline seulement si le serveur n'est pas joignable
-      // (currentSectionPageUrl chargera depuis le serveur si en ligne)
-      if (!serverUrl) {
-        setOfflineSectionHtml(cached.htmlPage);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [currentSectionIndex, manifest, cmid, serverUrl]);
-
-  // ── Pre-fetch : pré-charger la section suivante en arrière-plan ──
-  // Deux actions en parallèle :
-  //   1. Réchauffer le cache serveur (HTTP GET simple → serveur met en mémoire)
-  //   2. Télécharger le HTML avec CSS inliné dans SQLite pour offline
-  useEffect(() => {
-    if (!manifest || !cmid || !currentSectionPageUrl) return;
-    const bookId     = buildBookId(cmid);
-    const nextIdx    = currentSectionIndex + 1;
-    const sections   = manifest.readingSections;
+   useEffect(() => {
+    if (!manifest || !cmid || !token) return;
+    const bookId  = buildBookId(cmid);
+    const cmidNum = Number(cmid);
+    const nextIdx = currentSectionIndex + 1;
+    const sections = manifest.readingSections;
     if (nextIdx >= sections.length) return;
 
-    const nextSection = sections[nextIdx];
-    if (!nextSection) return;
+    const nextSec = sections[nextIdx];
+    if (!nextSec) return;
 
     let cancelled = false;
 
     (async () => {
-      // 1. Réchauffer le cache HTTP (requête silencieuse)
-      fetch(currentSectionPageUrl).catch(() => {});
-
-      // 2. Mettre en cache offline la section suivante (avec CSS inliné)
-      if (!cancelled) {
-        await prefetchSectionHtml(
-          bookId,
-          nextIdx,
-          nextSection.id,
-          nextSection.audioFiles ?? [],
-          nextSection.text ?? ''
-        );
+      // 1. Mettre en cache la section suivante si pas déjà présente
+      const cached = await getSectionOffline(bookId, nextIdx);
+      if (!cancelled && !cached?.htmlPage) {
+        try {
+          const { html, sectionId, audioFiles } = await fetchSectionHtmlMoodle(
+            cmidNum, nextIdx, token, true
+          );
+          if (!cancelled && html) {
+            await cacheSectionOffline(
+              bookId, nextIdx, sectionId, audioFiles, nextSec.text ?? '', html
+            );
+          }
+        } catch {}
       }
 
-      // 3. Télécharger l'audio de la section courante pour offline
+      // 2. Télécharger l'audio de la section courante pour offline
       if (!cancelled && currentSection?.audioFiles?.length) {
         await downloadAudioForSection(bookId, currentSection.audioFiles, getAudioUrl);
       }
     })();
 
     return () => { cancelled = true; };
-  }, [currentSectionIndex, manifest, cmid]);
+  }, [currentSectionIndex, manifest, cmid, token]);
 
   // ── Sections audio : données injectées dans le JS de la WebView ──
   // Scopé à la section COURANTE uniquement (mode section-par-section) :
@@ -662,7 +641,24 @@ export default function EpubReaderScreen() {
         fileToTimings[filename] = timings;
       };
 
-      // ── 12. Init ──
+      // ── 12. Images : réécrire pluginfile.php → webservice/pluginfile.php + token ──
+      // Le <base href> PHP résout les URLs relatives en pluginfile.php (sans token).
+      // Le WebView n'a pas de cookie Moodle → les images seraient bloquées.
+      // On remplace à la volée par l'URL webservice authentifiée.
+      (function() {
+        var _tok = ${JSON.stringify(token)};
+        if (!_tok) return;
+        var imgs = document.querySelectorAll('img[src]');
+        for (var _ii = 0; _ii < imgs.length; _ii++) {
+          var _s = imgs[_ii].src; // URL absolue résolue via <base href>
+          if (_s && _s.indexOf('/pluginfile.php/') !== -1 && _s.indexOf('/webservice/') === -1) {
+            imgs[_ii].src = _s.replace('/pluginfile.php/', '/webservice/pluginfile.php/')
+                           + (_s.indexOf('?') === -1 ? '?' : '&') + 'token=' + encodeURIComponent(_tok);
+          }
+        }
+      })();
+
+      // ── 13. Init ──
       setupAudio();
       new MutationObserver(function() { setupAudio(); })
         .observe(document.documentElement, { childList: true, subtree: true });
@@ -841,17 +837,33 @@ export default function EpubReaderScreen() {
     // URL de section → pas besoin d'injecter un scroll.
   }, [goToSection]);
 
+  // ── Compteur de secondes pendant le chargement ──
+  useEffect(() => {
+    if (!isLoading) {
+      setLoadingSecs(0);
+      return;
+    }
+    setLoadingSecs(0);
+    const id = setInterval(() => setLoadingSecs(s => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [isLoading]);
+
   // ── Loading ──
   if (isLoading) {
+    const isProcessing = loadingState === 'processing';
     const message =
-      loadingState === 'checking_server' ? 'Connexion au serveur...' :
-      loadingState === 'processing'      ? 'Traitement de l\'EPUB sur le serveur...' :
+      loadingState === 'checking_server' ? 'Connexion...' :
+      isProcessing                       ? 'Veuillez patienter...' :
+      loadingSecs >= 8                   ? 'Extraction du livre en cours...' :
                                            'Chargement du livre...';
+    const subMessage = isProcessing || loadingSecs >= 8
+      ? `Cette opération ne se fait qu'une seule fois${loadingSecs > 0 ? ` (${loadingSecs}s)` : ' (30-60 secondes)'}`
+      : null;
     return (
       <SafeAreaView style={styles.centered}>
         <ActivityIndicator size="large" color="#002366" />
         <Text style={styles.loadingText}>{message}</Text>
-        <Text style={styles.loadingSubText}>{serverUrl}</Text>
+        {subMessage && <Text style={[styles.loadingSubText, { marginTop: 8, color: '#6B7280' }]}>{subMessage}</Text>}
       </SafeAreaView>
     );
   }
@@ -916,31 +928,19 @@ export default function EpubReaderScreen() {
         <View style={[styles.progressFill, { width: `${progress}%` }]} />
       </View>
 
-      {/* WebView — charge la section courante (mode section-par-section) */}
+      {/* WebView — charge la section courante via HTML inline (Moodle WS) */}
       <View style={styles.webviewContainer}>
-        {(currentSectionPageUrl || mainHtmlUrl || offlineSectionHtml) ? (
+        {isSectionLoading && !currentSectionHtml && (
+          <View style={styles.centered}>
+            <ActivityIndicator size="small" color="#002366" />
+          </View>
+        )}
+        {currentSectionHtml ? (
           <WebView
             ref={webviewRef}
-            source={
-              offlineSectionHtml
-                ? { html: offlineSectionHtml, baseUrl: serverUrl }
-                : { uri: currentSectionPageUrl ?? mainHtmlUrl ?? '' }
-            }
+            source={{ html: currentSectionHtml, baseUrl: fileBaseUrl }}
             style={styles.webview}
-            onLoad={() => {
-              // Mettre en cache la section courante en SQLite pour offline
-              if (cmid && currentSection) {
-                const bookId = buildBookId(cmid);
-                // Télécharger avec inline_css pour offline (en arrière-plan)
-                prefetchSectionHtml(
-                  bookId,
-                  currentSectionIndex,
-                  currentSection.id,
-                  currentSection.audioFiles ?? [],
-                  currentSection.text ?? ''
-                ).catch(() => {});
-              }
-            }}
+            onLoad={() => {}}
             injectedJavaScriptBeforeContentLoaded={`
               (function() {
                 // S'exécute AVANT que le HTML soit parsé.

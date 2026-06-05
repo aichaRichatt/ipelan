@@ -3,14 +3,15 @@ import { ENV } from '../../constants/env';
 const IS_DEV = process.env.NODE_ENV === "development";
 
 export const Config = {
-  baseURL: process.env.EXPO_PUBLIC_MOODLE_API_URL || "https://moodle.richatt.com",
+  baseURL:  ENV.API.MOODLE_URL,
   service: "IPELAN_FULL_SERVICE",
 };
 
 export async function moodleFetch(
   endpoint: string,
   params: Record<string, any> = {},
-  method: string = "POST"
+  method: string = "POST",
+  timeoutMs: number = ENV.API.API_TIMEOUT
 ) {
   const url = new URL(`${Config.baseURL}${endpoint}`);
 
@@ -44,7 +45,7 @@ export async function moodleFetch(
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), ENV.API.API_TIMEOUT);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(url.toString(), {
@@ -100,7 +101,8 @@ export async function moodleFetch(
 export async function moodleCall(
   wsfunction: string,
   params: Record<string, any> = {},
-  token?: string
+  token?: string,
+  timeoutMs?: number
 ) {
   const callParams: any = {
     ...params,
@@ -111,7 +113,7 @@ export async function moodleCall(
     callParams.wstoken = token;
   }
 
-  return moodleFetch('/webservice/rest/server.php', callParams, 'POST');
+  return moodleFetch('/webservice/rest/server.php', callParams, 'POST', timeoutMs ?? ENV.API.API_TIMEOUT);
 }
 
 export async function isMoodleOnline(timeoutMs: number = 3000): Promise<boolean> {

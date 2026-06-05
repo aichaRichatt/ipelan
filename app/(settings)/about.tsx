@@ -333,13 +333,13 @@ export default function AboutScreen() {
 
         {/* Legal */}
         <View style={styles.mb8}>
-          <Pressable style={styles.style_4} onPress={() => handleOpenLink("https://moodle.richatt.com/mod/page/view.php?id=terms")}>
+          <Pressable style={styles.style_4} onPress={() => handleOpenLink(process.env.EXPO_PUBLIC_MOODLE_API_URL+ `/mod/page/view.php?id=terms`)}>
             <Text style={styles.style_3}>Conditions d&apos;utilisation</Text>
           </Pressable>
-          <Pressable style={styles.style_2} onPress={() => handleOpenLink("https://moodle.richatt.com/mod/page/view.php?id=privacy")}>
+          <Pressable style={styles.style_2} onPress={() => handleOpenLink(process.env.EXPO_PUBLIC_MOODLE_API_URL+ `/mod/page/view.php?id=privacy`)}>
             <Text style={styles.style_1}>Politique de confidentialité</Text>
           </Pressable>
-          <Pressable style={styles.py3} onPress={() => handleOpenLink("https://moodle.richatt.com/mod/page/view.php?id=licenses")}>
+          <Pressable style={styles.py3} onPress={() => handleOpenLink(process.env.EXPO_PUBLIC_MOODLE_API_URL+ `/mod/page/view.php?id=licenses`)}>
             <Text style={styles.textgray600}>Licences open source</Text>
           </Pressable>
         </View>

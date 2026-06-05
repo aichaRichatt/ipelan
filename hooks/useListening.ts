@@ -3,6 +3,12 @@ import { moodleFetch } from '../services/api/moodleClient';
 import { categorizeMoodleError, getUserFriendlyError, logActivityFetch } from '../services/utils/moodleErrorHandler';
 import { convertFileUrlForAuth, resolveActivityInstanceId } from '../services/utils/moodleIdResolver';
 import { shuffle } from '../utils/shuffle';
+import {
+  cacheActivity,
+  downloadActivityAudio,
+  getActivityOffline,
+  buildAuthAudioUrl,
+} from '../services/activities/activityOfflineService';
 
 export interface ListeningExercise {
   id: number;
@@ -185,20 +191,85 @@ const fetchListeningContent = useCallback(async () => {
       // Step 3: Si pas d'options, afficher erreur Moodle
       if (!isMountedRef.current) return;
 
+      const activeCmid = cmid || (moduleId > 0 ? moduleId : instanceId);
+
       if (choiceExercises.length > 0) {
         setExercises(choiceExercises);
         logActivityFetch('Listening', 'SUCCESS', { count: choiceExercises.length });
+        // Auto-cache for offline — store in ListeningData shape
+        if (activeCmid > 0) {
+          const cacheData = {
+            id: resolvedModule?.instanceId || activeCmid,
+            title: resolvedModule?.name || 'Écoute',
+            question: 'Écoutez et choisissez la bonne réponse',
+            options: choiceExercises.map(e => e.translation),
+            correctIndex: 0,
+          };
+          cacheActivity(activeCmid, 'listening', courseId, cacheData, choiceAudioUrl || null).catch(() => {});
+          if (choiceAudioUrl && authToken) {
+            downloadActivityAudio(activeCmid, choiceAudioUrl, authToken).catch(() => {});
+          }
+        }
       } else {
-        const errMsg = resolvedModule?.instanceId
-          ? "Impossible de charger les options du sondage. Permissions insuffisantes."
-          : "Module de choix non trouvé.";
-        setUserError(errMsg);
-        setError(errMsg);
-        logActivityFetch('Listening', 'NO_OPTIONS', errMsg);
+        // Try offline fallback before showing error
+        let usedOffline = false;
+        if (activeCmid > 0) {
+          const cached = await getActivityOffline(activeCmid);
+          if (cached?.data) {
+            const data = cached.data as any;
+            const resolvedAudioUrl = cached.rawAudioUrl
+              ? buildAuthAudioUrl(cached.rawAudioUrl, authToken)
+              : null;
+            setAudioUrl(resolvedAudioUrl);
+            if (data.options && Array.isArray(data.options) && data.options.length > 0) {
+              setExercises([{
+                id: 1,
+                word: data.title || 'Écoute',
+                translation: data.question || '',
+                audioUrl: resolvedAudioUrl || undefined,
+                options: data.options,
+                correctIndex: data.correctIndex ?? 0,
+              }]);
+              usedOffline = true;
+              logActivityFetch('Listening', 'OFFLINE_FALLBACK', { cmid: activeCmid });
+            }
+          }
+        }
+        if (!usedOffline) {
+          const errMsg = resolvedModule?.instanceId
+            ? "Impossible de charger les options du sondage. Permissions insuffisantes."
+            : "Module de choix non trouvé.";
+          setUserError(errMsg);
+          setError(errMsg);
+          logActivityFetch('Listening', 'NO_OPTIONS', errMsg);
+        }
       }
 
     } catch (err: any) {
       if (!isMountedRef.current) return;
+      const activeCmid = cmid || (moduleId > 0 ? moduleId : instanceId);
+      if (activeCmid > 0) {
+        const cached = await getActivityOffline(activeCmid);
+        if (cached?.data) {
+          const data = cached.data as any;
+          const resolvedAudioUrl = cached.rawAudioUrl
+            ? buildAuthAudioUrl(cached.rawAudioUrl, authToken)
+            : null;
+          setAudioUrl(resolvedAudioUrl);
+          if (data.options && Array.isArray(data.options) && data.options.length > 0) {
+            setExercises([{
+              id: 1,
+              word: data.title || 'Écoute',
+              translation: data.question || '',
+              audioUrl: resolvedAudioUrl || undefined,
+              options: data.options,
+              correctIndex: data.correctIndex ?? 0,
+            }]);
+            logActivityFetch('Listening', 'OFFLINE_FALLBACK', { cmid: activeCmid });
+            return;
+          }
+        }
+      }
       const moodleError = categorizeMoodleError(err, 'fetch_listening');
       logActivityFetch('Listening', 'ERROR', moodleError);
       setError(moodleError.message);
