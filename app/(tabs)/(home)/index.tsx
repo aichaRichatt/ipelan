@@ -421,7 +421,7 @@ export default function HomeScreen() {
                 </View>
               </Pressable>
               <View style={styles.greetingContainer}>
-                <Text style={styles.greetingLabel}>Àndu,</Text>
+                <Text style={styles.greetingLabel}></Text>
                 <Text style={styles.greetingName}>
                   {loggedUser?.firstname || loggedUser?.username || "Ahmadou"}
                 </Text>

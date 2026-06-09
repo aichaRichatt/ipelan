@@ -1,31 +1,9 @@
-// services/epub/epubServerService.ts
-// ─────────────────────────────────────────────────────────────────────────────
-// Client EPUB — deux modes de fonctionnement :
-//
-// Mode A — Moodle WS (plugin PHP local_ipelan_epub) :
-//   fetchManifestMoodle(cmid, token)               → manifest via moodleCall()
-//   fetchSectionHtmlMoodle(cmid, idx, token)       → HTML section via moodleCall()
-//   fetchStatusMoodle(cmid, token)                 → statut de traitement
-//
-// Mode B — Serveur Node.js intermédiaire (EpubPlugin, rétrocompat) :
-//   fetchManifest(bookId)                          → GET /epub/:bookId/manifest
-//   getSectionPageUrl(bookId, idx)                 → URL section HTML
-//   getFileUrl(bookId, path)                       → URL fichier
-//
-// bookId = "cmid-{N}" — N = cmid du module Moodle
-// ─────────────────────────────────────────────────────────────────────────────
-
-import { moodleCall } from '../api/moodleClient';
-
+ 
 const IS_DEV = process.env.NODE_ENV === 'development';
 
-// URL du serveur EPUB — configurée dans .env
-export const EPUB_SERVER_URL = (process.env.EXPO_PUBLIC_EPUB_SERVER_URL || '').replace(/\/$/, '');
+ export const EPUB_SERVER_URL = (process.env.EXPO_PUBLIC_EPUB_SERVER_URL || '').replace(/\/$/, '');
 
-// ─────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────
-
+ 
 export interface EpubWordTiming {
   word: string;
   start: number;  // secondes depuis le début du fichier audio
@@ -33,29 +11,27 @@ export interface EpubWordTiming {
 }
 
 export interface EpubReadingSection {
-  id: string;           // "p21" — id de la div dans le XHTML
+  id: string;        
   pageNumber: number | null;
   text: string;
-  audioFiles: string[]; // ["OEBPS/Audio/21.opus"] — relatif à la racine EPUB
-  images: string[];     // ["OEBPS/Images/21.png"]
+  audioFiles: string[];  
+  images: string[];     
   hasAudio: boolean;
-  // wordTimings : présent si Whisper est activé côté serveur
-  // clé = nom de fichier relatif (ex: "OEBPS/Audio/21.opus")
-  // valeur = [{word, start, end}] dans l'ordre de la transcription
+ 
   wordTimings?: Record<string, EpubWordTiming[]>;
 }
 
 export interface EpubSpineItem {
   index: number;
   id: string;
-  href: string;         // "OEBPS/Text/book.xhtml"
+  href: string;         
   hasAudio: boolean;
-  timing: null;         // SMIL timing (null pour les EPUBs actuels)
+  timing: null;        
   separateAudio: null;
 }
 
 export interface EpubManifest {
-  bookId: string;             // "cmid-42"
+  bookId: string;            
   version: string;
   generatedAt: string;
   epubType: 'locuteur' | 'non-locuteur' | 'math' | 'cahier' | 'unknown';
@@ -90,11 +66,7 @@ export interface EpubCatalog {
   catalog: Record<string, Record<string, { grade: number; books: EpubCatalogBook[] }>>;
 }
 
-// ─────────────────────────────────────────────────────────────
-// fetchManifest()
-// Récupère le manifest du livre. Si traitement en cours → poll jusqu'à prêt.
-// ─────────────────────────────────────────────────────────────
-
+ 
 export async function fetchManifest(
   bookId: string,
   options: {
@@ -162,26 +134,13 @@ export async function fetchStatus(bookId: string): Promise<{ status: 'ready' | '
   return data;
 }
 
-// ─────────────────────────────────────────────────────────────
-// getFileUrl()
-// Construit l'URL complète d'un fichier EPUB (audio, image, HTML)
-//
-// @param bookId    "cmid-42"
-// @param filePath  "OEBPS/Audio/21.opus"  (relatif à la racine EPUB)
-// @returns         "http://192.168.0.193:3001/epub/cmid-42/file/OEBPS/Audio/21.opus"
-// ─────────────────────────────────────────────────────────────
-
+ 
 export function getFileUrl(bookId: string, filePath: string): string {
   const cleanPath = filePath.replace(/^\//, '');
   return `${EPUB_SERVER_URL}/epub/${bookId}/file/${cleanPath}`;
 }
 
-// ─────────────────────────────────────────────────────────────
-// getMainHtmlUrl()
-// URL du fichier XHTML principal du livre à charger dans le WebView
-// L'EPUB IPELAN a tout le contenu dans un seul fichier XHTML.
-// ─────────────────────────────────────────────────────────────
-
+ 
 export function getMainHtmlUrl(bookId: string, manifest: EpubManifest): string {
   // Le spine pointe vers le(s) fichier(s) XHTML
   // Trouver le premier fichier qui n'est pas nav.xhtml
@@ -195,14 +154,7 @@ export function getMainHtmlUrl(bookId: string, manifest: EpubManifest): string {
   return getFileUrl(bookId, 'OEBPS/Text/book.xhtml');
 }
 
-// ─────────────────────────────────────────────────────────────
-// findSectionByAudioFile()
-// Trouver la section active depuis un chemin de fichier audio
-//
-// @param sections      readingSections du manifest
-// @param audioFilePath ex: "OEBPS/Audio/21.opus"
-// ─────────────────────────────────────────────────────────────
-
+ 
 export function findSectionByAudioFile(
   sections: EpubReadingSection[],
   audioFilePath: string
@@ -229,21 +181,7 @@ export async function fetchCatalog(): Promise<EpubCatalog> {
   return res.json();
 }
 
-// ─────────────────────────────────────────────────────────────
-// fetchAlignment()
-// Forced alignment via WhisperX : donne le texte exact EPUB + audio
-// → retourne les timestamps mot-par-mot précis.
-//
-// Appelé en arrière-plan par epub-reader après chaque changement de section.
-// Les résultats sont injectés dans la WebView via window.__ipelanSetTimings().
-//
-// @param bookId    "cmid-783"
-// @param audioFile "OEBPS/Audio/10.opus" (relatif à la racine EPUB)
-// @param text      Texte brut de la section (section.text du manifest)
-// @param lang      Code langue pour le modèle d'alignement (défaut: 'fr')
-// @returns [{word, start, end, score}] ou [] si indisponible
-// ─────────────────────────────────────────────────────────────
-
+ 
 export async function fetchAlignment(
   bookId  : string,
   audioFile: string,
@@ -348,103 +286,7 @@ export function buildBookId(cmid: number | string): string {
   return `cmid-${cmid}`;
 }
 
-// ═════════════════════════════════════════════════════════════
-// MODE A — Moodle Web Services (plugin PHP local_ipelan_epub)
-// Ces fonctions appellent moodleCall() directement — pas de
-// serveur intermédiaire Node.js requis.
-// ═════════════════════════════════════════════════════════════
-
-/**
- * Récupère le manifest depuis le plugin PHP via Moodle WS.
- * Poll automatiquement si le traitement est en cours.
- *
- * @param cmid  Course Module ID de la ressource EPUB
- * @param token wstoken Moodle de l'utilisateur
- */
-export async function fetchManifestMoodle(
-  cmid    : number,
-  token   : string,
-  options : { timeoutMs?: number; pollIntervalMs?: number; onProcessing?: () => void } = {}
-): Promise<{ manifest: EpubManifest; fileBaseUrl: string }> {
-  const { timeoutMs = 10 * 60 * 1000, pollIntervalMs = 3000, onProcessing } = options;
-  const deadline = Date.now() + timeoutMs;
-  let notifiedProcessing = false;
-
-  while (Date.now() < deadline) {
-    const data = await moodleCall('local_ipelan_epub_get_manifest', { cmid }, token) as any;
-
-    if (data.exception) throw new Error(data.message || data.exception);
-
-    if (data.status === 'ready' && data.manifest) {
-      const manifest: EpubManifest = JSON.parse(data.manifest);
-      if (IS_DEV) console.log(`[EpubWS] Manifest ready: ${manifest.metadata?.title} (${manifest.readingSections?.length} sections)`);
-      return { manifest, fileBaseUrl: data.file_base_url || '' };
-    }
-
-    if (data.status === 'processing') {
-      if (!notifiedProcessing) { onProcessing?.(); notifiedProcessing = true; }
-      await sleep(pollIntervalMs);
-      continue;
-    }
-
-    if (data.status === 'error') throw new Error(data.error || 'EPUB processing failed');
-
-    throw new Error(`Unexpected manifest status: ${data.status}`);
-  }
-
-  throw new Error('[EpubWS] Timeout waiting for EPUB manifest');
-}
-
-/**
- * Récupère le HTML complet d'une section via Moodle WS.
- * Utilisé pour le lazy loading et le prefetch offline.
- *
- * @param cmid          Course Module ID
- * @param sectionIndex  Index 0-based de la section
- * @param token         wstoken Moodle
- * @param inlineCss     true → CSS inliné pour usage offline
- */
-export async function fetchSectionHtmlMoodle(
-  cmid         : number,
-  sectionIndex : number,
-  token        : string,
-  inlineCss    = false
-): Promise<{ html: string; sectionId: string; audioFiles: string[] }> {
-  const data = await moodleCall('local_ipelan_epub_get_section_html', {
-    cmid,
-    section_index: sectionIndex,
-    inline_css   : inlineCss ? 1 : 0,
-  }, token) as any;
-
-  if (data.exception) throw new Error(data.message || data.exception);
-
-  return {
-    html      : data.html        || '',
-    sectionId : data.section_id  || '',
-    audioFiles: data.audio_files || [],
-  };
-}
-
-/**
- * Récupère le statut de traitement depuis le plugin PHP.
- */
-export async function fetchStatusMoodle(
-  cmid : number,
-  token: string
-): Promise<{ status: 'not_found' | 'processing' | 'ready' | 'error'; totalSections: number }> {
-  try {
-    const data = await moodleCall('local_ipelan_epub_get_status', { cmid }, token) as any;
-    if (data.exception) return { status: 'not_found', totalSections: 0 };
-    return { status: data.status || 'not_found', totalSections: data.total_sections || 0 };
-  } catch {
-    return { status: 'not_found', totalSections: 0 };
-  }
-}
-
-// ─────────────────────────────────────────────────────────────
-// Helper
-// ─────────────────────────────────────────────────────────────
-
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+

@@ -7,6 +7,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 interface ActivityCardProps {
   activity: ActivityWithProgress;
   onPress: () => void;
+  isOfflineCached?: boolean;
 }
 
 const getTypeIcon = (type: ActivityType): string => {
@@ -53,6 +54,7 @@ const getMasteryBadge = (scorePercent: number): { emoji: string; label: string; 
 export const ActivityCard: React.FC<ActivityCardProps> = ({
   activity,
   onPress,
+  isOfflineCached = false,
 }) => {
   const { title, type, xp, progress } = activity;
   const color = getTypeColor(type);
@@ -102,6 +104,12 @@ export const ActivityCard: React.FC<ActivityCardProps> = ({
             {scoreDisplay && (
               <View style={styles.scoreBadge}>
                 <Text style={styles.scoreText}>★ {scoreDisplay}</Text>
+              </View>
+            )}
+            {isOfflineCached && (
+              <View style={styles.offlineBadge}>
+                <Feather name="download" size={10} color="#1D4ED8" />
+                <Text style={styles.offlineText}>Hors-ligne</Text>
               </View>
             )}
           </View>
@@ -265,6 +273,22 @@ const styles = StyleSheet.create({
   progressBarFill: {
     height: '100%',
     borderRadius: 3,
+  },
+  // Offline badge
+  offlineBadge: {
+    backgroundColor: '#DBEAFE',
+    borderRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    gap: 3,
+  },
+  offlineText: {
+    color: '#1D4ED8',
+    fontSize: 11,
+    fontWeight: '500',
   },
   // Completed badge
   completedBadge: {

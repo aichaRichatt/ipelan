@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { generateIdRetryOrder, identifyActivityType, validateActivityIds } from '../services/activity/activityIdentifier';
-import { moodleFetch } from '../services/api/moodleClient';
+import { isMoodleOnline, moodleFetch } from '../services/api/moodleClient';
 import {
   cacheActivity,
   downloadActivityAudio,
@@ -171,6 +171,25 @@ export function useActivityContent(
 
     setIsLoading(true);
     setError(null);
+
+    // Offline-first: si hors ligne et données en cache → restaurer immédiatement
+    if (cmid) {
+      const online = await isMoodleOnline();
+      if (!isMountedRef.current) return;
+      if (!online) {
+        const cached = await getActivityOffline(cmid);
+        if (!isMountedRef.current) return;
+        if (cached) {
+          const au = cached.rawAudioUrl ? buildAuthAudioUrl(cached.rawAudioUrl, token) : undefined;
+          if (cached.activityType === 'dictation')   setDictation({ ...(cached.data as DictationData),   audioUrl: au });
+          if (cached.activityType === 'listening')   setListening({ ...(cached.data as ListeningData),   audioUrl: au });
+          if (cached.activityType === 'association') setAssociation(cached.data as AssociationData);
+          if (cached.activityType === 'word_order')  setWordOrder(cached.data as WordOrderData);
+          setIsLoading(false);
+          return;
+        }
+      }
+    }
 
     try {
       const activityToken = token || process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN;

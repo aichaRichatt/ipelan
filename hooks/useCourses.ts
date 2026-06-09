@@ -39,17 +39,25 @@ export function useCourses() {
       }
 
       const finalCourses = Array.isArray(apiCourses) ? apiCourses : [];
-      if (finalCourses.length === 0) {
-        console.warn("[useCourses] Both Student and Admin tokens returned 0 enrolled courses. CHECK MOODLE ENROLMENT.");
-      }
-
       const db = await getDBConnection();
-      const mappedCourses = finalCourses.map((c: any) => ({
-        ...c,
-        categoryid: c.category || c.categoryid || 0
-      }));
-      await saveCourses(db, mappedCourses);
-      setCourses(mappedCourses);
+
+      if (finalCourses.length > 0) {
+        const mappedCourses = finalCourses.map((c: any) => ({
+          ...c,
+          categoryid: c.category || c.categoryid || 0
+        }));
+        await saveCourses(db, mappedCourses);
+        setCourses(mappedCourses);
+      } else {
+        // Both tiers returned empty (offline or not enrolled) — use SQLite cache
+        const localCourses = await getCourses(db);
+        if (localCourses.length > 0) {
+          console.warn("[useCourses] Network returned 0 courses, using SQLite cache.");
+          setCourses(localCourses);
+        } else {
+          console.warn("[useCourses] Both Student and Admin tokens returned 0 enrolled courses. CHECK MOODLE ENROLMENT.");
+        }
+      }
     } catch (err: any) {
       console.warn("API fetch failed, trying local storage:", err.message);
       try {

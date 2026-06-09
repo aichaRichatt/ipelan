@@ -235,6 +235,25 @@ export async function clearActivityCache(cmid: number): Promise<void> {
   }
 }
 
+/**
+ * Retourne l'ensemble des cmids déjà en cache (requête batch — 1 seul SELECT).
+ * Utiliser pour afficher les badges "disponible hors-ligne" sans N requêtes.
+ */
+export async function getOfflineCachedCmids(cmids: number[]): Promise<Set<number>> {
+  if (!cmids.length) return new Set();
+  try {
+    const db           = await getDBConnection();
+    const placeholders = cmids.map(() => '?').join(',');
+    const rows         = await db.getAllAsync<{ cmid: number }>(
+      `SELECT cmid FROM activity_cache WHERE cmid IN (${placeholders})`,
+      cmids
+    );
+    return new Set(rows.map(r => r.cmid));
+  } catch {
+    return new Set();
+  }
+}
+
 export async function clearAllActivityCaches(): Promise<void> {
   try {
     const db   = await getDBConnection();

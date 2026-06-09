@@ -53,7 +53,18 @@ export function useCourseContent(
       const rawContents = await getCourseContents(token, courseId);
 
       if (!rawContents || rawContents.length === 0) {
-        if (IS_DEV) console.warn("[useCourseContent] No content returned for course:", courseId);
+        // Network returned empty (offline or Moodle unreachable) — try cache first
+        try {
+          const cached = await AsyncStorage.getItem(courseContentKey(courseId));
+          if (cached) {
+            const cachedContents = JSON.parse(cached);
+            if (IS_DEV) console.log('[useCourseContent] Network empty, using AsyncStorage cache for course:', courseId);
+            setSections(parseMoodleSections(cachedContents));
+            setCourseContent(parseCourseContent(courseId, cachedContents));
+            return;
+          }
+        } catch {}
+        if (IS_DEV) console.warn("[useCourseContent] No content and no cache for course:", courseId);
         setError("Aucun contenu disponible pour ce cours");
         setSections([]);
         setCourseContent(null);

@@ -122,14 +122,7 @@ function detectQuestionType(html: string): QuestionType {
   return 'unknown';
 }
 
-/**
- * Récupère le contenu de la première occurrence d'un attribut `qtext`
- * y compris quand il contient des `<pre><code>` ou des balises imbriquées.
- *
- * Stratégie : matcher l'ouverture `<div ... class="...qtext..."...>` puis
- * compter les ouvertures/fermetures de `<div>` jusqu'à la fermeture
- * équilibrée — plus robuste qu'un simple `[^<]*?</div>`.
- */
+ 
 function extractQtext(html: string): string {
   const openRe = /<div[^>]+class="[^"]*\bqtext\b[^"]*"[^>]*>/i;
   const m = openRe.exec(html);
@@ -159,27 +152,7 @@ function extractQtext(html: string): string {
   return html.slice(start);
 }
 
-/**
- * Extrait les options de réponse d'un bloc question Moodle 4.x.
- *
- * Format réel :
- *   <div class="answer">
- *     <div class="r0">
- *       <input type="radio" name="q296:1_answer" value="0" id="q296:1_answer0"
- *              aria-labelledby="q296:1_answer0_label" />
- *       <div class="d-flex w-auto" id="q296:1_answer0_label" data-region="answer-label">
- *         <span class="answernumber">a. </span>
- *         <div class="flex-fill ml-1"><p>Aboro Moodle!</p></div>
- *       </div>
- *     </div>
- *     <div class="r1">…</div>
- *   </div>
- *
- * On découpe par `<div class="rN">` puis on extrait l'input + le texte
- * du `<p>` (ou à défaut, le contenu du div `flex-fill`).
- *
- * L'option `value="-1"` (« Effacer mon choix ») est ignorée.
- */
+ 
 function extractMultichoiceOptions(html: string): QuizOption[] {
   const options: QuizOption[] = [];
 
@@ -237,17 +210,7 @@ function extractMultichoiceOptions(html: string): QuizOption[] {
   return options;
 }
 
-/**
- * Extrait les sous-questions et choix d'une question de type `matching`.
- *
- * Structure Moodle 4.x :
- *   <table>
- *     <tr><td class="text">Left item</td>
- *         <td class="control"><select name="q1:1_sub0">
- *           <option value="">Choisir...</option>
- *           <option value="1">Choice A</option></select></td></tr>
- *   </table>
- */
+ 
 function extractMatchingData(html: string): MatchingData | undefined {
   const subQuestions: MatchingSubQuestion[] = [];
   const choicesMap = new Map<string, string>(); // value → label (dédupliqué)
@@ -281,16 +244,7 @@ function extractMatchingData(html: string): MatchingData | undefined {
   };
 }
 
-/**
- * Parse une question Moodle depuis son HTML.
- *
- * - multichoice / truefalse : extrait toutes les options via `extractMultichoiceOptions`
- * - shortanswer / numerical : extrait l'input texte (name + valeur courante éventuelle)
- * - sequencecheck : extrait `<input type="hidden" name="qX:Y_:sequencecheck" value="N">`
- *
- * Le format du sequencecheck dans Moodle 4.4 est `q<usageId>:<slot>_:sequencecheck`
- * (ex. `q296:1_:sequencecheck`).
- */
+ 
 function parseQuestionHtml(
   slot: number,
   fallbackSequencecheck: number,
@@ -349,8 +303,7 @@ function parseQuestionHtml(
   };
 }
 
-// ─── Service public ──────────────────────────────────────────────────────────
-
+ 
 /**
  * Liste les tentatives existantes pour un quiz.
  */
@@ -376,14 +329,7 @@ export async function getUserAttempts(
   return result?.attempts || [];
 }
 
-/**
- * Démarre une nouvelle tentative ou réutilise une tentative en cours.
- *
- * Stratégie :
- *  1. List attempts → tentative `inprogress` ? → on la reprend (sumgrades
- *     peut être null pour une tentative fraîchement créée, c'est normal).
- *  2. Sinon → `mod_quiz_start_attempt` (sans forcenew pour éviter les doublons).
- */
+ 
 export async function getOrCreateAttempt(
   authToken: string,
   quizInstanceId: number
@@ -454,10 +400,7 @@ export async function getOrCreateAttempt(
   }
 }
 
-/**
- * Charge une page de la tentative et parse les questions.
- * À appeler après chaque save pour récupérer le nouveau sequencecheck.
- */
+ 
 export async function getAttemptPage(
   authToken: string,
   attemptId: number,

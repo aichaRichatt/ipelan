@@ -13,6 +13,7 @@ import {
   buildAudioDownloadUrl,
   cacheManifest,
   getManifestOffline,
+  invalidateStaleSections,
 } from '../services/epub/epubDownloadService';
 import {
   getSectionOffline,
@@ -76,6 +77,7 @@ export function useEpubReader(
   useEffect(() => {
     if (!cmidNum || !token || !bookId) return;
     let cancelled = false;
+    const abortCtrl = new AbortController();
 
     const run = async () => {
       if (IS_DEV) console.log('[useEpubReader] Loading cmid:', cmidNum);
@@ -87,6 +89,7 @@ export function useEpubReader(
 
       try {
         const { manifest: m, fileBaseUrl: fbu } = await fetchManifestMoodle(cmidNum, token, {
+          signal: abortCtrl.signal,
           onProcessing: () => { if (!cancelled) setLoadingState('processing'); },
         });
         if (cancelled) return;
@@ -95,10 +98,14 @@ export function useEpubReader(
         setFileBaseUrl(fbu);
         setLoadingState('ready');
         cacheManifest(bookId, m, fbu).catch(() => {});
+        if (m.generatedAt) {
+          invalidateStaleSections(bookId, m.generatedAt).catch(() => {});
+        }
 
         if (IS_DEV) console.log('[useEpubReader] Ready:', m.metadata?.title, '|', m.readingSections?.length, 'sections');
       } catch (err: any) {
-        if (cancelled) return;
+        // Ignorer les erreurs d'un effet annulé
+        if (cancelled || abortCtrl.signal.aborted) return;
 
         // Fallback manifest offline
         try {
@@ -120,7 +127,10 @@ export function useEpubReader(
     };
 
     run();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      abortCtrl.abort();
+    };
   }, [cmidNum, token, fetchTrigger]);
 
   // ── Charger le HTML de la section courante ────────────────────────────────

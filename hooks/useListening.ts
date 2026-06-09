@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { moodleFetch } from '../services/api/moodleClient';
+import { isMoodleOnline, moodleFetch } from '../services/api/moodleClient';
 import { categorizeMoodleError, getUserFriendlyError, logActivityFetch } from '../services/utils/moodleErrorHandler';
 import { convertFileUrlForAuth, resolveActivityInstanceId } from '../services/utils/moodleIdResolver';
 import { shuffle } from '../utils/shuffle';
@@ -57,6 +57,37 @@ const fetchListeningContent = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     setUserError(null);
+
+    // Offline-first: si hors ligne et données en cache → restaurer immédiatement
+    const activeCmidEarly = cmid || (moduleId > 0 ? moduleId : instanceId);
+    if (activeCmidEarly > 0) {
+      const online = await isMoodleOnline();
+      if (!isMountedRef.current) return;
+      if (!online) {
+        const cached = await getActivityOffline(activeCmidEarly);
+        if (!isMountedRef.current) return;
+        if (cached?.data) {
+          const data = cached.data as any;
+          const resolvedAudioUrl = cached.rawAudioUrl
+            ? buildAuthAudioUrl(cached.rawAudioUrl, authToken)
+            : null;
+          setAudioUrl(resolvedAudioUrl);
+          if (data.options?.length > 0) {
+            setExercises([{
+              id: 1,
+              word: data.title || 'Écoute',
+              translation: data.question || '',
+              audioUrl: resolvedAudioUrl || undefined,
+              options: data.options,
+              correctIndex: data.correctIndex ?? 0,
+            }]);
+            setIsLoading(false);
+            logActivityFetch('Listening', 'OFFLINE_FIRST', { cmid: activeCmidEarly });
+            return;
+          }
+        }
+      }
+    }
 
     try {
       logActivityFetch('Listening', 'START', { moduleId, instanceId, courseId });

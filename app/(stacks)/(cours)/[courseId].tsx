@@ -5,7 +5,10 @@ import { EmptyState } from "@/components/EmptyState";
 import { ActivityWithProgress, FilterTab, PaginationState } from "@/types/activity";
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getOfflineCachedCmids } from "../../../services/activities/activityOfflineService";
+import { downloadCourseActivities, type DownloadableActivity } from "../../../services/activities/courseDownloadService";
+import { isMoodleOnline } from "../../../services/api/moodleClient";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
@@ -16,6 +19,7 @@ import { isEpubFile } from "../../../services/contentLoader";
 import { updateUser } from "../../../services/redux/slices/authSlice";
 import { RootState } from "../../../services/redux/store";
 import { getAllScoresForCourse, saveActivityScore } from "../../../services/storage/activity-progress";
+import { saveCourseProgress } from "../../../services/storage/course-progress";
 import { checkInternetConnection, syncAfterActivity, syncCourseProgress } from "../../../services/sync/progressSync";
 import { getContentTypeColor, getContentTypeIcon, getContentTypeLabel, MappedContent } from "../../../utils/contentMapper";
 import { ActivityType, XP_CONFIG } from "../../../utils/xpCalculator";
@@ -239,6 +243,11 @@ export default function ModuleDetailScreen() {
   // Modal de rachat de vies
   const [isBuyModalVisible, setIsBuyModalVisible] = useState(false);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+
+  // Offline cache state
+  const [offlineCachedCmids, setOfflineCachedCmids] = useState<Set<number>>(new Set());
+  const isDownloadingRef = useRef(false);
+  const hasAutoDownloadedRef = useRef(false);
 
   // Reload progress from SQLite every time the screen gains focus (e.g. returning from result.tsx)
   useFocusEffect(
@@ -485,6 +494,60 @@ export default function ModuleDetailScreen() {
     }
   };
 
+  // Rafraîchir les badges hors-ligne quand la liste d'activités change ou que l'écran prend le focus
+  useEffect(() => {
+    if (!activities.length) return;
+    const cmids = activities.map(a => a.id);
+    getOfflineCachedCmids(cmids).then(setOfflineCachedCmids).catch(() => {});
+  }, [activities]);
+
+  // Auto-download silencieux — déclenché une fois dès que les sections sont prêtes
+  useEffect(() => {
+    if (!sections?.length || !activeToken || hasAutoDownloadedRef.current) return;
+    hasAutoDownloadedRef.current = true;
+
+    const MODNAME_TO_DL_TYPE: Record<string, DownloadableActivity['type']> = {
+      assign  : 'dictation',
+      choice  : 'listening',
+      glossary: 'association',
+      lesson  : 'word_order',
+      quiz    : 'quiz',
+    };
+    const downloadable: DownloadableActivity[] = [];
+    for (const section of sections) {
+      for (const mod of section.modules || []) {
+        const modnameLow = (mod.modname || '').toLowerCase();
+        let dlType = MODNAME_TO_DL_TYPE[modnameLow];
+        if (modnameLow === 'lesson') {
+          dlType = lessonType(mod.name || '') === 'wordOrder' ? 'word_order' : 'association';
+        }
+        if (dlType) {
+          downloadable.push({
+            cmid      : mod.id,
+            instanceId: mod.instance || mod.id,
+            type      : dlType,
+            title     : mod.name || '',
+            courseId,
+          });
+        }
+      }
+    }
+    if (!downloadable.length) return;
+
+    (async () => {
+      const online = await isMoodleOnline();
+      if (!online || isDownloadingRef.current) return;
+      isDownloadingRef.current = true;
+      try {
+        await downloadCourseActivities(courseId, activeToken, downloadable);
+        const cmids = downloadable.map(d => d.cmid);
+        getOfflineCachedCmids(cmids).then(setOfflineCachedCmids).catch(() => {});
+      } finally {
+        isDownloadingRef.current = false;
+      }
+    })();
+  }, [sections, activeToken]);
+
   const checkLivesAndProceed = async (onProceed: () => void) => {
     if (stats.lives <= 0) {
       setPendingAction(() => onProceed);
@@ -608,6 +671,15 @@ export default function ModuleDetailScreen() {
     }
     return { allLessons: lessons, completedCount: completed };
   }, [sections, progressData, getModuleContent]);
+
+  // Sync SQLite course_progress with the live section count so every screen shows the
+  // same percentage. Runs when sections first load and whenever completions change.
+  // The home page reads course_progress.total_activities — without this it stays stale
+  // when the teacher adds new modules to a course.
+  useEffect(() => {
+    if (!courseId || !userId || allLessons.length === 0) return;
+    saveCourseProgress(courseId, completedCount, allLessons.length, 0, 0, userId).catch(() => {});
+  }, [courseId, userId, allLessons.length, completedCount]);
 
   if (isLoading) {
     return (
@@ -894,6 +966,7 @@ export default function ModuleDetailScreen() {
                     key={activity.id}
                     activity={activity}
                     onPress={() => handleActivityPress(activity)}
+                    isOfflineCached={offlineCachedCmids.has(activity.id)}
                   />
                 ))}
                 

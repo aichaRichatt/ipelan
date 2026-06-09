@@ -27,35 +27,61 @@ const EPUB_EXTRACT_TIMEOUT_MS = 5 * 60 * 1000; // 5 min
 export async function fetchManifestMoodle(
   cmid     : number,
   token    : string,
-  options  : { timeoutMs?: number; pollIntervalMs?: number; onProcessing?: () => void } = {}
+  options  : {
+    timeoutMs?    : number;
+    pollIntervalMs?: number;
+    onProcessing? : () => void;
+    signal?       : AbortSignal;
+  } = {}
 ): Promise<{ manifest: EpubManifest; fileBaseUrl: string }> {
-  const { timeoutMs = 10 * 60 * 1000, pollIntervalMs = 3000, onProcessing } = options;
+  const { timeoutMs = 10 * 60 * 1000, pollIntervalMs = 3000, onProcessing, signal } = options;
   const deadline = Date.now() + timeoutMs;
   let notifiedProcessing = false;
 
   // Pré-vérification rapide : si le livre n'existe pas encore, prévenir l'UI
   // immédiatement avant que get_manifest ne bloque pendant l'extraction PHP
-  try {
-    const statusData = await moodleCall('local_ipelan_epub_get_status', { cmid }, token) as any;
-    if (!statusData?.exception &&
-        (statusData.status === 'not_found' || statusData.status === 'processing')) {
-      onProcessing?.();
-      notifiedProcessing = true;
-      if (IS_DEV) console.log('[EpubDownload] Pre-check: extraction needed for cmid', cmid);
+  if (!signal?.aborted) {
+    try {
+      const statusData = await moodleCall('local_ipelan_epub_get_status', { cmid }, token) as any;
+      if (!statusData?.exception &&
+          (statusData.status === 'not_found' || statusData.status === 'processing')) {
+        onProcessing?.();
+        notifiedProcessing = true;
+        if (IS_DEV) console.log('[EpubDownload] Pre-check: extraction needed for cmid', cmid);
+      }
+    } catch {
+      // Pré-vérification optionnelle — ignorer les erreurs
     }
-  } catch {
-    // Pré-vérification optionnelle — ignorer les erreurs
   }
 
+  let networkRetries = 0;
+
   while (Date.now() < deadline) {
-    // Utiliser un timeout long pour get_manifest car process_sync() bloque le PHP
-    // jusqu'à la fin de l'extraction (30-90s pour un EPUB IPELAN typique)
-    const data = await moodleCall(
-      'local_ipelan_epub_get_manifest',
-      { cmid },
-      token,
-      EPUB_EXTRACT_TIMEOUT_MS
-    ) as any;
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+
+    let data: any;
+    try {
+      // Timeout long pour get_manifest : process_sync() bloque le PHP pendant l'extraction
+      data = await moodleCall(
+        'local_ipelan_epub_get_manifest',
+        { cmid },
+        token,
+        EPUB_EXTRACT_TIMEOUT_MS
+      );
+      networkRetries = 0;
+    } catch (err: any) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      // Retry sur erreur réseau transitoire (max 3 tentatives, délai 5s)
+      const isNetworkError = err.message?.includes('Network request failed') ||
+                             err.message?.includes('Délai de connexion');
+      if (isNetworkError && networkRetries < 3) {
+        networkRetries++;
+        if (IS_DEV) console.log(`[EpubDownload] Network error, retry ${networkRetries}/3`);
+        await sleepAbortable(5000, signal);
+        continue;
+      }
+      throw err;
+    }
 
     if (data.exception) {
       throw new Error(data.message || data.exception);
@@ -72,7 +98,7 @@ export async function fetchManifestMoodle(
         notifiedProcessing = true;
       }
       if (IS_DEV) console.log('[EpubDownload] EPUB processing… retrying in', pollIntervalMs, 'ms');
-      await sleep(pollIntervalMs);
+      await sleepAbortable(pollIntervalMs, signal);
       continue;
     }
 
@@ -249,8 +275,12 @@ export function buildAudioDownloadUrl(
   audioFile  : string,
   token      : string
 ): string {
-  const base = fileBaseUrl
-    .replace('/pluginfile.php/', '/webservice/pluginfile.php/');
+  // Guard against double-replace: if fileBaseUrl already uses webservice/pluginfile.php
+  // (returned by updated PHP plugin), the naive replace would produce
+  // /webservice/webservice/pluginfile.php. Check first.
+  const base = fileBaseUrl.includes('/webservice/pluginfile.php/')
+    ? fileBaseUrl
+    : fileBaseUrl.replace('/pluginfile.php/', '/webservice/pluginfile.php/');
   const clean = audioFile.replace(/^\//, '');
   return `${base}/${bookId}/${clean}?token=${encodeURIComponent(token)}`;
 }
@@ -355,6 +385,13 @@ export async function clearBookDownloads(bookId: string): Promise<void> {
 }
 
  
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new DOMException('Aborted', 'AbortError')); return; }
+    const id = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(id);
+      reject(new DOMException('Aborted', 'AbortError'));
+    }, { once: true });
+  });
 }

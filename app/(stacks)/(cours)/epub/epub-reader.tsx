@@ -37,6 +37,7 @@ import {
 import {
   buildBookId,
   EpubReadingSection,
+  EpubWordTiming,
   fetchAlignment,
 } from '../../../../services/epub/epubServerService';
 import { syncAfterActivity } from '../../../../services/sync/progressSync';
@@ -65,8 +66,10 @@ export default function EpubReaderScreen() {
   // Flag pour auto-play après avance automatique de section
   const autoPlayNextRef = useRef(false);
 
-  // Fichiers audio déjà alignés (ou en cours d'alignement) — évite les appels dupliqués
-  const alignedFilesRef = useRef<Set<string>>(new Set());
+  // Timings d'alignement par fichier audio.
+  // Map<filename, timings> : [] = sentinel "en cours", non-empty = timings prêts.
+  // Permet de ré-injecter les timings quand l'utilisateur revisite une section.
+  const alignedTimingsRef = useRef<Map<string, EpubWordTiming[]>>(new Map());
 
   // Refs stables pour l'auto-advance (évite les stale closures dans handleWebViewMessage)
   const hasNextSectionRef = useRef(false);
@@ -231,7 +234,8 @@ export default function EpubReaderScreen() {
       for (var _i = 0; _i < AUDIO_SECTIONS.length; _i++) {
         var _s = AUDIO_SECTIONS[_i];
         if (_s.audioUrl) {
-          var _f = _s.audioUrl.split('/').pop();
+          var _fFull = (_s.audioUrl.split('/').pop() || '');
+          var _f = _fFull.split('?')[0]; // strip ?token=... query string
           fileToUrl[_f]     = _s.audioUrl;
           fileToTimings[_f] = _s.timings || [];
           if (_s.id) fileToManifestId[_f] = _s.id;
@@ -398,6 +402,15 @@ export default function EpubReaderScreen() {
           } else {
             audioEl.src = fullUrl;
           }
+          // preload="none" was set by the MutationObserver to block requests on the
+          // wrong relative URL. Now that the correct authenticated URL is in place:
+          // • preload="metadata" → fetches only the first few KB to get duration
+          //   (fixes controls always showing 0:00)
+          // • load() → acknowledges the source change without downloading the file
+          //   (fixes controls flickering/disappearing on first tap because without
+          //   it the browser triggers an implicit load() on the first user interaction)
+          audioEl.preload = 'metadata';
+          audioEl.load();
         }
 
         var _lastIdx = -1;
@@ -641,20 +654,46 @@ export default function EpubReaderScreen() {
         fileToTimings[filename] = timings;
       };
 
-      // ── 12. Images : réécrire pluginfile.php → webservice/pluginfile.php + token ──
-      // Le <base href> PHP résout les URLs relatives en pluginfile.php (sans token).
-      // Le WebView n'a pas de cookie Moodle → les images seraient bloquées.
-      // On remplace à la volée par l'URL webservice authentifiée.
+      // ── 12. Images/sources Moodle : ajouter token sur les URLs pluginfile ──
+      // Le <base href> PHP résout les URLs relatives en webservice/pluginfile.php.
+      // Le WebView n'a pas de cookie Moodle → toute URL pluginfile sans token est bloquée.
+      // Cette fonction ajoute le token, en convertissant pluginfile→webservice si besoin
+      // (compatibilité avec les manifests mis en cache avant la mise à jour du plugin).
       (function() {
         var _tok = ${JSON.stringify(token)};
         if (!_tok) return;
+        function _addToken(url) {
+          if (!url || url.indexOf('pluginfile.php/') === -1) return null;
+          // Convertir pluginfile.php → webservice/pluginfile.php si besoin
+          var u = url.indexOf('/webservice/pluginfile.php/') === -1
+            ? url.replace('/pluginfile.php/', '/webservice/pluginfile.php/')
+            : url;
+          // Ajouter le token seulement s'il est absent
+          if (u.indexOf('token=') !== -1) return null;
+          return u + (u.indexOf('?') === -1 ? '?' : '&') + 'token=' + encodeURIComponent(_tok);
+        }
+        // <img src> (not deferred)
         var imgs = document.querySelectorAll('img[src]');
         for (var _ii = 0; _ii < imgs.length; _ii++) {
-          var _s = imgs[_ii].src; // URL absolue résolue via <base href>
-          if (_s && _s.indexOf('/pluginfile.php/') !== -1 && _s.indexOf('/webservice/') === -1) {
-            imgs[_ii].src = _s.replace('/pluginfile.php/', '/webservice/pluginfile.php/')
-                           + (_s.indexOf('?') === -1 ? '?' : '&') + 'token=' + encodeURIComponent(_tok);
-          }
+          var _patched = _addToken(imgs[_ii].src);
+          if (_patched) imgs[_ii].src = _patched;
+        }
+        // Deferred images: src removed by injectedJavaScriptBeforeContentLoaded to avoid
+        // broken-image flash. Restore now with token appended.
+        var deferred = document.querySelectorAll('img[data-defer-src]');
+        for (var _ddi = 0; _ddi < deferred.length; _ddi++) {
+          var _deferUrl = deferred[_ddi].dataset.deferSrc || '';
+          var _dPatched = _addToken(_deferUrl);
+          if (_dPatched) deferred[_ddi].src = _dPatched;
+          else if (_deferUrl) deferred[_ddi].src = _deferUrl;
+        }
+        // <picture><source srcset> (rare dans EPUB mais possible)
+        var srcs = document.querySelectorAll('picture source[srcset]');
+        for (var _si = 0; _si < srcs.length; _si++) {
+          var _ss = (srcs[_si].getAttribute('srcset') || '').trim();
+          var _firstUrl = _ss.split(/[\s,]/)[0];
+          var _spPatched = _addToken(_firstUrl);
+          if (_spPatched) srcs[_si].srcset = _spPatched;
         }
       })();
 
@@ -740,18 +779,21 @@ export default function EpubReaderScreen() {
   }, [currentSectionIndex, webviewReady]);
 
   // ── Alignement WhisperX en arrière-plan ──
-  // Déclenché à chaque changement de section (et une fois quand la WebView est prête).
-  // Aligne la section courante + les 2 suivantes pour que les timings soient prêts
-  // avant que l'utilisateur y arrive.
+  // Déclenché à chaque changement de section ET quand la WebView est prête.
   //
-  // Chaque alignement complété est poussé dans la WebView via __ipelanSetTimings(),
-  // qui met à jour fileToTimings en temps réel (lookup dynamique dans ontimeupdate).
+  // Logique Map :
+  //   • undefined  → jamais traité → lancer l'alignement
+  //   • [] (vide)  → sentinel "en cours" → ignorer (évite les appels dupliqués)
+  //   • [timings…] → déjà aligné → ré-injecter dans la nouvelle page WebView
+  //                  (nécessaire quand l'utilisateur revisite une section)
   useEffect(() => {
     if (!manifest || !webviewReady || !cmid) return;
 
     const bookIdStr = buildBookId(cmid);
+    const langCode  = manifest.language === 'wolof'   ? 'wo'  :
+                      manifest.language === 'pulaar'  ? 'ff'  :
+                      manifest.language === 'soninke' ? 'snk' : 'fr';
 
-    // Sections avec audio à aligner : courante + 2 suivantes (slice en premier pour respecter l'index courant)
     const toAlign = manifest.readingSections
       .slice(currentSectionIndex, currentSectionIndex + 3)
       .filter(s => s.audioFiles.length > 0 && (s.text || '').trim().length > 5);
@@ -764,27 +806,41 @@ export default function EpubReaderScreen() {
           if (cancelled) return;
 
           const filename = af.split('/').pop() || '';
-          if (!filename || alignedFilesRef.current.has(filename)) continue;
+          if (!filename) continue;
 
-          // Marquer comme "en cours" avant l'await pour éviter les appels dupliqués
-          alignedFilesRef.current.add(filename);
+          const cached = alignedTimingsRef.current.get(filename);
+
+          if (cached !== undefined) {
+            // Déjà en Map : ré-injecter si des timings sont disponibles
+            if (cached.length > 0) {
+              webviewRef.current?.injectJavaScript(
+                `window.__ipelanSetTimings && window.__ipelanSetTimings(${JSON.stringify(filename)}, ${JSON.stringify(cached)}); true;`
+              );
+            }
+            // Si [] (sentinel en cours) → une autre invocation s'en occupe déjà
+            continue;
+          }
+
+          // Marquer "en cours" avant l'await
+          alignedTimingsRef.current.set(filename, []);
 
           try {
             if (IS_DEV) console.log('[EpubReader] Aligning:', filename);
-            const words = await fetchAlignment(bookIdStr, af, section.text || '');
+            const words = await fetchAlignment(bookIdStr, af, section.text || '', langCode);
             if (cancelled) return;
 
             if (words.length > 0) {
               if (IS_DEV) console.log('[EpubReader] Aligned:', filename, words.length, 'mots');
+              alignedTimingsRef.current.set(filename, words);
               webviewRef.current?.injectJavaScript(
                 `window.__ipelanSetTimings && window.__ipelanSetTimings(${JSON.stringify(filename)}, ${JSON.stringify(words)}); true;`
               );
             } else {
-              // Échec → retirer pour permettre un retry
-              alignedFilesRef.current.delete(filename);
+              // Aucun timing → supprimer le sentinel pour permettre un retry
+              alignedTimingsRef.current.delete(filename);
             }
           } catch {
-            alignedFilesRef.current.delete(filename);
+            alignedTimingsRef.current.delete(filename);
           }
         }
       }
@@ -944,21 +1000,33 @@ export default function EpubReaderScreen() {
             injectedJavaScriptBeforeContentLoaded={`
               (function() {
                 // S'exécute AVANT que le HTML soit parsé.
-                // Intercepte chaque <audio> au moment de son ajout au DOM
-                // et bloque immédiatement son préchargement.
-                // Sans ça, le navigateur tente de charger les chemins relatifs du EPUB
-                // (qui résolvent à de mauvaises URLs) avant que notre JS puisse les corriger.
+                // Intercepte chaque <audio> et <img> au moment de leur ajout au DOM.
+                // • Audio  : bloque le préchargement (évite requêtes vers mauvaises URLs relatives)
+                // • Images : diffère le chargement des images pluginfile (pas encore de token)
+                //            → stocke l'URL résolue dans data-defer-src, vide src
+                //            → section 12 de injectedJavaScript restaure avec le token
                 new MutationObserver(function(mutations) {
                   for (var i = 0; i < mutations.length; i++) {
                     var nodes = mutations[i].addedNodes;
                     for (var j = 0; j < nodes.length; j++) {
                       var n = nodes[j];
                       if (!n || n.nodeType !== 1) continue;
-                      var list = n.tagName === 'AUDIO' ? [n]
-                               : (n.querySelectorAll ? Array.prototype.slice.call(n.querySelectorAll('audio')) : []);
-                      for (var k = 0; k < list.length; k++) {
-                        list[k].preload = 'none';
-                        list[k].removeAttribute('autoplay');
+                      // Audio
+                      var audios = n.tagName === 'AUDIO' ? [n]
+                                 : (n.querySelectorAll ? Array.prototype.slice.call(n.querySelectorAll('audio')) : []);
+                      for (var k = 0; k < audios.length; k++) {
+                        audios[k].preload = 'none';
+                        audios[k].removeAttribute('autoplay');
+                      }
+                      // Images pluginfile — reporter le chargement jusqu'à ce que le token soit ajouté
+                      var imgs = n.tagName === 'IMG' ? [n]
+                               : (n.querySelectorAll ? Array.prototype.slice.call(n.querySelectorAll('img')) : []);
+                      for (var m = 0; m < imgs.length; m++) {
+                        var resolvedSrc = imgs[m].src || '';
+                        if (resolvedSrc && resolvedSrc.indexOf('pluginfile.php/') !== -1 && resolvedSrc.indexOf('token=') === -1) {
+                          imgs[m].dataset.deferSrc = resolvedSrc;
+                          imgs[m].removeAttribute('src');
+                        }
                       }
                     }
                   }
@@ -989,7 +1057,7 @@ export default function EpubReaderScreen() {
           <View style={styles.webviewErrorOverlay}>
             <Ionicons name="alert-circle" size={36} color="#EF4444" />
             <Text style={styles.webviewErrorText}>{webviewError}</Text>
-            <Pressable onPress={() => { setWebviewError(null); setWebviewReady(false); }} style={styles.retryButton}>
+            <Pressable onPress={() => { setWebviewError(null); setWebviewReady(false); refetch(); }} style={styles.retryButton}>
               <Text style={styles.retryButtonText}>Réessayer</Text>
             </Pressable>
           </View>
