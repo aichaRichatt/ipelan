@@ -64,7 +64,7 @@ export interface MoodleModule {
 export type ModuleType = 'page' | 'resource' | 'quiz' | 'url' | 'label' | 'assign';
  
 export interface CompletionData {
-  state           : CompletionState;
+  completionstate : CompletionState;  // champ réel renvoyé par Moodle (était mal nommé "state")
   timecompleted   : number;
   overrideby      : number | null;
   valueused       : boolean;

@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useDispatch, useSelector } from 'react-redux';
-import { agreeToSitePolicy, enrolUserInCourse, getMoodleProfile, getMoodleSiteInfo, login as moodleLogin, updateUserProfile } from "../services/api/moodleAuth";
+import { agreeToSitePolicy, enrolUsersInCourses, getMoodleProfile, getMoodleSiteInfo, login as moodleLogin, updateUserProfile } from "../services/api/moodleAuth";
 import { loginFailure, loginStart, loginSuccess, logout } from '../services/redux/slices/authSlice';
 import { RootState } from '../services/redux/store';
 import { createTables, getDBConnection, saveUser } from '../services/storage/db-service';
@@ -98,17 +98,19 @@ export function useLogin() {
         });
       }
 
-       (async () => {
+      (async () => {
         try {
           const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
           const prefsStr = await AsyncStorage.getItem('@ipelan_preferences');
           if (prefsStr) {
             const { language, grade } = JSON.parse(prefsStr);
             if (language && grade && authToken) {
-              const { getFirstCourseFromLanguageAndGrade } = await import('../services/api/courseService');
-              const targetCourse = await getFirstCourseFromLanguageAndGrade(authToken, language, Number(grade));
-              if (targetCourse?.id) {
-                await enrolUserInCourse(moodleId, targetCourse.id);
+              const { getCoursesForLanguageAndGrade } = await import('../services/api/courseService');
+              const courses = await getCoursesForLanguageAndGrade(authToken, language, Number(grade));
+              const courseIds = courses.map((c: any) => c.id).filter(Boolean);
+              if (courseIds.length > 0) {
+                await enrolUsersInCourses(moodleId, courseIds);
+                if (IS_DEV) console.log(`[useLogin] Auto-enrolled in ${courseIds.length} courses for ${language} grade ${grade}`);
               }
             }
           }

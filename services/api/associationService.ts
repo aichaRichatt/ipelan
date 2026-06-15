@@ -1,6 +1,8 @@
 import { getCourseModules } from './moduleResolver';
 import { moodleFetch } from './moodleClient';
 
+const IS_DEV = process.env.NODE_ENV === 'development';
+
 export interface WordPair {
   id: number;
   concept: string;
@@ -29,7 +31,7 @@ export async function getAssociationPairs(
       });
 
       if (result?.exception) {
-        console.warn('[associationService] get_entries error:', result.message);
+        if (IS_DEV) console.warn('[associationService] get_entries error:', result.message);
         return [];
       }
 
@@ -42,7 +44,7 @@ export async function getAssociationPairs(
 
     const modules = await getCourseModules(courseId, token);
 
-     console.log('[associationService] All modules:', modules.map(m => ({
+    if (IS_DEV) console.log('[associationService] All modules:', modules.map(m => ({
       id: m.id,
       name: m.name,
       modname: m.modname
@@ -51,12 +53,12 @@ export async function getAssociationPairs(
     const glossary = modules.find(m => m.modname === 'glossary');
 
     if (!glossary) {
-      console.warn('[associationService] No glossary found in course:', courseId);
-      console.warn('[associationService] Available modnames:', [...new Set(modules.map(m => m.modname))]);
+      if (IS_DEV) console.warn('[associationService] No glossary found in course:', courseId);
+      if (IS_DEV) console.warn('[associationService] Available modnames:', [...new Set(modules.map(m => m.modname))]);
       return [];
     }
 
-    console.log('[associationService] Found glossary:', {
+    if (IS_DEV) console.log('[associationService] Found glossary:', {
       id: glossary.id,
       name: glossary.name,
       instance: glossary.instance
@@ -73,7 +75,7 @@ export async function getAssociationPairs(
     });
 
     if (result?.exception) {
-      console.warn('[associationService] get_entries error:', result.message);
+      if (IS_DEV) console.warn('[associationService] get_entries error:', result.message);
       return [];
     }
 
@@ -83,7 +85,7 @@ export async function getAssociationPairs(
       definition: stripHtml(e.definition || ''),
     }));
   } catch (err: any) {
-    console.warn('[associationService] Exception:', err.message);
+    if (IS_DEV) console.warn('[associationService] Exception:', err.message);
     return [];
   }
 }

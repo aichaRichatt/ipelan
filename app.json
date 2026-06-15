@@ -16,8 +16,12 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "UIBackgroundModes": ["fetch"]
-      }
+        "UIBackgroundModes": [
+          "fetch"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.richatt.ipelan"
     },
     "android": {
       "adaptiveIcon": {
@@ -28,7 +32,11 @@
       },
       "edgeToEdgeEnabled": false,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.ipelan_app"
+      "package": "com.anonymous.ipelan_app",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "plugins": [
       "expo-router",
@@ -47,6 +55,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ce0c553e-5ab0-45a3-ad25-ded3fb64c50a"
+      }
     }
   }
 }

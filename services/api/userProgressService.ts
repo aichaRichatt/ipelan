@@ -1,6 +1,8 @@
 import { getDBConnection } from '../storage/db-service';
 import { moodleFetch } from './moodleClient';
 
+const IS_DEV = process.env.NODE_ENV === 'development';
+
 export async function initStreakTable(): Promise<void> {
   const db = await getDBConnection();
   await db.execAsync(`
@@ -38,7 +40,7 @@ export async function updateStreak(userId: number): Promise<number> {
 
     return updated.currentStreak;
   } catch (err) {
-    console.warn('[userProgressService] updateStreak error:', err);
+    if (IS_DEV) console.warn('[userProgressService] updateStreak error:', err);
     return 1;
   }
 }
@@ -51,7 +53,7 @@ export async function setXP(userId: number, xp: number): Promise<void> {
       [Math.max(0, xp), userId]
     );
   } catch (err) {
-    console.warn('[userProgressService] setXP error:', err);
+    if (IS_DEV) console.warn('[userProgressService] setXP error:', err);
   }
 }
 
@@ -65,7 +67,7 @@ export async function setStreak(userId: number, streak: number, best?: number): 
       [Math.max(0, streak), localDate, userId]
     );
   } catch (err) {
-    console.warn('[userProgressService] setStreak error:', err);
+    if (IS_DEV) console.warn('[userProgressService] setStreak error:', err);
   }
 }
 
@@ -77,7 +79,7 @@ export async function setCoins(userId: number, coins: number): Promise<void> {
       [Math.max(0, coins), userId]
     );
   } catch (err) {
-    console.warn('[userProgressService] setCoins error:', err);
+    if (IS_DEV) console.warn('[userProgressService] setCoins error:', err);
   }
 }
 
@@ -89,7 +91,7 @@ export async function setLives(userId: number, lives: number): Promise<void> {
       [Math.max(0, Math.min(6, lives)), userId]
     );
   } catch (err) {
-    console.warn('[userProgressService] setLives error:', err);
+    if (IS_DEV) console.warn('[userProgressService] setLives error:', err);
   }
 }
 
@@ -105,7 +107,7 @@ export async function setUserGamificationStats(
   const today = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
   await db.runAsync(
     `UPDATE users SET ipelan_xp = ?, coins = ?, lives = ?, streak = ?, last_activity = ? WHERE id = ?`,
-    [Math.max(0, xp), Math.max(0, coins), Math.max(0, Math.min(6, lives)), Math.max(1, streak), today, userId]
+    [Math.max(0, xp), Math.max(0, coins), Math.max(0, Math.min(6, lives)), Math.max(0, streak), today, userId]
   );
 }
 
@@ -125,7 +127,7 @@ export async function addXP(userId: number, xpToAdd: number): Promise<number> {
     const row = await db.getFirstAsync<{ xp: number }>('SELECT ipelan_xp as xp FROM users WHERE id = ?', [userId]);
     return row?.xp ?? xpToAdd;
   } catch (err) {
-    console.warn('[userProgressService] addXP error:', err);
+    if (IS_DEV) console.warn('[userProgressService] addXP error:', err);
     return xpToAdd;
   }
 }
@@ -146,7 +148,7 @@ export async function addCoins(userId: number, coinsToAdd: number): Promise<numb
     const row = await db.getFirstAsync<{ coins: number }>('SELECT coins FROM users WHERE id = ?', [userId]);
     return row?.coins ?? coinsToAdd;
   } catch (err) {
-    console.warn('[userProgressService] addCoins error:', err);
+    if (IS_DEV) console.warn('[userProgressService] addCoins error:', err);
     return coinsToAdd;
   }
 }
@@ -168,7 +170,7 @@ export async function checkStreakOnForeground(userId: number): Promise<number> {
 
     return newStreak;
   } catch (err) {
-    console.warn('[userProgressService] checkStreakOnForeground error:', err);
+    if (IS_DEV) console.warn('[userProgressService] checkStreakOnForeground error:', err);
     return 0;
   }
 }
@@ -200,7 +202,7 @@ export async function getUserProgress(userId: number): Promise<{
 
     return row ?? null;
   } catch (err) {
-    console.warn('[userProgressService] getUserProgress error:', err);
+    if (IS_DEV) console.warn('[userProgressService] getUserProgress error:', err);
     return null;
   }
 }
@@ -222,7 +224,7 @@ export async function submitGradeToMoodle(params: {
   const passed = percentage >= 60;
 
   if (!token || token.length < 10) {
-    console.warn('[Grade] Missing token, cannot submit completion to Moodle');
+    if (IS_DEV) console.warn('[Grade] Missing token, cannot submit completion to Moodle');
     return false;
   }
 
@@ -235,23 +237,23 @@ export async function submitGradeToMoodle(params: {
       completed: passed ? 1 : 0,
     });
 
-    console.log('[Grade] Completion marked for module:', moduleId, 'passed:', passed);
+    if (IS_DEV) console.log('[Grade] Completion marked for module:', moduleId, 'passed:', passed);
     return true;
   } catch (err: any) {
     const errCode = err?.errorcode || '';
     const errMsg = err?.message || String(err);
 
     if (errCode === 'invalidparameter' || errMsg.includes('Valeur incorrecte')) {
-      console.warn('[Grade] Completion not enabled on cmid:', moduleId);
+      if (IS_DEV) console.warn('[Grade] Completion not enabled on cmid:', moduleId);
       return false;
     }
 
     if (errCode === 'invalidtoken' || errMsg.includes('invalid token')) {
-      console.error('[Grade] Invalid token for cmid:', moduleId);
+      if (IS_DEV) console.error('[Grade] Invalid token for cmid:', moduleId);
       return false;
     }
 
-    console.warn('[Grade] Completion update failed:', errCode || errMsg);
+    if (IS_DEV) console.warn('[Grade] Completion update failed:', errCode || errMsg);
     return false;
   }
 }
@@ -282,7 +284,7 @@ export async function addPendingSync(
     );
     return true;
   } catch (err: any) {
-    console.warn('[pending_sync] Failed to add:', err.message);
+    if (IS_DEV) console.warn('[pending_sync] Failed to add:', err.message);
     return false;
   }
 }
@@ -292,7 +294,7 @@ export async function getPendingSync(): Promise<PendingSyncRecord[]> {
     const db = await getDBConnection();
     return await db.getAllAsync('SELECT * FROM pending_sync WHERE status = ? ORDER BY created_at ASC', ['pending']) as PendingSyncRecord[];
   } catch (err: any) {
-    console.warn('[pending_sync] Failed to get:', err.message);
+    if (IS_DEV) console.warn('[pending_sync] Failed to get:', err.message);
     return [];
   }
 }
@@ -316,7 +318,7 @@ export async function updatePendingSync(
       );
     }
   } catch (err: any) {
-    console.warn('[pending_sync] Failed to update:', err.message);
+    if (IS_DEV) console.warn('[pending_sync] Failed to update:', err.message);
   }
 }
 
@@ -325,6 +327,6 @@ export async function deletePendingSync(id: number): Promise<void> {
     const db = await getDBConnection();
     await db.runAsync('DELETE FROM pending_sync WHERE id = ?', [id]);
   } catch (err: any) {
-    console.warn('[pending_sync] Failed to delete:', err.message);
+    if (IS_DEV) console.warn('[pending_sync] Failed to delete:', err.message);
   }
 }

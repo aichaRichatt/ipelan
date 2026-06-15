@@ -16,39 +16,6 @@ export interface ActivityScoreData {
   syncedAt?: string;
 }
 
-export const saveActivityProgress = async (
-  progress: ActivityProgress
-): Promise<void> => {
-  try {
-    const db = await getDBConnection();
-    await db.runAsync(
-      `INSERT INTO activity_progress (module_id, course_id, type, best_score, total_score, attempts_count, is_completed, last_attempt, xp_earned)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(module_id, course_id) DO UPDATE SET
-         best_score = MAX(excluded.best_score, best_score),
-         total_score = excluded.total_score,
-         attempts_count = attempts_count + 1,
-         is_completed = excluded.is_completed,
-         last_attempt = excluded.last_attempt,
-         xp_earned = MAX(excluded.xp_earned, xp_earned)`,
-      [
-        progress.moduleId,
-        progress.courseId,
-        progress.type,
-        progress.bestScore,
-        progress.totalScore,
-        1,
-        progress.isCompleted ? 1 : 0,
-        progress.lastAttempt,
-        progress.xpEarned,
-      ]
-    );
-  } catch (error) {
-    console.error('Failed to save activity progress:', error);
-    throw error;
-  }
-};
-
 export const saveActivityScore = async (
   moduleId: number,
   courseId: number,

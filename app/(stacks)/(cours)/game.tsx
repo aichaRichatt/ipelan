@@ -1,4 +1,5 @@
 import { useActivityContent } from "@/hooks/useActivityContent";
+import { moodleCall } from "@/services/api/moodleClient";
 import { RootState } from "@/services/redux/store";
 import { shuffle } from "@/utils/shuffle";
 import { calculateXP } from "@/utils/xpCalculator";
@@ -132,16 +133,7 @@ export default function GameScreen() {
   const handleContinue = async () => {
     if (token && wordOrderData?.id) {
       try {
-        await fetch(`${process.env.EXPO_PUBLIC_MOODLE_API_URL}/webservice/rest/server.php`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            wstoken: token,
-            wsfunction: 'mod_lesson_finish_attempt',
-            lessonid: String(wordOrderData.id),
-            moodlewsrestformat: 'json',
-          }).toString(),
-        });
+        await moodleCall('mod_lesson_finish_attempt', { lessonid: String(wordOrderData.id) }, token);
       } catch {}
     }
     const iid = params.instanceId || params.moduleId || '0';

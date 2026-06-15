@@ -45,7 +45,7 @@ async function processItem(
     const { _courseId, ...params } = raw;
     await moodleCall(item.wsfunction, params, token);
     await removeFromQueue(item.id);
-    console.log('[QueueProcessor] ✅ Traité:', item.wsfunction);
+    if (IS_DEV) console.log('[QueueProcessor] ✅ Traité:', item.wsfunction);
 
     // Après une complétion confirmée par Moodle, marquer l'activité comme synchronisée
     if (item.type === 'completion' && params.cmid && courseId > 0) {
@@ -56,7 +56,7 @@ async function processItem(
   } catch (e: any) {
     const errMsg = e.message ?? 'Erreur inconnue';
     await incrementRetry(item.id, errMsg);
-    console.warn('[QueueProcessor] ❌ Échec retry', item.retries + 1, ':', errMsg);
+    if (IS_DEV) console.warn('[QueueProcessor] ❌ Échec retry', item.retries + 1, ':', errMsg);
     return false;
   }
 }
@@ -70,13 +70,13 @@ export async function processQueue(): Promise<{
 }> {
   const token = await getToken();
   if (!token) {
-    console.warn('[QueueProcessor] Pas de token — queue ignorée');
+    if (IS_DEV) console.warn('[QueueProcessor] Pas de token — queue ignorée');
     return { processed: 0, failed: 0, remaining: 0 };
   }
 
   const online = await isOnline();
   if (!online) {
-    console.info('[QueueProcessor] Hors ligne — queue reportée');
+    if (IS_DEV) console.info('[QueueProcessor] Hors ligne — queue reportée');
     const remaining = await getPendingCount();
     return { processed: 0, failed: 0, remaining };
   }
@@ -87,7 +87,7 @@ export async function processQueue(): Promise<{
 
   if (items.length === 0) return { processed: 0, failed: 0, remaining: 0 };
 
-  console.log('[QueueProcessor] Traitement de', items.length, 'items...');
+  if (IS_DEV) console.log('[QueueProcessor] Traitement de', items.length, 'items...');
 
   for (const item of items) {
     const ok = await processItem(item, token);
@@ -137,7 +137,7 @@ let wasOffline = false; // détecte la transition offline → online
 
 export function registerQueueProcessor(): void {
   // Traiter au démarrage
-  processQueue().catch(console.warn);
+  processQueue().catch(e => { if (IS_DEV) console.warn('[QueueProcessor] startup sync failed:', e); });
 
   // Traiter chaque fois que l'app revient au premier plan
   if (appStateSubscription) {
@@ -147,7 +147,7 @@ export function registerQueueProcessor(): void {
     'change',
     (state: AppStateStatus) => {
       if (state === 'active') {
-        processQueue().catch(console.warn);
+        processQueue().catch(e => { if (IS_DEV) console.warn('[QueueProcessor] foreground sync failed:', e); });
       }
     }
   );
@@ -159,13 +159,13 @@ export function registerQueueProcessor(): void {
   netInfoUnsubscribe = NetInfo.addEventListener((state: NetInfoState) => {
     const isConnected = state.isConnected ?? false;
     if (isConnected && wasOffline) {
-      console.log('[QueueProcessor] Réseau retrouvé — sync automatique');
-      processQueue().catch(console.warn);
+      if (IS_DEV) console.log('[QueueProcessor] Réseau retrouvé — sync automatique');
+      processQueue().catch(e => { if (IS_DEV) console.warn('[QueueProcessor] auto-sync failed:', e); });
     }
     wasOffline = !isConnected;
   });
 
-  console.log('[QueueProcessor] Enregistré (AppState + NetInfo)');
+  if (IS_DEV) console.log('[QueueProcessor] Enregistré (AppState + NetInfo)');
 }
 
 export function unregisterQueueProcessor(): void {

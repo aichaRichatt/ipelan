@@ -21,6 +21,7 @@ import { RootState } from "../../../services/redux/store";
 import { getAllScoresForCourse, saveActivityScore } from "../../../services/storage/activity-progress";
 import { saveCourseProgress } from "../../../services/storage/course-progress";
 import { checkInternetConnection, syncAfterActivity, syncCourseProgress } from "../../../services/sync/progressSync";
+import { downloadQuizForOffline, isQuizDownloaded } from "../../../services/quiz/quizOfflineService";
 import { getContentTypeColor, getContentTypeIcon, getContentTypeLabel, MappedContent } from "../../../utils/contentMapper";
 import { ActivityType, XP_CONFIG } from "../../../utils/xpCalculator";
 
@@ -248,7 +249,6 @@ export default function ModuleDetailScreen() {
   const [offlineCachedCmids, setOfflineCachedCmids] = useState<Set<number>>(new Set());
   const isDownloadingRef = useRef(false);
   const hasAutoDownloadedRef = useRef(false);
-
   // Reload progress from SQLite every time the screen gains focus (e.g. returning from result.tsx)
   useFocusEffect(
     useCallback(() => {
@@ -316,14 +316,14 @@ export default function ModuleDetailScreen() {
           return MODNAME_TO_ACTIVITY[modname] !== undefined;
         }).length || 0), 0) || 0;
         
-        console.log('[ModuleDetail] Total activities in course:', totalActivities);
-        
+        if (IS_DEV) console.log('[ModuleDetail] Total activities in course:', totalActivities);
+
         const isConnected = await checkInternetConnection();
         if (isConnected) {
-          console.log('[ModuleDetail] Online - syncing with Moodle in background...');
+          if (IS_DEV) console.log('[ModuleDetail] Online - syncing with Moodle in background...');
           syncCourseProgress(token, courseId, totalActivities, userId).then(syncResult => {
             if (syncResult.success) {
-              console.log('[ModuleDetail] Sync completed, reloading scores...');
+              if (IS_DEV) console.log('[ModuleDetail] Sync completed, reloading scores...');
               getAllScoresForCourse(courseId, userId).then(updatedScores => {
                 const updatedMap = new Map<number, ActivityWithProgress['progress']>();
                 updatedScores.forEach((scoreData, modId) => {
@@ -340,15 +340,15 @@ export default function ModuleDetailScreen() {
                   });
                 });
                 setProgressData(updatedMap);
-                console.log('[ModuleDetail] Updated scores after sync:', updatedScores.size);
+                if (IS_DEV) console.log('[ModuleDetail] Updated scores after sync:', updatedScores.size);
               });
             }
           });
         } else {
-          console.log('[ModuleDetail] Offline - skipping Moodle sync');
+          if (IS_DEV) console.log('[ModuleDetail] Offline - skipping Moodle sync');
         }
       } catch (err) {
-        console.warn('Failed to load progress:', err);
+        if (IS_DEV) console.warn('Failed to load progress:', err);
         setProgressError("Erreur lors du chargement de la progression");
       }
     };
@@ -539,7 +539,23 @@ export default function ModuleDetailScreen() {
       if (!online || isDownloadingRef.current) return;
       isDownloadingRef.current = true;
       try {
+        // Télécharger dictée, écoute, association, word-order
         await downloadCourseActivities(courseId, activeToken, downloadable);
+
+        // Télécharger les quiz non encore mis en cache
+        const quizList = downloadable.filter(d => d.type === 'quiz');
+        for (const quiz of quizList) {
+          try {
+            const cached = await isQuizDownloaded(quiz.cmid);
+            if (!cached) {
+              await downloadQuizForOffline(quiz.cmid, quiz.instanceId, courseId, activeToken);
+              if (IS_DEV) console.log(`[ModuleDetail] Quiz cmid ${quiz.cmid} mis en cache offline`);
+            }
+          } catch (e) {
+            if (IS_DEV) console.warn(`[ModuleDetail] Quiz cmid ${quiz.cmid} cache échoué:`, e);
+          }
+        }
+
         const cmids = downloadable.map(d => d.cmid);
         getOfflineCachedCmids(cmids).then(setOfflineCachedCmids).catch(() => {});
       } finally {
@@ -618,15 +634,17 @@ export default function ModuleDetailScreen() {
           router.push({ pathname: '/(stacks)/(cours)/game', params: baseParams } as any);
           break;
         default:
-          console.warn('[handleActivityPress] Unknown activity type:', activity.type);
+          if (IS_DEV) console.warn('[handleActivityPress] Unknown activity type:', activity.type);
       }
     });
   };
 
   // Must be before early returns to respect Rules of Hooks
-  const { allLessons, completedCount } = useMemo(() => {
+  const { allLessons, completedCount, completableCompleted, completableTotal } = useMemo(() => {
     const lessons: Lesson[] = [];
     let completed = 0;
+    let compCompleted = 0;
+    let compTotal = 0;
     for (const section of sections || []) {
       for (const mod of section.modules || []) {
         const content = getModuleContent(mod.id);
@@ -634,6 +652,16 @@ export default function ModuleDetailScreen() {
         const isLocked = section.status === 'locked';
         const progressInfo = progressData.get(mod.id);
         const isCompleted = progressInfo?.isCompleted === true || (mod.completiondata?.completionstate ?? 0) >= 1;
+
+        // Mirror getCompletableModules filter: only modules with completion tracking
+        const isCompletable = (mod.completion ?? 0) > 0
+          && mod.visible !== 0
+          && !['label', 'section'].includes(mod.modname ?? '')
+          && mod.instance && mod.instance !== 0;
+        if (isCompletable) {
+          compTotal++;
+          if (isCompleted) compCompleted++;
+        }
 
         let epubUrl: string | undefined;
         let pdfUrl: string | undefined;
@@ -669,17 +697,16 @@ export default function ModuleDetailScreen() {
         });
       }
     }
-    return { allLessons: lessons, completedCount: completed };
+    return { allLessons: lessons, completedCount: completed, completableCompleted: compCompleted, completableTotal: compTotal };
   }, [sections, progressData, getModuleContent]);
 
-  // Sync SQLite course_progress with the live section count so every screen shows the
-  // same percentage. Runs when sections first load and whenever completions change.
-  // The home page reads course_progress.total_activities — without this it stays stale
-  // when the teacher adds new modules to a course.
-  useEffect(() => {
-    if (!courseId || !userId || allLessons.length === 0) return;
-    saveCourseProgress(courseId, completedCount, allLessons.length, 0, 0, userId).catch(() => {});
-  }, [courseId, userId, allLessons.length, completedCount]);
+ useEffect(() => {
+    if (!courseId || !userId) return;
+    const total = completableTotal > 0 ? completableTotal : allLessons.length;
+    const saved = completableTotal > 0 ? completableCompleted : completedCount;
+    if (total === 0) return;
+    saveCourseProgress(courseId, saved, total, 0, 0, userId).catch(() => {});
+  }, [courseId, userId, completableCompleted, completableTotal, completedCount, allLessons.length]);
 
   if (isLoading) {
     return (
@@ -734,7 +761,9 @@ export default function ModuleDetailScreen() {
 
   const courseTitle = title || sections[0]?.title || "Cours";
   const courseDescription = sections[0]?.summary || "";
-  const progressPercent = Math.round((completedCount / Math.max(allLessons.length, 1)) * 100);
+  const progressPercent = completableTotal > 0
+    ? Math.min(100, Math.round((completableCompleted / completableTotal) * 100))
+    : Math.round((completedCount / Math.max(allLessons.length, 1)) * 100);
 
   const getLessonIcon = (type: ActivityType) => {
     const iconName = getContentTypeIcon(type);
@@ -860,10 +889,6 @@ export default function ModuleDetailScreen() {
     });
   };
 
-  const handleViewTimeline = () => {
-    router.push(`/(stacks)/(cours)/learning-path?courseId=${courseId}&courseTitle=${encodeURIComponent(courseTitle)}` as any);
-  };
-
   return (
     <SafeAreaView style={styles.flex1_bgFAF9F6} edges={['top']}>
       <View style={[styles.px5, styles.py4, styles.flexRow, styles.itemsCenter, styles.bgFAF9F6]}>
@@ -925,7 +950,10 @@ export default function ModuleDetailScreen() {
                 <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
               </View>
               <Text style={[styles.textWhite60, styles.textXs, styles.mt2]}>
-                {completedCount}/{allLessons.length} activités complétées
+                {completableTotal > 0
+                  ? `${completableCompleted}/${completableTotal} activités complétées`
+                  : `${completedCount}/${allLessons.length} activités complétées`
+                }
               </Text>
             </View>
 

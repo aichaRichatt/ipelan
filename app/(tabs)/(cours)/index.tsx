@@ -2,13 +2,14 @@ import { useUserStats } from "@/hooks/useUserStats";
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
 import ENV from "../../../constants/env";
 import { useLives } from "../../../hooks/useLives";
-import { getAllCoursesFromLanguageCategory, getCourseContents, getCoursesForLanguageAndGrade, getCoursesByCategoryFromEnrollments, getEnrolledCoursesByTimeline, getUserCourses } from "../../../services/api/courseService";
+import { filterByPreferences, getAllCoursesFromLanguageCategory, getCourseContents, getCoursesForLanguageAndGrade, getCoursesByCategoryFromEnrollments, getEnrolledCoursesByTimeline, getUserCourses, LANG_KEYWORDS } from "../../../services/api/courseService";
+// LANG_KEYWORDS used in Attempt 4 language fallback filter
 import { isMoodleOnline } from "../../../services/api/moodleClient";
 import { RootState } from "../../../services/redux/store";
 import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
@@ -49,50 +50,23 @@ const getIconForCourse = (name: string): { icon: string; color: string; bg: stri
   return { icon: "book", color: "#002366", bg: "#dbeafe" };
 };
 
-const getLevelFromCourse = (name: string): number => {
-  const lowerName = name.toLowerCase();
-  if (lowerName.includes('1') || lowerName.includes('fondamental')) return 1;
-  if (lowerName.includes('2') || lowerName.includes('inter')) return 2;
-  if (lowerName.includes('3') || lowerName.includes('avan')) return 3;
+const getLevelFromCourse = (course: any): number => {
+  // Priorité 1 : catégorie Moodle ("1ère année", "2 ème", etc.)
+  const cat = (course.coursecategory ?? course.categoryname ?? '').toLowerCase();
+  if (/1/.test(cat) || cat.includes('fond')) return 1;
+  if (/2/.test(cat)) return 2;
+  if (/3/.test(cat)) return 3;
+  if (/4/.test(cat)) return 4;
+  if (/5/.test(cat)) return 5;
+  if (/6/.test(cat)) return 6;
+  // Priorité 2 : nom du cours
+  const name = (course.fullname ?? '').toLowerCase();
+  if (/\b1\b|année 1|fondamental/.test(name)) return 1;
+  if (/\b2\b|intermédiaire/.test(name)) return 2;
+  if (/\b3\b|avancé/.test(name)) return 3;
   return 1;
 };
 
-// ── Filtre par langue et année sur les champs texte disponibles ──────────────
-const LANG_KEYWORDS: Record<string, string[]> = {
-  pulaar:  ['pulaar', 'pular'],
-  soninke: ['soninké', 'soninke'],
-  wolof:   ['wolof'],
-};
-// Noms exacts des catégories grade dans Moodle (screenshot admin confirmé)
-// "1ère année", "2 ème", "3 ème", "4 ème", "5 ème", "6 ème"
-const GRADE_KEYWORDS: Record<number, string[]> = {
-  1: ['1ère année', '1ere année', '1ère', '1ere', '1 ème', '1ème', '1eme'],
-  2: ['2 ème', '2 eme', '2ème', '2eme', '2 ère', '2ère', '2ere'],
-  3: ['3 ème', '3 eme', '3ème', '3eme', '3 ère', '3ère', '3ere'],
-  4: ['4 ème', '4 eme', '4ème', '4eme', '4 ère', '4ère', '4ere'],
-  5: ['5 ème', '5 eme', '5ème', '5eme', '5 ère', '5ère', '5ere'],
-  6: ['6 ème', '6 eme', '6ème', '6eme', '6 ère', '6ère', '6ere'],
-};
-
-function filterByPreferences(courses: any[], language: string, grade: number): any[] {
-  const langKeys = LANG_KEYWORDS[language.toLowerCase()] ?? [language.toLowerCase()];
-  const gradeKeys = GRADE_KEYWORDS[grade] ?? [];
-
-  return courses.filter(c => {
-    // Tous les champs texte disponibles dans la réponse Moodle
-    const text = [
-      c.coursecategory ?? '',
-      c.fullname ?? '',
-      c.shortname ?? '',
-      c.categoryname ?? '',
-      c.displayname ?? '',
-    ].join(' ').toLowerCase();
-
-    const hasLang  = langKeys.some(k  => text.includes(k.toLowerCase()));
-    const hasGrade = gradeKeys.length === 0 || gradeKeys.some(k => text.includes(k.toLowerCase()));
-    return hasLang && hasGrade;
-  });
-}
 
 export default function CoursScreen() {
   const router = useRouter();
@@ -104,8 +78,10 @@ export default function CoursScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [highlightCourses, setHighlightCourses] = useState(false);
+  const [fetchKey, setFetchKey] = useState(0);
   const PAGE_SIZE = 3;
   const [visibleCounts, setVisibleCounts] = useState<Record<number, number>>({ 1: PAGE_SIZE, 2: PAGE_SIZE, 3: PAGE_SIZE });
+  const prevPrefsRef = useRef<{ language: string; grade: number }>({ language: '', grade: 0 });
 
   const scrollViewRef = React.useRef<any>(null);
   const coursesYRef = React.useRef(0);
@@ -117,6 +93,17 @@ export default function CoursScreen() {
   useFocusEffect(
     useCallback(() => {
       refetchUserStats();
+
+      // Détecter un changement de langue/grade depuis les paramètres → relancer fetchCourses
+      AsyncStorage.getItem(PREFERENCES_KEY).then(raw => {
+        if (!raw) return;
+        const { language = '', grade = 0 } = JSON.parse(raw);
+        const prev = prevPrefsRef.current;
+        if (prev.language !== language || prev.grade !== grade) {
+          prevPrefsRef.current = { language, grade };
+          setFetchKey(k => k + 1);
+        }
+      }).catch(() => {});
 
       // Reload per-course progress from SQLite on every tab focus
       // This makes progress bar update immediately after viewing content in [courseId].tsx
@@ -169,14 +156,34 @@ export default function CoursScreen() {
         const prefsStr = await AsyncStorage.getItem(PREFERENCES_KEY).catch(() => null);
         const prefs: UserPreferences | null = prefsStr ? JSON.parse(prefsStr) : null;
         let fetchedCourses: any[] = [];
+        // true si les cours proviennent d'une fetch par catégorie Moodle
+        // → le grade est garanti par la structure, pas besoin du filtre texte strict
+        let fetchedViaCategory = false;
 
         const online = await isMoodleOnline();
         if (!online) {
           if (IS_DEV) console.log("[Cours] Offline — loading from cache");
+          // Niveau 1 : AsyncStorage (plus rapide)
           const cached = await AsyncStorage.getItem(COURSES_CACHE_KEY).catch(() => null);
           if (cached) {
             fetchedCourses = JSON.parse(cached);
-            if (IS_DEV) console.log("[Cours] Cache loaded:", fetchedCourses.length, "courses");
+            if (IS_DEV) console.log("[Cours] AsyncStorage cache:", fetchedCourses.length, "cours");
+          }
+          // Niveau 2 : SQLite (fallback si AsyncStorage vidé)
+          if (fetchedCourses.length === 0) {
+            try {
+              const { getDBConnection, getCourses } = await import('../../../services/storage/db-service');
+              const db = await getDBConnection();
+              const sqliteCourses = await getCourses(db);
+              if (sqliteCourses.length > 0) {
+                fetchedCourses = sqliteCourses.map(c => ({
+                  id: c.id, shortname: c.shortname, fullname: c.fullname,
+                  displayname: c.displayname || c.fullname, visible: c.visible === 1,
+                  progress: 0, courseimage: '', coursecategory: '', viewurl: '', lessonsCount: 0,
+                }));
+                if (IS_DEV) console.log("[Cours] SQLite fallback:", fetchedCourses.length, "cours");
+              }
+            } catch {}
           }
           if (fetchedCourses.length === 0) {
             setError("Hors ligne — aucun cours en cache");
@@ -233,24 +240,24 @@ export default function CoursScreen() {
           if (langCourses.length > 0) {
             if (IS_DEV) console.log("[Cours] Attempt 1 found", langCourses.length, "courses");
             fetchedCourses = langCourses;
+            fetchedViaCategory = true;
           }
         }
 
         // ── Tentative 2 : catégories grade déduites des cours inscrits ────────
         // N'utilise PAS core_course_get_categories — fiable avec ipelan_full
-        // Logique : cours inscrit → category ID (grade) → tous les cours du grade
+        // Logique : cours inscrit → category ID (grade) → TOUS les cours du grade
+        // ⚠️ Ne pas filtrer par langue ici : les IDs de catégorie proviennent des cours
+        // inscrits de l'utilisateur → la langue est garantie par la structure Moodle.
+        // Un filtre texte exclurait des cours dont le nom ne contient pas le mot de
+        // langue (ex : "Salutations" dans Pulaar > 1ère année).
         if (fetchedCourses.length === 0 && userId) {
           if (IS_DEV) console.log("[Cours] Attempt 2 – courses from enrolled category IDs");
           const catCourses = await getCoursesByCategoryFromEnrollments(token, userId);
           if (catCourses.length > 0) {
-            // Filtrer par langue si possible
-            if (prefs) {
-              const filtered = filterByPreferences(catCourses, prefs.language, prefs.grade);
-              fetchedCourses = filtered.length > 0 ? filtered : catCourses;
-              if (IS_DEV) console.log("[Cours] Attempt 2 filtered", filtered.length, "/", catCourses.length, "courses");
-            } else {
-              fetchedCourses = catCourses;
-            }
+            fetchedCourses = catCourses;
+            fetchedViaCategory = true;
+            if (IS_DEV) console.log("[Cours] Attempt 2 found", catCourses.length, "courses");
           }
         }
 
@@ -295,6 +302,14 @@ export default function CoursScreen() {
           } else {
             fetchedCourses = allEnrolled;
           }
+        }
+
+        // Filtre final strict : UNIQUEMENT pour les résultats non-catégorie (tentatives 3 & 4).
+        // Pour les résultats catégorie (1 & 2), la structure Moodle garantit déjà le grade —
+        // appliquer ce filtre exclurait des cours dont le nom ne contient pas le mot de grade.
+        if (!fetchedViaCategory && prefs && fetchedCourses.length > 0) {
+          const strictFiltered = filterByPreferences(fetchedCourses, prefs.language, prefs.grade);
+          if (strictFiltered.length > 0) fetchedCourses = strictFiltered;
         }
 
         if (IS_DEV) console.log("[Cours] Total courses to display:", fetchedCourses.length);
@@ -372,14 +387,14 @@ export default function CoursScreen() {
         AsyncStorage.setItem(COURSES_CACHE_KEY, JSON.stringify(enrichedCache)).catch(() => {});
 
       } catch (err: any) {
-        console.error("Failed to fetch courses:", err);
+        if (IS_DEV) console.error("Failed to fetch courses:", err);
         setError(err.message);
         setIsLoading(false);
       }
     };
 
     fetchCourses();
-  }, [token]);
+  }, [token, fetchKey]);
 
   useEffect(() => {
     const reloadProgress = async () => {
@@ -399,7 +414,7 @@ export default function CoursScreen() {
           dbProgress: progressMap[c.id] || c.dbProgress,
         })));
       } catch (err) {
-        console.warn('[Cours] Failed to reload progress:', err);
+        if (IS_DEV) console.warn('[Cours] Failed to reload progress:', err);
       }
     };
 
@@ -407,7 +422,7 @@ export default function CoursScreen() {
   }, [stats.xp, token]);
 
   const groupedCourses = courses.reduce((acc, course) => {
-    const level = getLevelFromCourse(course.fullname);
+    const level = getLevelFromCourse(course);
     if (!acc[level]) acc[level] = [];
     acc[level].push(course);
     return acc;
@@ -470,9 +485,12 @@ export default function CoursScreen() {
 
   const renderLevelSection = (level: number, levelCourses: CourseData[]) => {
     const levelTitles: Record<number, { title: string; subtitle: string }> = {
-      1: { title: "Niveau 1", subtitle: "Fondamental" },
-      2: { title: "Niveau 2", subtitle: "Intermédiaire" },
-      3: { title: "Niveau 3", subtitle: "Avancé" },
+      1: { title: "1ère Année", subtitle: "Fondamental" },
+      2: { title: "2ème Année", subtitle: "Élémentaire" },
+      3: { title: "3ème Année", subtitle: "Intermédiaire" },
+      4: { title: "4ème Année", subtitle: "Intermédiaire+" },
+      5: { title: "5ème Année", subtitle: "Avancé" },
+      6: { title: "6ème Année", subtitle: "Avancé+" },
     };
 
     const completedModules = levelCourses.filter(c => c.progress === 100).length;
@@ -595,7 +613,7 @@ export default function CoursScreen() {
               <Text style={styles.errorText}>{error}</Text>
             </View>
           ) : courses.length > 0 ? (
-            [1, 2, 3].map(level =>
+            [1, 2, 3, 4, 5, 6].map(level =>
               groupedCourses[level]?.length > 0
                 ? renderLevelSection(level, groupedCourses[level])
                 : null

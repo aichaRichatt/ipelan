@@ -1,5 +1,6 @@
-
 import { getDBConnection } from './db-service';
+
+const IS_DEV = process.env.NODE_ENV === 'development';
 
 export interface SyncQueueItem {
   id: number;
@@ -27,9 +28,9 @@ export async function addToSyncQueue(
        VALUES (?, ?, ?, ?)`,
       [type, wsfunction, JSON.stringify(payload), userId ?? null]
     );
-    console.log('[SyncQueue] Ajouté:', type, wsfunction);
+    if (IS_DEV) console.log('[SyncQueue] Ajouté:', type, wsfunction);
   } catch (error) {
-    console.error('[SyncQueue] Erreur ajout:', error);
+    if (IS_DEV) console.error('[SyncQueue] Erreur ajout:', error);
   }
 }
 
@@ -47,7 +48,7 @@ export async function getPendingItems(maxRetries = 3): Promise<SyncQueueItem[]> 
     );
     return rows;
   } catch (error) {
-    console.error('[SyncQueue] Erreur lecture:', error);
+    if (IS_DEV) console.error('[SyncQueue] Erreur lecture:', error);
     return [];
   }
 }
@@ -59,7 +60,7 @@ export async function removeFromQueue(id: number): Promise<void> {
     const db = await getDBConnection();
     await db.runAsync('DELETE FROM sync_queue WHERE id = ?', [id]);
   } catch (error) {
-    console.error('[SyncQueue] Erreur suppression:', error);
+    if (IS_DEV) console.error('[SyncQueue] Erreur suppression:', error);
   }
 }
 
@@ -73,7 +74,7 @@ export async function incrementRetry(id: number, error: string): Promise<void> {
       [error, id]
     );
   } catch (error) {
-    console.error('[SyncQueue] Erreur retry increment:', error);
+    if (IS_DEV) console.error('[SyncQueue] Erreur retry increment:', error);
   }
 }
 
@@ -108,7 +109,7 @@ export async function persistGamificationJob(
       [userId, jobType, JSON.stringify(jobData)]
     );
   } catch (error) {
-    console.warn('[GamificationQueue] Erreur persist:', error);
+    if (IS_DEV) console.warn('[GamificationQueue] Erreur persist:', error);
   }
 }
 
@@ -123,7 +124,7 @@ export async function removePersistedGamificationJob(
       [userId, jobType]
     );
   } catch (error) {
-    console.warn('[GamificationQueue] Erreur remove:', error);
+    if (IS_DEV) console.warn('[GamificationQueue] Erreur remove:', error);
   }
 }
 

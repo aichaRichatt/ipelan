@@ -245,7 +245,7 @@ function extractMatchingData(html: string): MatchingData | undefined {
 }
 
  
-function parseQuestionHtml(
+export function parseQuestionHtml(
   slot: number,
   fallbackSequencecheck: number,
   html: string,
@@ -345,8 +345,7 @@ export async function getOrCreateAttempt(
       });
     }
 
-    // Reprendre toute tentative en cours — abandoned exclu (Moodle rejette les saves dessus)
-    const activeStates = ['inprogress', 'overdue'];
+     const activeStates = ['inprogress', 'overdue'];
     const existingAttempt = attempts.find(a => activeStates.includes(a.state));
     if (existingAttempt?.id) {
       if (IS_DEV) console.log('[quizService] Resuming attempt:', existingAttempt.id, 'state:', existingAttempt.state);

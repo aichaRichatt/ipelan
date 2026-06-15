@@ -416,7 +416,7 @@ export const triggerGamificationSync = async (userId: number, userToken?: string
 
     return success;
   } catch (error) {
-    console.error("[Gamification] Trigger sync failed:", error);
+    if (IS_DEV) console.error("[Gamification] Trigger sync failed:", error);
     return false;
   }
 };

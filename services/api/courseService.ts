@@ -1,6 +1,43 @@
 import { categorizeMoodleError, logActivityFetch } from "../utils/moodleErrorHandler";
 import { moodleFetch } from "./moodleClient";
 
+const IS_DEV = process.env.NODE_ENV === 'development';
+
+// ── Filtres par langue et grade ───────────────────────────────────────────────
+// Partagés entre la page Cours et la page d'Accueil
+
+export const LANG_KEYWORDS: Record<string, string[]> = {
+  pulaar:  ['pulaar', 'pular'],
+  soninke: ['soninké', 'soninke'],
+  wolof:   ['wolof'],
+};
+
+export const GRADE_KEYWORDS: Record<number, string[]> = {
+  1: ['1ère année', '1ere année', '1ère', '1ere', '1 ème', '1ème', '1eme'],
+  2: ['2 ème', '2 eme', '2ème', '2eme', '2 ère', '2ère', '2ere'],
+  3: ['3 ème', '3 eme', '3ème', '3eme', '3 ère', '3ère', '3ere'],
+  4: ['4 ème', '4 eme', '4ème', '4eme', '4 ère', '4ère', '4ere'],
+  5: ['5 ème', '5 eme', '5ème', '5eme', '5 ère', '5ère', '5ere'],
+  6: ['6 ème', '6 eme', '6ème', '6eme', '6 ère', '6ère', '6ere'],
+};
+
+export function filterByPreferences(courses: any[], language: string, grade: number): any[] {
+  const langKeys = LANG_KEYWORDS[language.toLowerCase()] ?? [language.toLowerCase()];
+  const gradeKeys = GRADE_KEYWORDS[grade] ?? [];
+  return courses.filter(c => {
+    const text = [
+      c.coursecategory ?? '',
+      c.fullname ?? '',
+      c.shortname ?? '',
+      c.categoryname ?? '',
+      c.displayname ?? '',
+    ].join(' ').toLowerCase();
+    const hasLang  = langKeys.some(k => text.includes(k.toLowerCase()));
+    const hasGrade = gradeKeys.length === 0 || gradeKeys.some(k => text.includes(k.toLowerCase()));
+    return hasLang && hasGrade;
+  });
+}
+
 export interface Category {
   id: number;
   name: string;
@@ -57,7 +94,7 @@ export async function getCategories(token: string, parentId?: number): Promise<C
     }
     return categories;
   } catch (error) {
-    console.warn("[courseService] getCategories failed:", error);
+    if (IS_DEV) console.warn("[courseService] getCategories failed:", error);
     return [];
   }
 }
@@ -73,7 +110,7 @@ export async function getEnrolledCoursesByTimeline(token: string, forUserId?: nu
 
   // Removed admin token fallback for usernotfullysetup
 
-  console.log("[courseService] API returned:", result ? "data" : "nothing", typeof result);
+  if (IS_DEV) console.log("[courseService] API returned:", result ? "data" : "nothing", typeof result);
   return result;
 }
 
@@ -137,10 +174,16 @@ export async function getCoursesByCategory(token: string, categoryId: number, li
 
 export async function getCoursesForLanguageAndGrade(token: string, language: string, grade: number): Promise<any[]> {
   const IS_DEV = process.env.NODE_ENV === "development";
+  const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN;
 
   try {
-    // Get ALL categories recursively (including subcategories)
-    const categories = await getCategories(token);
+    // core_course_get_categories may not be in ipelan_full service — try user token first,
+    // fall back to admin token (which has broader API access)
+    let categories = await getCategories(token);
+    if (categories.length === 0 && ADMIN_TOKEN) {
+      if (IS_DEV) console.log("[courseService] getCoursesForLanguageAndGrade: retrying categories with admin token");
+      categories = await getCategories(ADMIN_TOKEN);
+    }
 
     if (IS_DEV) {
       console.log("[courseService] All categories:", categories.map(c => ({ id: c.id, name: c.name, parent: c.parent })));
@@ -179,7 +222,7 @@ export async function getCoursesForLanguageAndGrade(token: string, language: str
 
     if (!langCategory) {
       if (IS_DEV) console.warn("[courseService] Language category not found. Looking for:", possibleLangNames);
-      console.log("[courseService] Available categories:", categories.map(c => c.name).join(", "));
+      if (IS_DEV) console.log("[courseService] Available categories:", categories.map(c => c.name).join(", "));
       return [];
     }
 
@@ -209,9 +252,12 @@ export async function getCoursesForLanguageAndGrade(token: string, language: str
 
     if (IS_DEV) console.log("[courseService] Found grade categories:", gradeCategories.map(c => c.name));
 
+    // Use admin token for course lookup — new unenrolled users may not see courses
+    // with their own token if courses are not visible to guests/authenticated users
+    const lookupToken = (ADMIN_TOKEN || token) as string;
     const courses: any[] = [];
     for (const gradeCat of gradeCategories) {
-      const gradeCourses = await getCoursesByCategory(token, gradeCat.id);
+      const gradeCourses = await getCoursesByCategory(lookupToken, gradeCat.id);
       courses.push(...gradeCourses);
     }
 
@@ -219,7 +265,7 @@ export async function getCoursesForLanguageAndGrade(token: string, language: str
 
     return courses;
   } catch (error) {
-    console.warn("[courseService] getCoursesForLanguageAndGrade failed:", error);
+    if (IS_DEV) console.warn("[courseService] getCoursesForLanguageAndGrade failed:", error);
     return [];
   }
 }
@@ -302,13 +348,13 @@ export async function getAllCourses(token: string): Promise<any[]> {
     }
 
     if (result?.exception) {
-      console.warn("[courseService] getAllCourses exception:", result.message);
+      if (IS_DEV) console.warn("[courseService] getAllCourses exception:", result.message);
       return [];
     }
 
     return Array.isArray(result) ? result : [];
   } catch (error) {
-    console.error("[courseService] getAllCourses error:", error);
+    if (IS_DEV) console.error("[courseService] getAllCourses error:", error);
     return [];
   }
 }
@@ -323,7 +369,8 @@ export async function getCourseContents(token: string, courseId: number): Promis
       moodlewsrestformat: "json",
       courseid: courseId,
       options: [
-        { name: "excludemodules", value: 0 }
+        { name: "excludemodules", value: 0 },
+        { name: "includestealthmodules", value: 1 }
       ]
     };
 
@@ -443,7 +490,7 @@ export function parseSections(data: any[], completion: any): any[] {
 }
 
 export async function getCourseLevel(token: string, courseId: number): Promise<string> {
-  console.log("[courseService] getCourseLevel called for course:", courseId);
+  if (IS_DEV) console.log("[courseService] getCourseLevel called for course:", courseId);
 
   try {
     const courses = await getUserCourses(token);
@@ -455,7 +502,7 @@ export async function getCourseLevel(token: string, courseId: number): Promise<s
 
     return "1";
   } catch (error) {
-    console.error("[courseService] getCourseLevel error:", error);
+    if (IS_DEV) console.error("[courseService] getCourseLevel error:", error);
     return "1";
   }
 }
@@ -497,7 +544,7 @@ export async function getAllCoursesFromLanguageCategory(token: string, rootCateg
       const categoryNames = categories
         .filter(c => allCategoryIds.includes(c.id))
         .map(c => ({ id: c.id, name: c.name, parent: c.parent }));
-      console.log("[courseService] All categories to search:", categoryNames);
+      if (IS_DEV) console.log("[courseService] All categories to search:", categoryNames);
     }
 
     const allCourses: any[] = [];

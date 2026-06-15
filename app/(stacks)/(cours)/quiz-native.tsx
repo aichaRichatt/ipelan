@@ -18,6 +18,9 @@ import React, { useRef } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
+import { parseQuestionHtml, ParsedQuestion } from '@/services/api/quizService';
+import { getQuizOffline, saveOfflineQuizAttempt } from '@/services/quiz/quizOfflineService';
+import { saveActivityScore } from '@/services/storage/activity-progress';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
 
@@ -262,12 +265,47 @@ export default function QuizNativePage() {
 
   const [textAnswer, setTextAnswer] = React.useState('');
 
-  const currentQuestion = questions[currentIndex];
+  // ─── Mode offline ───────────────────────────────────────────────────────────
+  const [offlineMode,       setOfflineMode]       = React.useState(false);
+  const [offlineQuestions,  setOfflineQuestions]  = React.useState<ParsedQuestion[]>([]);
+  const [offlineAttemptId,  setOfflineAttemptId]  = React.useState<number | null>(null);
+  const [offlineIdx,        setOfflineIdx]        = React.useState(0);
+  const [offlineAnswers,    setOfflineAnswers]     = React.useState<Record<string, string>>({});
+  const [offlineComplete,   setOfflineComplete]   = React.useState(false);
+  const [offlineScore,      setOfflineScore]      = React.useState<{ correct: number; total: number } | null>(null);
+  const userId = useSelector((s: RootState) => s.auth.user?.id ?? 0);
+
+  // Quand useQuiz échoue → essayer le cache
+  React.useEffect(() => {
+    if (!error) return;
+    (async () => {
+      try {
+        const cached = await getQuizOffline(cmid);
+        if (cached?.questions?.length) {
+          const parsed = cached.questions.map(q =>
+            parseQuestionHtml(q.slot, q.sequencecheck, q.html)
+          );
+          setOfflineQuestions(parsed);
+          setOfflineAttemptId(cached.attemptId);
+          setOfflineMode(true);
+          if (IS_DEV) console.log(`[QuizNative] Fallback offline — ${parsed.length} questions depuis cache`);
+        }
+      } catch {}
+    })();
+  }, [error, cmid]);
+
+  // Données actives : online ou offline selon le mode
+  const activeQuestions    = offlineMode ? offlineQuestions  : questions;
+  const activeCurrentIndex = offlineMode ? offlineIdx        : currentIndex;
+  const activeAnswers      = offlineMode ? offlineAnswers     : answers;
+  const activeIsComplete   = offlineMode ? offlineComplete    : isComplete;
+
+  const currentQuestion = activeQuestions[activeCurrentIndex];
 
   // Clear text answer when moving to a new question
   React.useEffect(() => {
     setTextAnswer('');
-  }, [currentIndex]);
+  }, [activeCurrentIndex]);
 
   // ─── États de chargement/erreur ─────────────────────────────────────────
 
@@ -282,29 +320,29 @@ export default function QuizNativePage() {
     );
   }
 
-  if (error) {
+  if (error && !offlineMode) {
     return (
       <SafeAreaView style={styles.style_4} edges={['top']}>
         <View style={styles.style_3}>
           <Feather name="alert-circle" size={48} color="#F59E0B" />
-          <Text style={styles.mt4_textxl_fontbold_textgray90}>
-            Quiz indisponible
-          </Text>
+          <Text style={styles.mt4_textxl_fontbold_textgray90}>Quiz indisponible</Text>
           <Text style={styles.mt2_textgray500_textcenter}>{error}</Text>
           <View style={styles.flexrow_mt6}>
-            <Pressable
-              onPress={() => router.back()}
-              style={styles.bggray200_px6_py3_roundedxl_mr}
-            >
+            <Pressable onPress={() => router.back()} style={styles.bggray200_px6_py3_roundedxl_mr}>
               <Text style={styles.textgray700_fontbold}>Retour</Text>
             </Pressable>
-            <Pressable
-              onPress={() => reload()}
-              style={styles.bg4a90e2_px6_py3_roundedxl}
-            >
+            <Pressable onPress={() => reload()} style={styles.bg4a90e2_px6_py3_roundedxl}>
               <Text style={styles.textwhite_fontbold}>Réessayer</Text>
             </Pressable>
           </View>
+          {offlineQuestions.length > 0 && (
+            <Pressable
+              onPress={() => setOfflineMode(true)}
+              style={[styles.bg4a90e2_px6_py3_roundedxl, { marginTop: 12, backgroundColor: '#10B981' }]}
+            >
+              <Text style={styles.textwhite_fontbold}>Continuer hors-ligne</Text>
+            </Pressable>
+          )}
         </View>
       </SafeAreaView>
     );
@@ -320,20 +358,83 @@ export default function QuizNativePage() {
     );
   }
 
-  const progress = ((currentIndex + 1) / questions.length) * 100;
+  const progress = ((activeCurrentIndex + 1) / activeQuestions.length) * 100;
 
-  // Pour multichoice/truefalse : la réponse est sélectionnée si la valeur
-  // courante (selectedValue) ou une valeur déjà sauvée correspond.
   const savedValueForQuestion =
     currentQuestion.answerInputName
-      ? answers[currentQuestion.answerInputName]
+      ? activeAnswers[currentQuestion.answerInputName]
       : undefined;
 
-  const effectiveSelected = selectedValue ?? savedValueForQuestion ?? null;
+  const effectiveSelected = offlineMode
+    ? (offlineAnswers[currentQuestion.answerInputName] ?? null)
+    : (selectedValue ?? savedValueForQuestion ?? null);
+
+  const isLastActiveQuestion = activeCurrentIndex >= activeQuestions.length - 1;
+
+  // ─── Actions offline ───────────────────────────────────────────────────────
+  const handleOfflineSelect = (value: string) => {
+    if (!currentQuestion.answerInputName) return;
+    setOfflineAnswers(prev => ({ ...prev, [currentQuestion.answerInputName]: value }));
+  };
+
+  const handleOfflineFinish = async () => {
+    const total   = offlineQuestions.length;
+    // Offline: we can't verify correctness without the server — count answered questions
+    const correct = offlineQuestions.filter(q =>
+      !!offlineAnswers[q.answerInputName]
+    ).length;
+
+    setOfflineScore({ correct, total });
+    setOfflineComplete(true);
+
+    if (offlineAttemptId && userId) {
+      const answers = Object.entries(offlineAnswers).map(([name, value], i) => ({
+        slot: offlineQuestions.findIndex(q => q.answerInputName === name) + 1,
+        name,
+        value,
+      }));
+      await saveOfflineQuizAttempt(userId, cmid, 0, offlineAttemptId, answers, correct, total, startTimeRef.current)
+        .catch(() => {});
+    }
+
+    const elapsedSeconds = Math.round((Date.now() - startTimeRef.current) / 1000);
+    const xp = calculateXP('quiz', correct, total, {
+      perfectScore: correct === total && total > 0,
+      timeSpent: elapsedSeconds,
+      streak,
+    }).totalXP;
+
+    await saveActivityScore(cmid, courseId, 'quiz', correct, total, xp, userId).catch(() => {});
+
+    const resultParams = new URLSearchParams({
+      activity: 'Quiz',
+      score: String(correct),
+      total: String(total),
+      xp: String(xp),
+      moduleId: String(cmid),
+      courseId: String(courseId),
+      returnRoute: `/(stacks)/(cours)/${courseId}`,
+      offlineMode: '1',
+    });
+    router.replace(`/(stacks)/(cours)/result?${resultParams.toString()}` as any);
+  };
 
   // ─── Action : valider la question puis passer à la suivante ─────────────
 
   const handleNext = async () => {
+    if (offlineMode) {
+      if (!effectiveSelected) {
+        Alert.alert('Sélectionne une réponse', 'Choisis une option avant de continuer.');
+        return;
+      }
+      if (isLastActiveQuestion) {
+        await handleOfflineFinish();
+      } else {
+        setOfflineIdx(i => i + 1);
+      }
+      return;
+    }
+
     if (currentQuestion.type === 'matching') {
       const subQs = currentQuestion.matchingData?.subQuestions ?? [];
       const allAnswered = subQs.length > 0 && subQs.every(s => matchingAnswers[s.inputName]);
@@ -355,7 +456,6 @@ export default function QuizNativePage() {
       return;
     }
 
-    // Si la réponse n'est pas encore sauvegardée → submitAnswer
     if (selectedValue !== null) {
       const ok = await submitAnswer();
       if (!ok) {
@@ -418,8 +518,8 @@ export default function QuizNativePage() {
     return (
       <Pressable
         key={`${currentQuestion.slot}-${idx}`}
-        onPress={() => selectAnswer(option.value)}
-        disabled={isSaving}
+        onPress={() => offlineMode ? handleOfflineSelect(option.value) : selectAnswer(option.value)}
+        disabled={!offlineMode && isSaving}
         style={{
           padding: 16,
           borderRadius: 12,
@@ -469,11 +569,18 @@ export default function QuizNativePage() {
           <Feather name="x" size={24} color="#374151" />
         </Pressable>
         <View style={styles.itemscenter}>
-          <Text style={styles.textbase_fontbold_text002366} numberOfLines={1}>
-            {quizName || title}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={styles.textbase_fontbold_text002366} numberOfLines={1}>
+              {quizName || title}
+            </Text>
+            {offlineMode && (
+              <View style={{ backgroundColor: '#F59E0B', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6 }}>
+                <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>HORS-LIGNE</Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.textxs_textgray500}>
-            Question {currentIndex + 1} / {questions.length}
+            Question {activeCurrentIndex + 1} / {activeQuestions.length}
           </Text>
         </View>
         <View style={styles.w10} />
@@ -626,7 +733,7 @@ export default function QuizNativePage() {
           <Text style={styles.textwhite_textcenter_fontbold_}>
             {isSaving
               ? 'Envoi…'
-              : isLastQuestion
+              : isLastActiveQuestion
                 ? 'Terminer le quiz'
                 : 'Suivant'}
           </Text>

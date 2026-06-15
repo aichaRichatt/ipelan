@@ -432,38 +432,6 @@ const styles = StyleSheet.create({
   profileRight: {
     alignItems: 'flex-end',
   },
-  livesTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-    backgroundColor: '#fef2f2',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  livesText: {
-    color: '#ef4444',
-    fontWeight: 'bold',
-    marginRight: 4,
-  },
-  heartEmoji: {
-    fontSize: 18,
-  },
-  countdownTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-    backgroundColor: '#fef2f2',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  countdownText: {
-    color: '#f87171',
-    fontWeight: '600',
-    fontSize: 10,
-    marginLeft: 4,
-  },
   coinsTag: {
     flexDirection: 'row',
     alignItems: 'center',

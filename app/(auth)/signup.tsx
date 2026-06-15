@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { EmailVerificationModal } from "../../components/EmailVerificationModal";
 import { PolicyModal } from "../../components/PolicyModal";
 import { useSignup } from "../../hooks/useSignup";
 
@@ -29,6 +30,8 @@ export default function SignUp() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showPolicy, setShowPolicy] = useState(false);
   const [policyAccepted, setPolicyAccepted] = useState(false);
+  const [showEmailVerification, setShowEmailVerification] = useState(false);
+  const [registeredEmail, setRegisteredEmail] = useState("");
 
   const { signup } = useSignup();
 
@@ -85,17 +88,8 @@ export default function SignUp() {
         lastname: cleanLastname,
       });
 
-      Alert.alert(
-        "Compte créé !",
-        `Bienvenue ${cleanFirstname} ! Votre compte a été créé. Vérifiez votre email pour activer votre compte, puis connectez-vous.`,
-        [
-          {
-            text: "Se connecter",
-            onPress: () => router.replace("/(auth)/login"),
-            style: "default",
-          },
-        ]
-      );
+      setRegisteredEmail(cleanEmail);
+      setShowEmailVerification(true);
     } catch (signupErr: any) {
       const errMsg = signupErr.message || "";
       if (errMsg.toLowerCase().includes("exist") || errMsg.toLowerCase().includes("already") || errMsg.toLowerCase().includes("déjà")) {
@@ -236,6 +230,15 @@ export default function SignUp() {
           setShowPolicy(false);
         }}
         onClose={() => setShowPolicy(false)}
+      />
+
+      <EmailVerificationModal
+        visible={showEmailVerification}
+        email={registeredEmail}
+        onClose={() => {
+          setShowEmailVerification(false);
+          router.replace("/(auth)/login");
+        }}
       />
     </SafeAreaView>
   );

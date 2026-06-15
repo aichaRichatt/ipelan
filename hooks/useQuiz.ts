@@ -22,6 +22,7 @@ import {
   ParsedQuestion,
   saveQuizAnswers,
 } from '../services/api/quizService';
+import { isMoodleOnline } from '../services/api/moodleClient';
 import { resolveActivityInstanceId } from '../services/utils/moodleIdResolver';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
@@ -118,6 +119,15 @@ export function useQuiz(
     setIsLoading(true);
     setError(null);
 
+    // Offline-first: si pas de réseau, déclencher immédiatement l'erreur
+    // → quiz-native.tsx détecte l'erreur et charge depuis quiz_cache sans attendre le timeout
+    const online = await isMoodleOnline();
+    if (!online) {
+      setError('Hors ligne — chargement depuis le cache local');
+      setIsLoading(false);
+      return;
+    }
+
     try {
       // 1. Résoudre cmid → instanceId
       let instanceId = fallbackInstanceId ?? cmid;
@@ -204,7 +214,7 @@ export function useQuiz(
       answersRef.current = newAnswers;
       setAnswers(newAnswers);
 
-      const ok = await saveQuizAnswers(
+      let ok = await saveQuizAnswers(
         token,
         attemptId,
         { [currentQuestion.answerInputName]: selectedValue },
@@ -212,21 +222,41 @@ export function useQuiz(
       );
 
       if (!ok) {
-        if (IS_DEV) console.warn('[useQuiz] save failed for slot', currentQuestion.slot);
-        return false;
+        // Moodle a rejeté — seqcheck probablement périmé (réseau coupé après
+        // traitement côté Moodle). Recharger et réessayer une seule fois.
+        if (IS_DEV) console.log('[useQuiz] save rejected, refreshing seqcheck for retry...');
+        const freshQuestions = await fetchAllQuizQuestions(token, attemptId);
+        if (isMountedRef.current && freshQuestions.length > 0) setQuestions(freshQuestions);
+        const freshQ = freshQuestions.find(q => q.slot === currentQuestion.slot);
+        if (freshQ) {
+          ok = await saveQuizAnswers(
+            token,
+            attemptId,
+            { [freshQ.answerInputName]: selectedValue },
+            { [freshQ.sequencecheckName]: String(freshQ.sequencecheck) }
+          );
+        }
+        if (!ok) {
+          if (IS_DEV) console.warn('[useQuiz] save failed after seqcheck refresh for slot', currentQuestion.slot);
+          return false;
+        }
       }
 
-      // Recharger pour rafraîchir les sequencechecks
+      // Recharger pour rafraîchir les sequencechecks de toutes les questions
       const refreshed = await fetchAllQuizQuestions(token, attemptId);
-      if (refreshed.length > 0) {
-        setQuestions(refreshed);
-      }
+      if (isMountedRef.current && refreshed.length > 0) setQuestions(refreshed);
       return true;
     } catch (err: any) {
       if (IS_DEV) console.warn('[useQuiz] submitAnswer:', err?.message);
+      // Erreur réseau — Moodle a peut-être traité la requête avant la coupure.
+      // Rafraîchir silencieusement pour que le prochain essai ait le bon seqcheck.
+      try {
+        const refreshed = await fetchAllQuizQuestions(token, attemptId);
+        if (isMountedRef.current && refreshed.length > 0) setQuestions(refreshed);
+      } catch {}
       return false;
     } finally {
-      setIsSaving(false);
+      if (isMountedRef.current) setIsSaving(false);
     }
   }, [token, attemptId, currentQuestion, selectedValue]);
 
@@ -254,22 +284,41 @@ export function useQuiz(
       answersRef.current = merged;
       setAnswers(merged);
 
-      const ok = await saveQuizAnswers(
+      let ok = await saveQuizAnswers(
         token,
         attemptId,
         answersToSave,
         { [currentQuestion.sequencecheckName]: String(currentQuestion.sequencecheck) }
       );
-      if (!ok) return false;
+
+      if (!ok) {
+        if (IS_DEV) console.log('[useQuiz] matching save rejected, refreshing seqcheck for retry...');
+        const freshQuestions = await fetchAllQuizQuestions(token, attemptId);
+        if (isMountedRef.current && freshQuestions.length > 0) setQuestions(freshQuestions);
+        const freshQ = freshQuestions.find(q => q.slot === currentQuestion.slot);
+        if (freshQ) {
+          ok = await saveQuizAnswers(
+            token,
+            attemptId,
+            answersToSave,
+            { [freshQ.sequencecheckName]: String(freshQ.sequencecheck) }
+          );
+        }
+        if (!ok) return false;
+      }
 
       const refreshed = await fetchAllQuizQuestions(token, attemptId);
-      if (refreshed.length > 0) setQuestions(refreshed);
+      if (isMountedRef.current && refreshed.length > 0) setQuestions(refreshed);
       return true;
     } catch (err: any) {
       if (IS_DEV) console.warn('[useQuiz] submitMatchingAnswers:', err?.message);
+      try {
+        const refreshed = await fetchAllQuizQuestions(token, attemptId);
+        if (isMountedRef.current && refreshed.length > 0) setQuestions(refreshed);
+      } catch {}
       return false;
     } finally {
-      setIsSaving(false);
+      if (isMountedRef.current) setIsSaving(false);
     }
   }, [token, attemptId, currentQuestion, matchingAnswers]);
 

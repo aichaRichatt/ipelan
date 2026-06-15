@@ -30,7 +30,7 @@ async function moodleFetchWithFallback(endpoint: string, params: Record<string, 
   let result = await moodleFetch(endpoint, params);
 
   if (result?.exception && ADMIN_TOKEN && params.wstoken === userToken) {
-    console.log('[useActivityContent] User token failed for ' + params.wsfunction + ', trying admin...');
+    if (IS_DEV) console.log('[useActivityContent] User token failed for ' + params.wsfunction + ', trying admin...');
     const adminParams = { ...params, wstoken: ADMIN_TOKEN };
     result = await moodleFetch(endpoint, adminParams);
   }
@@ -57,6 +57,7 @@ export interface DictationData {
   words: { word: string; hint?: string; translation?: string }[];
   difficulty?: 'easy' | 'medium' | 'hard';
   correctText?: string;
+  instructions?: string;
 }
 
 export interface ListeningData {
@@ -245,7 +246,7 @@ export function useActivityContent(
     } finally {
       if (isMountedRef.current) setIsLoading(false);
     }
-  }, [token, moduleId, instanceId, moduleType, cmid]);
+  }, [token, moduleId, instanceId, moduleType, cmid, courseId, moduleTitle]);
 
   useEffect(() => {
     fetchActivity();
@@ -336,7 +337,6 @@ async function loadQuizWithRetry(
 
       if (attemptResult?.exception) {
         if (IS_DEV) console.warn(`[loadQuizWithRetry] Start attempt failed:`, attemptResult.message);
-        console.log(`[loadQuizWithRetry] Failed to start quiz attempt for ${type}:`, id);
         continue;
       }
 
@@ -406,73 +406,9 @@ async function loadQuizWithRetry(
   setQuestions([]);
 }
 
-/**
- * Extrait une liste de mots à dicter depuis le HTML d'intro Moodle.
- *
- * Conventions supportées (par ordre de priorité) :
- *   1. Balises <li>...</li>  → un mot par item
- *   2. Marqueurs `mot | indice` → format <mot>|<hint optionnel>
- *   3. Lignes séparées par <br> ou retours chariot
- *   4. Mots séparés par virgules ou points-virgules
- *
- * Renvoie [] si rien d'exploitable n'est trouvé.
- */
-function parseDictationWordsFromIntro(
-  introHtml: string
-): { word: string; hint?: string }[] {
-  if (!introHtml) return [];
-
-  const decoded = introHtml
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#039;/gi, "'");
-
-  // 1. Liste <li>
-  const liMatches = Array.from(decoded.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi));
-  if (liMatches.length > 0) {
-    return liMatches
-      .map(m => m[1].replace(/<[^>]+>/g, '').trim())
-      .filter(s => s.length > 0)
-      .map(splitWordHint);
-  }
-
-
-  const plain = decoded.replace(/<br\s*\/?\s*>/gi, '\n').replace(/<[^>]+>/g, '\n');
-  const lines = plain
-    .split(/\n|\r/)
-    .map(s => s.trim())
-    .filter(s => s.length > 0);
-
-  let candidates: string[] = [];
-  if (lines.length >= 2) {
-    candidates = lines;
-  } else if (lines.length === 1) {
-    candidates = lines[0]
-      .split(/[,;]/)
-      .map(s => s.trim())
-      .filter(s => s.length > 0);
-  }
-
-  return candidates
-    .filter(s => /\S/.test(s))
-    .map(splitWordHint);
-}
-
-function splitWordHint(raw: string): { word: string; hint?: string } {
-  const parts = raw.split('|').map(s => s.trim()).filter(Boolean);
-  if (parts.length >= 2) {
-    return { word: parts[0], hint: parts.slice(1).join(' | ') };
-  }
-  return { word: parts[0] || raw.trim() };
-}
-
-
 async function loadDictationWithRetry(
   token: string,
-  moduleId: number,
+  _moduleId: number,
   instanceId: number,
   cmid: number | undefined,
   courseId: number,
@@ -480,7 +416,6 @@ async function loadDictationWithRetry(
   setError: (e: string) => void
 ) {
   const AUDIO_RE = /\.(mp3|wav|m4a|ogg|opus|aac)(\?|$)/i;
-  const MOODLE_URL = (process.env.EXPO_PUBLIC_MOODLE_API_URL || '').replace(/\/$/, '');
 
   for (const id of [courseId]) {
     try {
@@ -524,39 +459,14 @@ async function loadDictationWithRetry(
         console.log(`[loadDictationWithRetry] intro (100 chars):`, (assignment.intro || '').substring(0, 100));
       }
 
-      // Cherche dans introfiles + introattachments par filename OU fileurl
-      const allFiles: any[] = [
-        ...(assignment.introfiles || []),
-        ...(assignment.introattachments || []),
-      ];
-      const audioFile = allFiles.find((f: any) =>
+      // Audio : UNIQUEMENT depuis "Fichiers supplémentaires" (introattachments)
+      const audioFile = (assignment.introattachments || []).find((f: any) =>
         AUDIO_RE.test(f?.filename || '') || AUDIO_RE.test(f?.fileurl || '')
       );
-      let rawAudioUrl: string = audioFile?.fileurl || '';
+      const rawAudioUrl: string = audioFile?.fileurl || '';
 
-      // Fallback 1 : parser le HTML intro pour <audio src=...> ou href direct
-      if (!rawAudioUrl && assignment.intro) {
-        const m = assignment.intro.match(/<(?:audio|source)[^>]*src=["']([^"']+)["']/i)
-          || assignment.intro.match(/(https?:\/\/[^"'\s]+\.(?:mp3|wav|m4a|ogg|opus|aac)(?:\?[^"'\s]*)?)/i);
-        if (m) rawAudioUrl = m[1];
-      }
+      if (IS_DEV) console.log(`[loadDictationWithRetry] rawAudioUrl (introattachments):`, rawAudioUrl || 'NONE');
 
-      // Fallback 2 : si Moodle renvoie @@PLUGINFILE@@ (stockage interne TinyMCE)
-      // → construire l'URL avec le contextId du module (assignment.cmid = contextId de type module)
-      if (!rawAudioUrl && assignment.intro && assignment.intro.includes('@@PLUGINFILE@@')) {
-        const pluginMatch = assignment.intro.match(/@@PLUGINFILE@@([^"'<\s]+)/i);
-        if (pluginMatch) {
-          // contextId pour un assign = id du course_modules context (≈ cmid + offset)
-          // On utilise introattachment filearea + instanceId comme approximation
-          rawAudioUrl = `${MOODLE_URL}/webservice/pluginfile.php/${assignment.cmid || cmid}/mod_assign/intro${pluginMatch[1]}`;
-        }
-      }
-
-      if (IS_DEV) console.log(`[loadDictationWithRetry] rawAudioUrl:`, rawAudioUrl || 'NONE');
-
-      // Convertir pluginfile.php → webservice/pluginfile.php SEULEMENT si pas déjà fait
-      // (Moodle retourne déjà /webservice/pluginfile.php/ via les WS — ne pas doubler)
-      // Ne pas ajouter le token s'il est déjà présent dans l'URL (évite le double-token → 403)
       let audioUrl: string | undefined;
       if (rawAudioUrl) {
         const wsUrl = rawAudioUrl.includes('/webservice/pluginfile.php/')
@@ -566,10 +476,21 @@ async function loadDictationWithRetry(
         audioUrl = hasToken ? wsUrl : wsUrl + (wsUrl.includes('?') ? '&' : '?') + `token=${token}`;
       }
 
-      const words = parseDictationWordsFromIntro(assignment.intro || '');
+      // Mot/phrase à dicter : texte exact de la description (intro), HTML strippé
+      const _strip = (html: string) => html
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#039;/gi, "'")
+        .replace(/\s+/g, ' ').trim();
+
+      const word = _strip(assignment.intro || '');
+      const words = word ? [{ word }] : [];
+
+      // Instructions : champ "Instructions de l'activité" (activity), fallback défaut côté écran
+      const instructions = _strip(assignment.activity || '') || undefined;
 
       if (words.length === 0) {
-        const msg = `Aucun mot trouvé dans l'intro de la dictée (assignment ${instanceId}). Format attendu : liste <li> ou un mot par ligne.`;
+        const msg = `La description du Devoir est vide (assignment ${instanceId}). Ajouter le mot ou la phrase à dicter dans le champ Description.`;
         if (IS_DEV) console.warn('[loadDictationWithRetry]', msg);
         setError(msg);
       }
@@ -579,6 +500,7 @@ async function loadDictationWithRetry(
         title: assignment.name || 'Dictée audio',
         audioUrl,
         words,
+        instructions,
       };
 
       if (IS_DEV) {

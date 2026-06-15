@@ -126,11 +126,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16
   },
-  style_1: {
-    fontSize: 20,
-    marginRight: 8
-  },
-  style_2: {
+  rewardIcon: {
     fontSize: 20,
     marginRight: 8
   },
@@ -268,28 +264,39 @@ export default function ResultScreen() {
   const syncStatus = syncState.status === 'idle' ? 'pending' : syncState.status;
   const syncMessage = syncState.message;
 
+  // Guard : évite la double soumission si les refs du hook changent entre deux renders
+  const hasSavedRef = React.useRef(false);
+
   useEffect(() => {
     let isCancelled = false;
 
     const saveProgress = async () => {
+      if (hasSavedRef.current) return;   // déjà soumis
       if (!moduleId || !courseId) {
         if (IS_DEV) console.log('[Result] Missing moduleId or courseId');
         return;
       }
       if (isCancelled) return;
+      hasSavedRef.current = true;
 
       let activityCount = 0;
-      let fetchedSections: any[] = [];
       try {
-        fetchedSections = await getCourseContents(token || '', courseId);
-        if (Array.isArray(fetchedSections) && fetchedSections.length > 0) {
-          const { getCompletableModules } = await import('@/services/storage/course-progress');
-          const completable = getCompletableModules(fetchedSections);
-          // Utiliser uniquement les modules avec suivi d'achèvement (source de vérité Moodle)
-          // Fallback sur le total brut si aucun module completable trouvé
-          activityCount = completable.length > 0
-            ? completable.length
-            : fetchedSections.reduce((sum: number, s: any) => sum + (s.modules?.length || 0), 0);
+        const { isMoodleOnline } = await import('@/services/api/moodleClient');
+        const online = await isMoodleOnline();
+        if (online) {
+          const fetchedSections = await getCourseContents(token || '', courseId);
+          if (Array.isArray(fetchedSections) && fetchedSections.length > 0) {
+            const { getCompletableModules } = await import('@/services/storage/course-progress');
+            const completable = getCompletableModules(fetchedSections);
+            activityCount = completable.length > 0
+              ? completable.length
+              : fetchedSections.reduce((sum: number, s: any) => sum + (s.modules?.length || 0), 0);
+          }
+        }
+        if (activityCount === 0) {
+          const { getCourseProgress } = await import('@/services/storage/course-progress');
+          const existingProg = await getCourseProgress(courseId, userId ?? undefined);
+          activityCount = existingProg?.totalActivities ?? 0;
         }
       } catch (err) {
         if (IS_DEV) console.warn('[Result] Failed to get course contents:', err);
@@ -416,28 +423,39 @@ export default function ResultScreen() {
           });
         }
 
-        if (isCompleted && courseId) {
+        // Vérifier si le cours est terminé à 100 % pour proposer le cours suivant
+        if (isCompleted && courseId && userId) {
           try {
             const { getCourseProgressForCompletion } = await import('@/services/storage/course-progress');
-            const courseProgress = await getCourseProgressForCompletion(courseId, userId ?? undefined);
+            const courseProgress = await getCourseProgressForCompletion(courseId, userId);
 
-            if (courseProgress && courseProgress.progress >= 100) {
-              if (IS_DEV) console.log('[Result] Course completed! Finding next course...');
+            if (courseProgress && courseProgress.progress >= 100 && token) {
+              if (IS_DEV) console.log('[Result] Course completed! Looking for next course...');
 
               const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
               const PREFERENCES_KEY = '@ipelan_preferences';
               const prefsStr = await AsyncStorage.getItem(PREFERENCES_KEY);
 
-              if (prefsStr && token) {
+              if (prefsStr) {
                 const preferences = JSON.parse(prefsStr);
-                const { getCoursesForLanguageAndGrade } = await import('@/services/api/courseService');
-                const allCourses = await getCoursesForLanguageAndGrade(token, preferences.language, preferences.grade);
+                const { getCoursesForLanguageAndGrade, getCoursesByCategoryFromEnrollments } = await import('@/services/api/courseService');
+
+                // Tentative 1 : arbre de catégories (si core_course_get_categories est dans le service)
+                let allCourses = await getCoursesForLanguageAndGrade(token, preferences.language, preferences.grade);
+
+                // Tentative 2 : fallback via cours inscrits
+                if (allCourses.length === 0) {
+                  allCourses = await getCoursesByCategoryFromEnrollments(token, userId);
+                }
+
                 const currentIndex = allCourses.findIndex((c: any) => c.id === courseId);
 
                 if (currentIndex >= 0 && currentIndex < allCourses.length - 1) {
                   const nextCourse = allCourses[currentIndex + 1];
+                  if (IS_DEV) console.log('[Result] Next course:', nextCourse.id, nextCourse.fullname);
+                  // Utiliser replace : pas de retour en arrière vers result depuis le cours suivant
                   setTimeout(() => {
-                    if (!isCancelled) router.push(`/(stacks)/(cours)/${nextCourse.id}` as any);
+                    if (!isCancelled) router.replace(`/(stacks)/(cours)/${nextCourse.id}` as any);
                   }, 2000);
                   return;
                 }
@@ -453,7 +471,8 @@ export default function ResultScreen() {
     };
     saveProgress();
     return () => { isCancelled = true; };
-  }, [moduleId, courseId, activityType, score, total, isCompleted, xp, instanceId, token, userId, saveProgressLocally, syncActivityToMoodle]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moduleId, courseId, activityType, score, total, xp, instanceId, token, userId]);
   
   const getGrade = () => {
     if (percentage >= 90) return { text: "Excellent !", color: "#10B981" };
@@ -464,14 +483,22 @@ export default function ResultScreen() {
   
   const grade = getGrade();
   
-  const decodedReturnRoute = params.returnRoute ? decodeURIComponent(params.returnRoute) : `/(stacks)/(cours)/${params.courseId || ''}`;
-
   const handleContinue = () => {
-    if (decodedReturnRoute.startsWith("/(")) {
-      router.push(decodedReturnRoute as any);
-    } else {
-      router.push(`/(stacks)/(cours)/${params.courseId || ''}` as any);
+    // Priorité 1 : courseId passé en paramètre → retour direct au cours
+    if (courseId && courseId > 0) {
+      router.replace(`/(stacks)/(cours)/${courseId}` as any);
+      return;
     }
+    // Priorité 2 : returnRoute décodé (passé par l'activité)
+    if (params.returnRoute) {
+      const decoded = decodeURIComponent(params.returnRoute);
+      if (decoded.startsWith('/(stacks)/(cours)/') && decoded.length > 18) {
+        router.replace(decoded as any);
+        return;
+      }
+    }
+    // Fallback : onglet cours
+    router.replace('/(tabs)/(cours)' as any);
   };
 
   return (
@@ -511,12 +538,12 @@ export default function ResultScreen() {
 
             <View style={styles.flexrow_wfull_justifycenter_mb}>
               <View style={styles.bgpurple100_rounded2xl_px4_py3}>
-                <Text style={styles.style_2}>⭐</Text>
+                <Text style={styles.rewardIcon}>⭐</Text>
                 <Text style={styles.textpurple700_fontbold_textlg}>+{xp} XP</Text>
               </View>
               {earnedCoins > 0 && (
                 <View style={styles.bgyellow100_rounded2xl_px4_py3}>
-                  <Text style={styles.style_1}>🪙</Text>
+                  <Text style={styles.rewardIcon}>🪙</Text>
                   <Text style={styles.textyellow700_fontbold_textlg}>+{earnedCoins}</Text>
                 </View>
               )}
@@ -560,12 +587,14 @@ export default function ResultScreen() {
               </Pressable>
             </View>
             
-            <Pressable
-              onPress={() => router.push(`/(stacks)/(cours)/${params.courseId || ''}` as any)}
-              style={styles.mt4_py2}
-            >
-              <Text style={styles.textgray500_textcenter}>Retour au module</Text>
-            </Pressable>
+            {courseId > 0 && (
+              <Pressable
+                onPress={() => router.replace(`/(stacks)/(cours)/${courseId}` as any)}
+                style={styles.mt4_py2}
+              >
+                <Text style={styles.textgray500_textcenter}>Retour au module</Text>
+              </Pressable>
+            )}
           </View>
         </View>
       </ScrollView>

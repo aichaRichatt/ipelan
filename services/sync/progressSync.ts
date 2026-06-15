@@ -136,7 +136,7 @@ async function markManualCompletion(
   userId?: number
 ): Promise<boolean> {
   if (!cmid || cmid <= 0) {
-    console.warn('[markManualCompletion] Invalid cmid:', cmid);
+    if (IS_DEV) console.warn('[markManualCompletion] Invalid cmid:', cmid);
     return false;
   }
   const params = {
@@ -310,7 +310,7 @@ export async function syncCourseProgress(
     for (const section of sections) {
       if (Array.isArray(section.modules)) {
         for (const mod of section.modules) {
-          if (mod.id && mod.completiondata?.state === 1) {
+          if (mod.id && mod.completiondata?.completionstate === 1) {
             // Only sync modules already marked complete locally
             cmids.push(mod.id);
           }

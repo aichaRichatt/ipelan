@@ -75,7 +75,9 @@ export default function DictationScreen() {
 
   const words       = dictation?.words?.length ? dictation.words : [];
   const currentWord = words[currentWordIndex] || { word: '', hint: '' };
-  const progress    = words.length > 0 ? ((currentWordIndex + 1) / words.length) * 100 : 0;
+  const progress    = words.length > 0
+    ? (currentAnswer !== null ? (currentWordIndex + 1) : currentWordIndex) / words.length * 100
+    : 0;
   const totalWords  = words.length;
 
   // ── Audio player ─────────────────────────────────────────────────────────
@@ -219,7 +221,7 @@ export default function DictationScreen() {
     <SafeAreaView style={s.screen} edges={['top']}>
       <ActivityHeader
         title="Dictée audio"
-        subtitle={`Mot ${currentWordIndex + 1} / ${totalWords}`}
+        subtitle={totalWords > 1 ? `Mot ${currentWordIndex + 1} / ${totalWords}` : undefined}
         onBack={() => router.back()}
       />
 
@@ -234,7 +236,7 @@ export default function DictationScreen() {
 
         {/* Carte audio */}
         <View style={s.audioCard}>
-          <Text style={s.audioInstruction}>Écoute le mot et écris-le</Text>
+          <Text style={s.audioInstruction}>{dictation?.instructions ?? 'Écoute le mot et écris-le'}</Text>
 
           {/* Waveform */}
           <View style={s.waveRow}>
@@ -269,7 +271,7 @@ export default function DictationScreen() {
         </View>
 
         {/* Saisie */}
-        <Text style={s.sectionLabel}>Écris le mot que tu as entendu</Text>
+        <Text style={s.sectionLabel}>Écris ce que tu as entendu</Text>
         <View style={s.inputBox}>
           <TextInput
             value={userInput}

@@ -112,7 +112,9 @@ class DownloadService {
   }
 
   async downloadEPUB(epubUrl: string): Promise<string> {
-    const filename = 'lesson.epub';
+    const base = epubUrl.split('?')[0];
+    const name = this.getFilenameFromUrl(base);
+    const filename = name.endsWith('.epub') ? name : `${name}.epub`;
     const localFile = new File(this.baseDir, filename);
 
     if (localFile.exists) {
@@ -120,6 +122,7 @@ class DownloadService {
     }
 
     await this.ensureBaseDir();
+    await this.evictToFit(0);
     await File.downloadFileAsync(epubUrl, localFile);
     return localFile.uri;
   }
@@ -160,38 +163,20 @@ class DownloadService {
   async copyLocalEPUB(sourcePath: string): Promise<string> {
     const filename = sourcePath.split('/').pop() || 'local.epub';
     const targetFile = new File(this.baseDir, filename);
-    
+
     await this.ensureBaseDir();
-    
+
     if (targetFile.exists) {
-      console.log('[DownloadService] Local EPUB already exists');
       return targetFile.uri;
     }
-    
-    try {
-      const sourceFile = new File(sourcePath);
-      if (!sourceFile.exists) {
-        throw new Error('Source EPUB file not found: ' + sourcePath);
-      }
-      
-      console.log('[DownloadService] Copying local EPUB to cache...');
-      await sourceFile.copy(targetFile);
-      console.log('[DownloadService] EPUB copied successfully');
-      
-      return targetFile.uri;
-    } catch (error) {
-      console.error('[DownloadService] Failed to copy local EPUB:', error);
-      throw error;
+
+    const sourceFile = new File(sourcePath);
+    if (!sourceFile.exists) {
+      throw new Error('Source EPUB file not found: ' + sourcePath);
     }
-  }
 
-  getLocalEPUBPath(filename: string = 'libretest.epub'): string {
-    return new File(this.baseDir, filename).uri;
-  }
-
-  async localEPUBExists(filename: string = 'libretest.epub'): Promise<boolean> {
-    const file = new File(this.baseDir, filename);
-    return file.exists;
+    await sourceFile.copy(targetFile);
+    return targetFile.uri;
   }
 
   async getStorageInfo(): Promise<{ used: number; available: number }> {

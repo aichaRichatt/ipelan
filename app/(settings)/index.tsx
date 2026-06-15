@@ -4,6 +4,9 @@ import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import { Alert, Animated, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { getToken, getUserData } from "../../services/storage/tokenStorage";
+import { enrolUsersInCourses } from "../../services/api/moodleAuth";
+import { getCoursesForLanguageAndGrade } from "../../services/api/courseService";
 
 const PREFERENCES_KEY = '@ipelan_preferences';
 const LANGUAGE_KEY = '@ipelan_language';
@@ -132,7 +135,8 @@ const styles = StyleSheet.create({
   },
   divider: {
     backgroundColor: '#E5E7EB',
-    marginBottom: 16
+    marginBottom: 16,
+    height: 1,
   },
   settingOption: {
     alignItems: 'center',
@@ -177,16 +181,45 @@ export default function SettingsScreen() {
     try {
       const raw = await AsyncStorage.getItem(PREFERENCES_KEY);
       const existing = raw ? JSON.parse(raw) : {};
+      const prevLang = existing.language;
+      const prevGrade = existing.grade;
+      const prefsChanged = prevLang !== selectedLang || prevGrade !== selectedGrade;
+
       const updated = { ...existing, language: selectedLang, grade: selectedGrade };
       await AsyncStorage.setItem(PREFERENCES_KEY, JSON.stringify(updated));
       await AsyncStorage.setItem(LANGUAGE_KEY, selectedLang);
 
+      if (prefsChanged) {
+        // Vider le cache cours pour forcer un rechargement avec les nouvelles préférences
+        await AsyncStorage.removeItem('@ipelan_courses_cache');
+
+        // Auto-inscription synchrone dans les cours de la nouvelle langue/niveau
+        try {
+          const [token, userData] = await Promise.all([getToken(), getUserData()]);
+          if (token && userData?.id) {
+            const courses = await getCoursesForLanguageAndGrade(token, selectedLang, selectedGrade);
+            const courseIds = courses.map((c: any) => c.id).filter(Boolean);
+            if (courseIds.length > 0) {
+              await enrolUsersInCourses(userData.id, courseIds);
+            }
+          }
+        } catch {
+          // Enrollment échoué — sera re-tenté au prochain login
+        }
+      }
+
       setSaved(true);
       Animated.sequence([
         Animated.timing(saveColorAnim, { toValue: 1, duration: 200, useNativeDriver: false }),
-        Animated.delay(2000),
+        Animated.delay(1200),
         Animated.timing(saveColorAnim, { toValue: 0, duration: 300, useNativeDriver: false }),
-      ]).start(() => setSaved(false));
+      ]).start(() => {
+        setSaved(false);
+        if (prefsChanged) {
+          // Retourner à l'accueil pour recharger les cours avec les nouvelles préférences
+          router.replace('/(tabs)/(home)' as any);
+        }
+      });
     } catch {
       Alert.alert('Erreur', 'Impossible de sauvegarder les préférences.');
     }

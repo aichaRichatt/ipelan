@@ -3,13 +3,13 @@ import { useLives } from "@/hooks/useLives";
 import { AntDesign, Feather, FontAwesome5, Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
 import { useSyncStatus } from "../../../hooks/useSyncStatus";
 import { useUserStats } from "../../../hooks/useUserStats";
-import { getFirstCourseFromLanguageAndGrade } from "../../../services/api/courseService";
+import { filterByPreferences, getCoursesForLanguageAndGrade, getUserCourses } from "../../../services/api/courseService";
 import { RootState } from "../../../services/redux/store";
 import { getAllScoresForCourse } from "../../../services/storage/activity-progress";
 import { calculateCourseProgress, getAllCourseProgress, saveCourseProgress } from "../../../services/storage/course-progress";
@@ -57,8 +57,10 @@ function formatHeartCountdown(nextHeartTime: string | null): string | null {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
-function useActiveCourse(activeToken: string) {
+function useActiveCourse(activeToken: string, userId?: number, refreshKey = 0) {
   const [courses, setCourses] = useState<any[]>([]);
+  const [activeCourse, setActiveCourse] = useState<any | null>(null);
+  const [progressList, setProgressList] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,113 +71,137 @@ function useActiveCourse(activeToken: string) {
         return;
       }
 
-      let loadedFromCache = false;
+      setIsLoading(true);
+      setError(null);
 
+      // Lire les préférences langue+grade
+      let language = '';
+      let grade = 0;
       try {
-        setIsLoading(true);
-        setError(null);
+        const prefsJson = await AsyncStorage.getItem(PREFERENCES_KEY);
+        if (prefsJson) {
+          const parsed = JSON.parse(prefsJson);
+          language = parsed.language || '';
+          grade = parsed.grade || 0;
+        }
+      } catch (e) {
+        if (IS_DEV) console.warn('[useActiveCourse] prefs read failed:', e);
+      }
 
-        const moodleCall = (await import('../../../services/api/moodleClient')).moodleCall;
+      let allGradeCourses: any[] = [];
 
-        if (IS_DEV) console.log('[useActiveCourse] Fetching enrolled courses');
-        const result = await moodleCall(
-          'core_course_get_enrolled_courses_by_timeline_classification',
-          { classification: 'inprogress', limit: 10 },
-          activeToken
-        );
+      const { isMoodleOnline } = await import('../../../services/api/moodleClient');
+      const isOnline = await isMoodleOnline();
 
-        if (IS_DEV) console.log('[useActiveCourse] API result:', result?.courses?.length || 0, 'courses');
-
-        if (result && result.courses && result.courses.length > 0) {
-          setCourses(result.courses);
+      if (isOnline) {
+        // Tentative 1 : API catégorie langue+grade (ordre Moodle = séquence pédagogique)
+        if (language && grade) {
           try {
-            const { getDBConnection, saveCourses } = await import('../../../services/storage/db-service');
-            const db = await getDBConnection();
-            const coursesToSave = result.courses.map((c: any) => ({
-              id: c.id,
-              shortname: c.shortname || '',
-              fullname: c.fullname || '',
-              displayname: c.fullname || '',
-              idnumber: c.idnumber || '',
-              categoryid: c.categoryid || 0,
-              visible: c.visible ? 1 : 0,
-              summary: c.summary || '',
-              summaryformat: c.summaryformat || 0,
-              format: c.format || '',
-              showgrades: c.showgrades ? 1 : 0,
-              lang: c.lang || '',
-              enablecompletion: c.enablecompletion ? 1 : 0,
-              completionhasrules: c.completionhasrules ? 1 : 0,
-            }));
-            await saveCourses(db, coursesToSave);
+            allGradeCourses = await getCoursesForLanguageAndGrade(activeToken, language, grade);
+            if (IS_DEV) console.log('[useActiveCourse] API grade courses:', allGradeCourses.length);
           } catch (e) {
-            if (IS_DEV) console.warn('[useActiveCourse] Failed to cache courses:', e);
+            if (IS_DEV) console.warn('[useActiveCourse] getCoursesForLanguageAndGrade failed:', e);
           }
-          setIsLoading(false);
-          return;
         }
-      } catch (err: any) {
-        if (IS_DEV) console.warn('[useActiveCourse] API failed:', err.message);
+
+        // Tentative 2 : cours inscrits + filtre texte
+        if (allGradeCourses.length === 0 && userId && language && grade) {
+          try {
+            const enrolled = await getUserCourses(activeToken, userId);
+            allGradeCourses = filterByPreferences(enrolled, language, grade);
+            if (IS_DEV) console.log('[useActiveCourse] Enrolled filter:', allGradeCourses.length);
+          } catch (e) {
+            if (IS_DEV) console.warn('[useActiveCourse] enrolled fallback failed:', e);
+          }
+        }
+      } else {
+        if (IS_DEV) console.log('[useActiveCourse] Offline — skip API, go directly to SQLite');
       }
 
-      try {
-        const { getDBConnection, getCourses } = await import('../../../services/storage/db-service');
-        const db = await getDBConnection();
-        const cachedCourses = await getCourses(db);
-
-        if (cachedCourses && cachedCourses.length > 0) {
-          if (IS_DEV) console.log('[useActiveCourse] Loaded from cache:', cachedCourses.length, 'courses');
-          setCourses(cachedCourses.map(c => ({
-            id: c.id,
-            shortname: c.shortname,
-            fullname: c.fullname,
-            displayname: c.displayname,
-            categoryid: c.categoryid,
-            visible: c.visible === 1,
-            summary: c.summary,
-            progress: 0,
-          })));
-          loadedFromCache = true;
-        } else {
-          setCourses([]);
-        }
-      } catch (cacheErr: any) {
-        if (IS_DEV) console.error('[useActiveCourse] Cache failed:', cacheErr.message);
-      }
-
-      // Fallback 3: use language+grade preferences from registration
-      if (!loadedFromCache) {
+      // Tentative 3 (ou direct si offline) : SQLite cache + filtre texte
+      if (allGradeCourses.length === 0) {
         try {
-          const prefsJson = await AsyncStorage.getItem(PREFERENCES_KEY);
-          if (prefsJson) {
-            const { language, grade } = JSON.parse(prefsJson);
-            if (IS_DEV) console.log('[useActiveCourse] Trying preferences fallback:', language, grade);
-            const firstCourse = await getFirstCourseFromLanguageAndGrade(activeToken, language, grade);
-            if (firstCourse) {
-              if (IS_DEV) console.log('[useActiveCourse] Found course via preferences:', firstCourse.fullname);
-              setCourses([firstCourse]);
-              loadedFromCache = true;
-            }
-          }
+          const { getDBConnection, getCourses } = await import('../../../services/storage/db-service');
+          const db = await getDBConnection();
+          const cached = await getCourses(db);
+          const mapped = cached.map(c => ({
+            id: c.id, shortname: c.shortname, fullname: c.fullname,
+            displayname: c.displayname, categoryid: c.categoryid,
+            visible: c.visible === 1, summary: c.summary, progress: 0,
+          }));
+          allGradeCourses = language && grade ? filterByPreferences(mapped, language, grade) : mapped;
+          if (IS_DEV) console.log('[useActiveCourse] SQLite cache:', allGradeCourses.length);
         } catch (e) {
-          if (IS_DEV) console.warn('[useActiveCourse] Preferences fallback failed:', e);
+          if (IS_DEV) console.warn('[useActiveCourse] SQLite fallback failed:', e);
         }
       }
 
-      if (!loadedFromCache && courses.length === 0) {
-        setError('Hors ligne - Aucun cours en cache');
+      if (allGradeCourses.length === 0) {
+        setError('Aucun cours trouvé ');
+        setIsLoading(false);
+        return;
       }
 
+      // Mettre en cache SQLite les cours récupérés depuis l'API
+      try {
+        const { getDBConnection, saveCourses } = await import('../../../services/storage/db-service');
+        const db = await getDBConnection();
+        await saveCourses(db, allGradeCourses.map((c: any) => ({
+          id: c.id, shortname: c.shortname || '', fullname: c.fullname || '',
+          displayname: c.fullname || '', idnumber: c.idnumber || '',
+          categoryid: c.categoryid || c.category || 0, visible: c.visible ? 1 : 0,
+          summary: c.summary || '', summaryformat: c.summaryformat || 0,
+          format: c.format || '', showgrades: c.showgrades ? 1 : 0,
+          lang: c.lang || '', enablecompletion: c.enablecompletion ? 1 : 0,
+          completionhasrules: c.completionhasrules ? 1 : 0,
+        })));
+      } catch (e) {
+        if (IS_DEV) console.warn('[useActiveCourse] saveCourses failed:', e);
+      }
+
+      // Charger la progression depuis SQLite pour trouver le cours actif
+      let pList: any[] = [];
+      try {
+        pList = await getAllCourseProgress(userId);
+        setProgressList(pList);
+      } catch (e) {
+        if (IS_DEV) console.warn('[useActiveCourse] getAllCourseProgress failed:', e);
+      }
+      const progressMap: Record<number, { completed: number; total: number }> = {};
+      for (const p of pList) {
+        progressMap[p.courseId] = { completed: p.completedActivities, total: p.totalActivities };
+      }
+
+      // Trouver le cours ACTIF dans la séquence pédagogique
+      // Priorité 1 : cours avec progression partielle (en cours = actif)
+      let found = allGradeCourses.find((c: any) => {
+        const p = progressMap[c.id];
+        return p && p.total > 0 && p.completed > 0 && p.completed < p.total;
+      });
+      // Priorité 2 : premier cours non encore commencé (suivant dans la séquence)
+      if (!found) {
+        found = allGradeCourses.find((c: any) => {
+          const p = progressMap[c.id];
+          return !p || p.total === 0;
+        });
+      }
+      // Priorité 3 : tous terminés → le plus récemment actif
+      if (!found && pList.length > 0) {
+        found = allGradeCourses.find((c: any) => c.id === pList[0].courseId);
+      }
+      // Priorité 4 : premier de la liste
+      if (!found) found = allGradeCourses[0];
+
+      setCourses(allGradeCourses);
+      setActiveCourse(found ?? null);
+      if (IS_DEV) console.log('[useActiveCourse] active:', found?.fullname);
       setIsLoading(false);
     };
 
     fetchCourses();
-  }, [activeToken]);
+  }, [activeToken, userId, refreshKey]);
 
-  const course = courses.length > 0 ? courses[0] : null;
-  const allCourses = courses;
-
-  return { course, allCourses, isLoading, error };
+  return { course: activeCourse, allCourses: courses, progressList, isLoading, error };
 }
 
 export default function HomeScreen() {
@@ -186,13 +212,16 @@ export default function HomeScreen() {
   const loggedUser = reduxUser;
   const activeToken = reduxToken || "";
   const [avatarError, setAvatarError] = useState(false);
+  const [prefRefreshKey, setPrefRefreshKey] = useState(0);
+  const prevPrefsRef = useRef<{ language: string; grade: number }>({ language: '', grade: 0 });
 
-  const { course, allCourses, isLoading, error } = useActiveCourse(activeToken);
+  const { course, allCourses, progressList: hookProgressList, isLoading, error } = useActiveCourse(activeToken, reduxUser?.id, prefRefreshKey);
   const { stats, isLoading: statsLoading, isSyncing, refetch: refetchUserStats } = useUserStats();
   const { icon, color, opacity, isSyncing: isAutoSyncing } = useSyncStatus();
   const { lives, maxLives, canBuyLife, isBuying, lifeCost, buyLife } = useLives(refetchUserStats);
 
   const [courseProgressMap, setCourseProgressMap] = useState<any>({});
+  const [courseProgressList, setCourseProgressList] = useState<any[]>(hookProgressList);
   const [courseScoreMap, setCourseScoreMap] = useState<any>({});
   const [showBuyModal, setShowBuyModal] = useState(false);
 
@@ -203,11 +232,11 @@ export default function HomeScreen() {
       try {
         const prefsJson = await AsyncStorage.getItem(PREFERENCES_KEY);
         if (!prefsJson) {
-          console.log('[HomeScreen] No preferences, redirecting to language-selection');
+          if (IS_DEV) console.log('[HomeScreen] No preferences, redirecting to language-selection');
           router.replace("/(auth)/language-selection" as any);
         }
       } catch (e) {
-        console.warn('[HomeScreen] Failed to check preferences:', e);
+        if (IS_DEV) console.warn('[HomeScreen] Failed to check preferences:', e);
       }
     };
     checkPreferences();
@@ -223,9 +252,22 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       refetchUserStats();
+
+      // Détecter un changement de langue/grade depuis les paramètres → relancer le hook
+      AsyncStorage.getItem(PREFERENCES_KEY).then(raw => {
+        if (!raw) return;
+        const { language = '', grade = 0 } = JSON.parse(raw);
+        const prev = prevPrefsRef.current;
+        if (prev.language !== language || prev.grade !== grade) {
+          prevPrefsRef.current = { language, grade };
+          setPrefRefreshKey(k => k + 1);
+        }
+      }).catch(() => {});
+
       // Reload course progress from SQLite so progress bars update immediately on focus
       if (reduxUser?.id) {
         getAllCourseProgress(reduxUser.id).then(allCP => {
+          setCourseProgressList(allCP);
           const map: any = {};
           for (const cp of allCP) {
             map[cp.courseId] = {
@@ -279,7 +321,12 @@ export default function HomeScreen() {
 
         (async () => {
           try {
-            const { moodleCall } = await import('../../../services/api/moodleClient');
+            const { moodleCall, isMoodleOnline } = await import('../../../services/api/moodleClient');
+            const seedOnline = await isMoodleOnline();
+            if (!seedOnline) {
+              if (IS_DEV) console.log('[Home] Offline — progress seeding skipped');
+              return;
+            }
 
             for (const c of coursesToSeed) {
               try {
@@ -320,7 +367,7 @@ export default function HomeScreen() {
         })();
 
       } catch (err) {
-        console.warn('[Home] Failed to load progress:', err);
+        if (IS_DEV) console.warn('[Home] Failed to load progress:', err);
         setCourseProgressMap({});
         setCourseScoreMap({});
       }
@@ -339,7 +386,12 @@ export default function HomeScreen() {
   const getCourseProgress = (c: any) => {
     const dbProgress = courseProgressMap[c?.id];
     if (dbProgress && dbProgress.total > 0) {
-      return Math.min(100, Math.round((dbProgress.completed / dbProgress.total) * 100));
+      const dbPct = Math.min(100, Math.round((dbProgress.completed / dbProgress.total) * 100));
+      // SQLite can have stale 100% due to MAX logic — cross-check with Moodle server value
+      if (dbPct >= 100 && (c?.progress ?? 0) > 0 && c.progress < 100) {
+        return c.progress as number;
+      }
+      return dbPct;
     }
     return Math.min(100, c?.progress || 0);
   };
@@ -398,6 +450,21 @@ export default function HomeScreen() {
   };
 
   const currentCourse = course;
+
+  // 3 cours les plus récemment actifs dans la langue+grade de l'utilisateur
+  const recentCourses = (() => {
+    if (courseProgressList.length === 0) return allCourses.slice(0, 3);
+    const recentIds = courseProgressList.slice(0, 3).map((cp: any) => cp.courseId);
+    const found = recentIds
+      .map((id: number) => allCourses.find((c: any) => c.id === id))
+      .filter(Boolean) as any[];
+    if (found.length < 3) {
+      const foundIdSet = new Set(found.map((c: any) => c.id));
+      const extra = allCourses.filter((c: any) => !foundIdSet.has(c.id)).slice(0, 3 - found.length);
+      return [...found, ...extra];
+    }
+    return found;
+  })();
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -512,9 +579,20 @@ export default function HomeScreen() {
                     </Text>
                     <View style={styles.activeCourseTagsRow}>
                       <View style={styles.lessonsTag}>
-                        <Ionicons name="book-outline" size={11} color="rgba(255,255,255,0.8)" />
+                        <Ionicons name="checkmark-circle-outline" size={11} color="rgba(255,255,255,0.8)" />
                         <Text style={styles.lessonsTagText}>
-                          {getCompletedLessons(currentCourse)}/{getCourseLessonsCount(currentCourse)} leçons
+                          {(() => {
+                            const done = getCompletedLessons(currentCourse);
+                            const total = getCourseLessonsCount(currentCourse);
+                            if (total > 0 && done < total) return `${done}/${total} activités`;
+                            if (total > 0 && done >= total) {
+                               const moodlePct = currentCourse?.progress ?? 0;
+                              if (moodlePct > 0 && moodlePct < 100) return `${moodlePct}% complété`;
+                              return `${done}/${total} activités`;
+                            }
+                            const pct = getCourseProgress(currentCourse);
+                            return pct > 0 ? `${pct}% complété` : 'Commencer';
+                          })()}
                         </Text>
                       </View>
                       {getXpAllFromCourse(currentCourse.id) > 0 && (
@@ -544,7 +622,7 @@ export default function HomeScreen() {
                 <View style={styles.activeCourseBottom}>
                   {getCourseScore(currentCourse.id) && (
                     <View style={styles.scoreTag}>
-                      <Text style={styles.scoreTagText}>★ {getCourseScore(currentCourse.id)}</Text>
+                      <Text style={styles.scoreTagText}>★ </Text>
                     </View>
                   )}
                   <View style={styles.continueButton}>
@@ -574,8 +652,8 @@ export default function HomeScreen() {
                 <View style={styles.errorContainer}>
                   <Text style={styles.errorText}>{error}</Text>
                 </View>
-              ) : allCourses.length > 0 ? (
-                allCourses.map(c => (
+              ) : recentCourses.length > 0 ? (
+                recentCourses.map((c: any) => (
                   <HomeModuleCard
                     key={c.id}
                     module={{

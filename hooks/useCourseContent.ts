@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCourseContents } from '../services/api/courseService';
+import { isMoodleOnline } from '../services/api/moodleClient';
 import {
   parseCourseContent,
   parseMoodleSections,
@@ -49,6 +50,23 @@ export function useCourseContent(
 
     try {
       if (IS_DEV) console.log("[useCourseContent] Fetching content for course:", courseId);
+
+      // Offline-first : si pas de réseau, charger le cache immédiatement sans attendre le timeout API
+      const online = await isMoodleOnline();
+      if (!online) {
+        const cached = await AsyncStorage.getItem(courseContentKey(courseId)).catch(() => null);
+        if (cached) {
+          const cachedContents = JSON.parse(cached);
+          if (IS_DEV) console.log('[useCourseContent] Offline — cache chargé immédiatement pour:', courseId);
+          setSections(parseMoodleSections(cachedContents));
+          setCourseContent(parseCourseContent(courseId, cachedContents));
+          setIsLoading(false);
+          return;
+        }
+        setError('Hors ligne — ouvre ce cours en ligne une première fois pour le rendre disponible hors connexion');
+        setIsLoading(false);
+        return;
+      }
 
       const rawContents = await getCourseContents(token, courseId);
 

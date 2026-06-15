@@ -129,23 +129,27 @@ async function cacheDictation(
     return;
   }
 
-  // Extraire les mots depuis l'intro HTML
-  const words = parseDictationWords(assignment.intro || '');
-
-  // Extraire l'URL audio brute (sans token)
-  const allFiles = [...(assignment.introfiles ?? []), ...(assignment.introattachments ?? [])];
-  const audioFile = allFiles.find((f: any) =>
+  // Audio : introattachments UNIQUEMENT (règle alignée avec useActivityContent)
+  const audioFile = (assignment.introattachments ?? []).find((f: any) =>
     AUDIO_RE.test(f?.filename || '') || AUDIO_RE.test(f?.fileurl || '')
   );
-  let rawAudioUrl: string | null = audioFile?.fileurl
+  const rawAudioUrl: string | null = audioFile?.fileurl
     ? stripToken(audioFile.fileurl.replace('/pluginfile.php/', '/webservice/pluginfile.php/'))
     : null;
 
+  // Mot/phrase : texte exact de la description (intro), HTML strippé
+  const word = stripHtml(assignment.intro || '');
+  const words = word ? [{ word }] : [];
+
+  // Instructions optionnelles depuis "Instructions de l'activité"
+  const instructions = stripHtml(assignment.activity || '') || undefined;
+
   const data = {
-    id       : activity.instanceId,
-    title    : assignment.name || activity.title,
-    audioUrl : rawAudioUrl ?? undefined,
+    id          : activity.instanceId,
+    title       : assignment.name || activity.title,
+    audioUrl    : rawAudioUrl ?? undefined,
     words,
+    instructions,
   };
 
   await cacheActivity(activity.cmid, 'dictation', activity.courseId, data, rawAudioUrl);
@@ -320,37 +324,3 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-function parseDictationWords(introHtml: string): { word: string; hint?: string }[] {
-  if (!introHtml) return [];
-  const decoded = introHtml
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#039;/gi, "'");
-
-  const liMatches = Array.from(decoded.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi));
-  if (liMatches.length > 0) {
-    return liMatches
-      .map(m => m[1].replace(/<[^>]+>/g, '').trim())
-      .filter(s => s.length > 0)
-      .map(splitWordHint);
-  }
-
-  const plain = decoded.replace(/<br\s*\/?\s*>/gi, '\n').replace(/<[^>]+>/g, '\n');
-  const lines = plain.split(/\n|\r/).map(s => s.trim()).filter(s => s.length > 0);
-
-  const candidates = lines.length >= 2
-    ? lines
-    : lines[0]?.split(/[,;]/).map(s => s.trim()).filter(s => s.length > 0) ?? [];
-
-  return candidates.filter(s => /\S/.test(s)).map(splitWordHint);
-}
-
-function splitWordHint(raw: string): { word: string; hint?: string } {
-  const parts = raw.split('|').map(s => s.trim()).filter(Boolean);
-  return parts.length >= 2
-    ? { word: parts[0], hint: parts.slice(1).join(' | ') }
-    : { word: parts[0] || raw.trim() };
-}

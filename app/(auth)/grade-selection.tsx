@@ -2,6 +2,11 @@ import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
+
+const IS_DEV = process.env.NODE_ENV === 'development';
+import { getToken, getUserData } from "../../services/storage/tokenStorage";
+import { enrolUsersInCourses } from "../../services/api/moodleAuth";
+import { getCoursesForLanguageAndGrade } from "../../services/api/courseService";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -294,21 +299,34 @@ export default function GradeSelectionScreen() {
 
   const handleContinue = async () => {
     if (!selectedGrade) return;
-    
+
     setIsLoading(true);
     try {
       const language = await AsyncStorage.getItem(LANGUAGE_STORAGE_KEY);
-      
-      const preferences: UserPreferences = {
-        language: language || 'pulaar',
-        grade: selectedGrade
-      };
-      
+      const selectedLanguage = language || 'pulaar';
+
+      const preferences: UserPreferences = { language: selectedLanguage, grade: selectedGrade };
       await AsyncStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences));
-      
+
+      // Auto-inscription synchrone : on attend avant de naviguer pour que l'user soit
+      // bien inscrit quand il arrive sur l'écran d'accueil
+      try {
+        const [token, userData] = await Promise.all([getToken(), getUserData()]);
+        if (token && userData?.id) {
+          const courses = await getCoursesForLanguageAndGrade(token, selectedLanguage, selectedGrade);
+          const courseIds = courses.map((c: any) => c.id).filter(Boolean);
+          if (courseIds.length > 0) {
+            await enrolUsersInCourses(userData.id, courseIds);
+          }
+        }
+      } catch (enrollErr) {
+        // Enrollment failed (token absent, admin token manquant, réseau) — on continue
+        // L'enrollment sera re-tenté au prochain login via useLogin
+        if (IS_DEV) console.warn('[grade-selection] Auto-enrollment failed:', enrollErr);
+      }
+
       router.replace("/(tabs)/(home)" as any);
     } catch (error) {
-      console.error('Failed to save preferences:', error);
       router.replace("/(tabs)/(home)" as any);
     } finally {
       setIsLoading(false);
