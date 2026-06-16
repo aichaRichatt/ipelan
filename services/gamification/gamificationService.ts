@@ -187,7 +187,7 @@ export const getGlobalGamificationStats = async (userId: number): Promise<{
 
 export const syncUserGamificationToMoodle = async (
   userId: number,
-  stats: { totalXp: number; coins: number; lives: number; streak: number; allBadgeIds?: string[]; latestBadge?: string | null; lastLivesUpdate?: string | null; lastSync?: string | null; courseProgress?: Record<string, { c: number; t: number }> | null },
+  stats: { totalXp: number; coins: number; lives: number; streak: number; allBadgeIds?: string[]; latestBadge?: string | null; lastLivesUpdate?: string | null; lastSync?: string | null; courseProgress?: Record<string, { c: number; t: number }> | null; lastActivity?: string | null },
   userToken?: string
 ): Promise<boolean> => {
   const trySync = async (token: string): Promise<{ success: boolean; permissionError: boolean }> => {
@@ -207,32 +207,45 @@ export const syncUserGamificationToMoodle = async (
         "users[0][customfields][3][value]": String(stats.streak),
       };
 
+      // Compteur dynamique pour éviter les collisions d'index lors des champs conditionnels
+      let cf = 4;
+
       if (stats.allBadgeIds && stats.allBadgeIds.length > 0) {
-        params["users[0][customfields][4][type]"] = "ipelan_badges";
-        params["users[0][customfields][4][value]"] = stats.allBadgeIds.join(',');
-        params["users[0][customfields][5][type]"] = "ipelan_badges_count";
-        params["users[0][customfields][5][value]"] = String(stats.allBadgeIds.length);
+        params[`users[0][customfields][${cf}][type]`]  = "ipelan_badges";
+        params[`users[0][customfields][${cf}][value]`] = stats.allBadgeIds.join(',');
+        cf++;
+        params[`users[0][customfields][${cf}][type]`]  = "ipelan_badges_count";
+        params[`users[0][customfields][${cf}][value]`] = String(stats.allBadgeIds.length);
+        cf++;
       }
 
       if (stats.latestBadge) {
-        params["users[0][customfields][6][type]"] = "ipelan_last_badge"; // Dernier badge obtenu
-        params["users[0][customfields][6][value]"] = stats.latestBadge;
+        params[`users[0][customfields][${cf}][type]`]  = "ipelan_last_badge";
+        params[`users[0][customfields][${cf}][value]`] = stats.latestBadge;
+        cf++;
       }
 
-      //  Synchroniser le timestamp de dernière régénération de vies (multi-device)
       if (stats.lastLivesUpdate) {
-        params["users[0][customfields][7][type]"] = "ipelan_last_lives_update";
-        params["users[0][customfields][7][value]"] = stats.lastLivesUpdate;
+        params[`users[0][customfields][${cf}][type]`]  = "ipelan_last_lives_update";
+        params[`users[0][customfields][${cf}][value]`] = stats.lastLivesUpdate;
+        cf++;
       }
 
-      // ✅ Toujours écrire ipelan_last_sync — permet la détection de conflits multi-device
-      params["users[0][customfields][8][type]"] = "ipelan_last_sync";
-      params["users[0][customfields][8][value]"] = stats.lastSync || new Date().toISOString();
+      if (stats.lastActivity) {
+        params[`users[0][customfields][${cf}][type]`]  = "ipelan_last_activity";
+        params[`users[0][customfields][${cf}][value]`] = stats.lastActivity;
+        cf++;
+      }
 
-      // ✅ Progression des cours — permet à Device B de voir la progression immédiatement
+      // Toujours écrire ipelan_last_sync — permet la détection de conflits multi-device
+      params[`users[0][customfields][${cf}][type]`]  = "ipelan_last_sync";
+      params[`users[0][customfields][${cf}][value]`] = stats.lastSync || new Date().toISOString();
+      cf++;
+
+      // Progression des cours — permet à Device B de voir la progression immédiatement
       if (stats.courseProgress && Object.keys(stats.courseProgress).length > 0) {
-        params["users[0][customfields][9][type]"] = "ipelan_course_progress";
-        params["users[0][customfields][9][value]"] = JSON.stringify(stats.courseProgress);
+        params[`users[0][customfields][${cf}][type]`]  = "ipelan_course_progress";
+        params[`users[0][customfields][${cf}][value]`] = JSON.stringify(stats.courseProgress);
       }
 
       await moodleFetch("/webservice/rest/server.php", params, "POST");
@@ -376,11 +389,12 @@ export const triggerGamificationSync = async (userId: number, userToken?: string
 
     // ✅ Récupérer le timestamp de dernière régénération de vies depuis SQLite
     const db = await getDBConnection();
-    const userRow = await db.getFirstAsync<{ last_lives_update: string }>(
-      'SELECT last_lives_update FROM users WHERE id = ?',
+    const userRow = await db.getFirstAsync<{ last_lives_update: string; last_activity: string }>(
+      'SELECT last_lives_update, last_activity FROM users WHERE id = ?',
       [userId]
     );
     const lastLivesUpdate = userRow?.last_lives_update || null;
+    const lastActivity    = userRow?.last_activity    || null;
 
     // ✅ Récupérer la progression des cours pour la synchronisation multi-device
     const { getAllCourseProgress } = await import('../storage/course-progress');
@@ -399,8 +413,9 @@ export const triggerGamificationSync = async (userId: number, userToken?: string
       streak: stats.streak,
       allBadgeIds: stats.allBadgeIds,
       latestBadge: stats.latestBadge,
-      lastLivesUpdate,                    // ✅ Synchroniser pour multi-device
-      lastSync: new Date().toISOString(), // ✅ Horodatage de cette sync
+      lastLivesUpdate,
+      lastActivity,
+      lastSync: new Date().toISOString(),
       courseProgress: Object.keys(courseProgressMap).length > 0 ? courseProgressMap : null,
     }, userToken);
 

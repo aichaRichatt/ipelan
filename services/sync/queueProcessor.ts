@@ -40,16 +40,19 @@ async function processItem(
 
   try {
     const raw = JSON.parse(item.payload);
-    // Extraire les métadonnées internes avant d'envoyer à Moodle
+    // Extraire les métadonnées internes avant d'envoyer à Moodle.
+    // payloadToken préserve le token admin pour les items qui l'exigent
+    // (ex. core_grades_update_grades) — ne pas l'écraser avec le user token.
     const courseId = raw._courseId ? parseInt(raw._courseId as string, 10) : 0;
-    const { _courseId, ...params } = raw;
-    await moodleCall(item.wsfunction, params, token);
+    const { _courseId, wstoken: payloadToken, ...cleanParams } = raw;
+    const callToken = payloadToken || token;
+    await moodleCall(item.wsfunction, cleanParams, callToken);
     await removeFromQueue(item.id);
     if (IS_DEV) console.log('[QueueProcessor] ✅ Traité:', item.wsfunction);
 
     // Après une complétion confirmée par Moodle, marquer l'activité comme synchronisée
-    if (item.type === 'completion' && params.cmid && courseId > 0) {
-      await markActivitySynced(parseInt(params.cmid as string, 10), courseId).catch(() => {});
+    if (item.type === 'completion' && cleanParams.cmid && courseId > 0) {
+      await markActivitySynced(parseInt(cleanParams.cmid as string, 10), courseId).catch(() => {});
     }
 
     return true;

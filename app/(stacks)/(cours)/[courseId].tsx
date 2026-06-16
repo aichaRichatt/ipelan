@@ -307,7 +307,7 @@ export default function ModuleDetailScreen() {
           quiz: 'quiz',
           assign: 'dictation',
           choice: 'listening',
-          lesson: 'wordOrder', // covers both word-order and association lessons for count
+          lesson: 'wordOrder',  
           glossary: 'association',
         };
         

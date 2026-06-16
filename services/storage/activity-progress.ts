@@ -109,7 +109,7 @@ export const saveActivityScore = async (
     } catch (error: any) {
       lastError = error;
       const isLockError = error?.message?.includes('database is locked') || error?.code === 'database is locked';
-      console.warn('[ActivityProgress] Save attempt', attempt, 'failed:', isLockError ? 'database locked' : error.message);
+      if (IS_DEV) console.warn('[ActivityProgress] Save attempt', attempt, 'failed:', isLockError ? 'database locked' : error.message);
 
       if (isLockError && attempt < maxRetries) {
         await new Promise(r => setTimeout(r, 100 * attempt));
@@ -119,7 +119,7 @@ export const saveActivityScore = async (
     }
   }
 
-  console.error('[ActivityProgress] Failed to save after', maxRetries, 'attempts:', lastError);
+  if (IS_DEV) console.error('[ActivityProgress] Failed to save after', maxRetries, 'attempts:', lastError);
 };
 
 export const getBestScore = async (
@@ -162,7 +162,7 @@ export const getBestScore = async (
       syncedAt: result.synced_at,
     };
   } catch (error) {
-    console.error('Failed to get best score:', error);
+    if (IS_DEV) console.error('Failed to get best score:', error);
     return null;
   }
 };
@@ -206,7 +206,7 @@ export const getAllScoresForCourse = async (
     }
     return scoreMap;
   } catch (error) {
-    console.error('Failed to get all scores for course:', error);
+    if (IS_DEV) console.error('Failed to get all scores for course:', error);
     return new Map();
   }
 };
@@ -232,9 +232,9 @@ export const markActivitySynced = async (
       userId != null ? [now, moduleId, courseId, userId] : [now, moduleId, courseId]
     );
 
-    console.log('[ActivityProgress]   Marked as synced:', { moduleId, courseId });
+    if (IS_DEV) console.log('[ActivityProgress] ✅ Marked as synced:', { moduleId, courseId });
   } catch (error) {
-    console.error('[ActivityProgress] Failed to mark as synced:', error);
+    if (IS_DEV) console.error('[ActivityProgress] Failed to mark as synced:', error);
     // Don't throw - this is non-critical
   }
 };
@@ -261,7 +261,7 @@ export const isActivitySynced = async (
 
     return !!result?.synced_at;
   } catch (error) {
-    console.error('[ActivityProgress] Failed to check sync status:', error);
+    if (IS_DEV) console.error('[ActivityProgress] Failed to check sync status:', error);
     return false;
   }
 };
@@ -304,7 +304,7 @@ export const getActivityProgress = async (
       xpEarned: result.xp_earned,
     };
   } catch (error) {
-    console.error('Failed to get activity progress:', error);
+    if (IS_DEV) console.error('Failed to get activity progress:', error);
     return null;
   }
 };
@@ -344,7 +344,7 @@ export const getAllProgressForCourse = async (
       xpEarned: r.xp_earned,
     }));
   } catch (error) {
-    console.error('Failed to get all progress for course:', error);
+    if (IS_DEV) console.error('Failed to get all progress for course:', error);
     return [];
   }
 };
@@ -370,13 +370,14 @@ export const incrementActivityAttempts = async (
     );
     return current?.attempts_count || 1;
   } catch (error) {
-    console.error('Failed to increment attempts:', error);
+    if (IS_DEV) console.error('Failed to increment attempts:', error);
     return 1;
   }
 };
 
 export const getCourseActivityStats = async (
-  courseId: number
+  courseId: number,
+  userId?: number
 ): Promise<{
   total: number;
   completed: number;
@@ -393,12 +394,12 @@ export const getCourseActivityStats = async (
         COUNT(*) as total,
         SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed,
         SUM(xp_earned) as totalXp
-       FROM activity_progress WHERE course_id = ?`,
-      [courseId]
+       FROM activity_progress WHERE course_id = ?${userId != null ? ' AND user_id = ?' : ''}`,
+      userId != null ? [courseId, userId] : [courseId]
     );
     return result || { total: 0, completed: 0, totalXp: 0 };
   } catch (error) {
-    console.error('Failed to get course activity stats:', error);
+    if (IS_DEV) console.error('Failed to get course activity stats:', error);
     return { total: 0, completed: 0, totalXp: 0 };
   }
 };
@@ -430,7 +431,7 @@ export const getQuizStats = async (userId: number | null | undefined): Promise<Q
       perfectScores: result?.perfectScores ?? 0,
     };
   } catch (error) {
-    console.error('[ActivityProgress] Failed to get quiz stats:', error);
+    if (IS_DEV) console.error('[ActivityProgress] Failed to get quiz stats:', error);
     return { quizPassed: 0, perfectScores: 0 };
   }
 };

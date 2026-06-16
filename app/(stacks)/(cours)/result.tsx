@@ -17,7 +17,7 @@ const IS_DEV = process.env.NODE_ENV === "development";
 const activityTypeMap: Record<string, ActivityType> = {
   'Quiz': 'quiz',
   'Dictée audio': 'dictation',
-  'Listening': 'listening',
+  'Écoute': 'listening',
   'Association': 'association',
   'Ordre des mots': 'wordOrder',
 };
@@ -307,14 +307,13 @@ export default function ResultScreen() {
         } catch { activityCount = 0; }
       }
 
-      try {
-        if (isCancelled) return;
-
-        let cEarned = 0;
-        let lLost = 0;
-
-        if (userId) {
-          // association gère ses propres vies (pénalité Duolingo) → ne pas déduire ici
+      // Déduire la vie / attribuer coins AVANT tout check isCancelled —
+      // c'est une opération SQLite locale qui doit s'exécuter même si l'écran
+      // a été quitté pendant la requête réseau précédente (getCourseContents).
+      let cEarned = 0;
+      let lLost = 0;
+      if (userId) {
+        try {
           const skipLife = activityType === 'association';
           const { coinsEarned, livesLost } = await processActivityResults(userId, score, total, { skipLifeDeduction: skipLife });
           cEarned = coinsEarned;
@@ -323,8 +322,12 @@ export default function ResultScreen() {
             setEarnedCoins(coinsEarned);
             setLostLives(livesLost);
           }
+        } catch (lifeErr) {
+          if (IS_DEV) console.warn('[Result] processActivityResults failed:', lifeErr);
         }
+      }
 
+      try {
         //  Sauvegarde locale via le hook (fonctionne hors-ligne)
         await saveProgressLocally({
           moduleId,
@@ -413,13 +416,6 @@ export default function ResultScreen() {
             maxScore: total,
             userId: userId ?? undefined,
             instanceId,
-          }).then(async (result) => {
-            if (isCancelled) return;
-            if (result === 'success') {
-              setTimeout(() => {
-                if (!isCancelled) { /* state cleared automatically */ }
-              }, 2000);
-            }
           });
         }
 
@@ -483,6 +479,21 @@ export default function ResultScreen() {
   
   const grade = getGrade();
   
+  const handleReplay = () => {
+    const routeMap: Record<string, string> = {
+      quiz:        '/(stacks)/(cours)/quiz-native',
+      dictation:   '/(stacks)/(cours)/dictation',
+      listening:   '/(stacks)/(cours)/listening',
+      association: '/(stacks)/(cours)/association',
+      wordOrder:   '/(stacks)/(cours)/game',
+    };
+    const target = routeMap[activityType] ?? routeMap.quiz;
+    const replayParams = activityType === 'quiz'
+      ? { cmid: String(moduleId), instanceId: String(instanceId), courseId: String(courseId), moduleTitle: params.moduleTitle ?? '' }
+      : { moduleId: String(moduleId), cmid: String(moduleId), instanceId: String(instanceId), courseId: String(courseId), moduleTitle: params.moduleTitle ?? '' };
+    router.replace({ pathname: target, params: replayParams } as any);
+  };
+
   const handleContinue = () => {
     // Priorité 1 : courseId passé en paramètre → retour direct au cours
     if (courseId && courseId > 0) {
@@ -503,12 +514,12 @@ export default function ResultScreen() {
 
   return (
     <SafeAreaView style={styles.flex1_bgFAF9F6} edges={['top']}>
-      <View style={styles.px5_py4_flexrow_itemscenter_bg}>
+      {/* <View style={styles.px5_py4_flexrow_itemscenter_bg}>
         <Pressable onPress={() => router.back()} style={styles.mr4_p2_ml2}>
           <Feather name="arrow-left" size={24} color="black" />
         </Pressable>
         <Text style={styles.textlg_fontbold_textgray900}>Résultats</Text>
-      </View>
+      </View> */}
       
       <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 120 }}>
         <View style={styles.flex1_itemscenter_justifycente}>
@@ -574,7 +585,7 @@ export default function ResultScreen() {
 
             <View style={styles.flexrow_wfull}>
               <Pressable
-                onPress={() => router.back()}
+                onPress={handleReplay}
                 style={styles.flex1_py4_roundedxl_mr2_bggray}
               >
                 <Text style={styles.fontbold_textcenter_textgray70}>Rejouer</Text>
@@ -587,14 +598,14 @@ export default function ResultScreen() {
               </Pressable>
             </View>
             
-            {courseId > 0 && (
+            {/* {courseId > 0 && (
               <Pressable
                 onPress={() => router.replace(`/(stacks)/(cours)/${courseId}` as any)}
                 style={styles.mt4_py2}
               >
                 <Text style={styles.textgray500_textcenter}>Retour au module</Text>
               </Pressable>
-            )}
+            )} */}
           </View>
         </View>
       </ScrollView>

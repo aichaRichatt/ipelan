@@ -166,7 +166,7 @@ export function getContentTypeLabel(type: ActivityType): string {
   const labels: Record<ActivityType, string> = {
     quiz: 'Quiz',
     dictation: 'Dictée',
-    listening: 'Compréhension orale',
+    listening: 'Écoute',
     association: 'Association',
     wordOrder: 'Ordre des mots',
     lesson: 'Leçon',

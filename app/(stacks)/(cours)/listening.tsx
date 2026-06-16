@@ -166,7 +166,7 @@ export default function ListeningScreen() {
     }).totalXP;
     const iId = params.instanceId || params.moduleId || '0';
     router.push(
-      `/(stacks)/(cours)/result?activity=Listening&score=${score}&total=${exercises.length}&xp=${earnedXp}&moduleId=${params.moduleId || ''}&instanceId=${iId}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Compréhension Orale')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}` as any
+      `/(stacks)/(cours)/result?activity=%C3%89coute&score=${score}&total=${exercises.length}&xp=${earnedXp}&moduleId=${params.moduleId || ''}&instanceId=${iId}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Compréhension Orale')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}` as any
     );
   };
 

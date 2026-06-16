@@ -582,37 +582,33 @@ export async function getAttemptReview(
  * Extrait le score final d'une review Moodle.
  *
  * Structure réelle de mod_quiz_get_attempt_review :
- *   attempt.sumgrades → score brut (nombre de bonnes réponses, ex. 1.0)
- *   grade             → note sur l'échelle du quiz (ex. "10" si maxgrade=10, PAS un %)
- *   questions         → tableau des questions (source fiable pour le total)
+ *   attempt.sumgrades  → points obtenus par l'étudiant (ex. 10.0 pour 10/10)
+ *   questions[].maxmark → points max par question (peut être > 1)
+ *   grade               → note sur l'échelle du quiz (PAS un %)
  *
- * RÈGLE : utiliser sumgrades / questionsCount comme source principale.
- * review.grade est sur l'échelle du quiz (0-10 par défaut) — pas un pourcentage.
+ * RÈGLE : maxgrade = sum(questions[].maxmark) → diviseur correct quelle que soit
+ * la pondération des questions (1 pt/question ou 10 pts/question, etc.).
  */
 export function extractFinalScore(review: any): {
   sumgrades: number;
   maxgrade: number;
   percentage: number;
 } {
-  const attempt       = review?.attempt || {};
-  const sumgrades     = Number(attempt.sumgrades ?? 0);
-  const questionsCount = Array.isArray(review?.questions) ? review.questions.length : 0;
-  const maxgrade      = questionsCount > 0 ? questionsCount : Math.max(1, Math.round(sumgrades) || 1);
+  const attempt   = review?.attempt || {};
+  const sumgrades = Number(attempt.sumgrades ?? 0);
+  const questions = Array.isArray(review?.questions) ? review.questions : [];
 
-  // Priorité 1 : sumgrades / questionsCount (fiable — indépendant de l'échelle du quiz)
-  if (questionsCount > 0) {
-    const percentage = Math.round((sumgrades / questionsCount) * 100);
-    return { sumgrades, maxgrade, percentage };
-  }
+  // Somme des maxmark : seule source fiable pour les quiz à pondération variable
+  const sumMaxmarks = questions.reduce(
+    (acc: number, q: any) => acc + (Number(q.maxmark) || 0),
+    0
+  );
 
-  // Priorité 2 : review.grade est un pourcentage strict (entre 0 et 100, sans ambiguïté)
-  // Cas : quiz avec notation sur 100, grade="66.67"
-  const gradeRaw = review?.grade != null ? Number(review.grade) : NaN;
-  if (!isNaN(gradeRaw) && gradeRaw >= 0 && gradeRaw <= 100 && gradeRaw !== sumgrades) {
-    return { sumgrades, maxgrade, percentage: Math.round(gradeRaw) };
-  }
+  const maxgrade = sumMaxmarks > 0
+    ? sumMaxmarks
+    : (questions.length > 0 ? questions.length : Math.max(1, sumgrades || 1));
 
-  // Fallback : 0%
-  return { sumgrades, maxgrade, percentage: 0 };
+  const percentage = Math.min(100, Math.round((sumgrades / maxgrade) * 100));
+  return { sumgrades, maxgrade, percentage };
 }
 

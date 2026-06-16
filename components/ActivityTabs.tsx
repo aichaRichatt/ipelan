@@ -12,7 +12,7 @@ const TABS: { key: FilterTab; label: string }[] = [
   { key: 'all', label: 'Tous' },
   { key: 'quiz', label: 'Quiz' },
   { key: 'dictation', label: 'Dictée' },
-  { key: 'listening', label: 'Listening' },
+  { key: 'listening', label: 'Écoute' },
   { key: 'association', label: 'Association' },
   { key: 'wordOrder', label: 'Ordre' },
 ];

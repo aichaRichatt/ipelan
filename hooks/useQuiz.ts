@@ -364,7 +364,7 @@ export function useQuiz(
 
       if (review) {
         const { sumgrades, maxgrade, percentage } = extractFinalScore(review);
-        const total = questions.length || Math.round(maxgrade) || 1;
+        const total = Math.round(maxgrade) || questions.length || 1;
         finalScore = {
           correct  : Math.round(sumgrades),   // sumgrades = nombre brut de bonnes réponses
           total,

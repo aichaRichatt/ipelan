@@ -27,15 +27,21 @@ const IS_DEV = process.env.NODE_ENV === "development";
 const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN;
 
 async function moodleFetchWithFallback(endpoint: string, params: Record<string, any>, userToken: string) {
-  let result = await moodleFetch(endpoint, params);
+  try {
+    return await moodleFetch(endpoint, params);
+  } catch (err: any) {
+    // moodleFetch throws on data.exception — result?.exception is unreachable after a normal return
+    const isPermError =
+      err?.errorcode === 'nopermissions' ||
+      err?.errorcode === 'accessdenied' ||
+      err?.message?.toLowerCase().includes('permission');
 
-  if (result?.exception && ADMIN_TOKEN && params.wstoken === userToken) {
-    if (IS_DEV) console.log('[useActivityContent] User token failed for ' + params.wsfunction + ', trying admin...');
-    const adminParams = { ...params, wstoken: ADMIN_TOKEN };
-    result = await moodleFetch(endpoint, adminParams);
+    if (isPermError && ADMIN_TOKEN && params.wstoken === userToken) {
+      if (IS_DEV) console.log('[useActivityContent] User token refusé pour ' + params.wsfunction + ', retry admin...');
+      return await moodleFetch(endpoint, { ...params, wstoken: ADMIN_TOKEN });
+    }
+    throw err;
   }
-
-  return result;
 }
 
 export interface ActivityQuestion {
@@ -140,7 +146,7 @@ export function useActivityContent(
     if (rawAudioUrl && token) {
       downloadActivityAudio(cmid, rawAudioUrl, token).catch(() => {});
     }
-  }, [dictation]);
+  }, [dictation, cmid, courseId, token]);
 
   useEffect(() => {
     if (!listening || !cmid || cachedCmidRef.current === cmid) return;
@@ -150,17 +156,17 @@ export function useActivityContent(
     if (rawAudioUrl && token) {
       downloadActivityAudio(cmid, rawAudioUrl, token).catch(() => {});
     }
-  }, [listening]);
+  }, [listening, cmid, courseId, token]);
 
   useEffect(() => {
     if (!association || !cmid) return;
     cacheActivity(cmid, 'association', courseId || 0, association, null).catch(() => {});
-  }, [association]);
+  }, [association, cmid, courseId]);
 
   useEffect(() => {
     if (!wordOrder || !cmid) return;
     cacheActivity(cmid, 'word_order', courseId || 0, wordOrder, null).catch(() => {});
-  }, [wordOrder]);
+  }, [wordOrder, cmid, courseId]);
 
   const fetchActivity = useCallback(async () => {
     const idToUse = moduleId || instanceId;
