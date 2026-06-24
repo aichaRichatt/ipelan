@@ -21,7 +21,6 @@
     "expo": "~54.0.34",
     "expo-audio": "~1.1.1",
     "expo-background-fetch": "~14.0.9",
-    "expo-background-task": "^55.0.17",
     "expo-blur": "~15.0.8",
     "expo-constants": "~18.0.13",
     "expo-document-picker": "~14.0.8",

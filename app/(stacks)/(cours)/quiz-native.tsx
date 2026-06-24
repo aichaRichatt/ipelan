@@ -19,7 +19,13 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, Text
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import { parseQuestionHtml, ParsedQuestion } from '@/services/api/quizService';
-import { getQuizOffline, saveOfflineQuizAttempt } from '@/services/quiz/quizOfflineService';
+import {
+  getOfflineQuizProgress,
+  getQuizOffline,
+  saveOfflineQuizAttempt,
+  saveOfflineQuizProgress,
+} from '@/services/quiz/quizOfflineService';
+import { processQueue } from '@/services/sync/queueProcessor';
 import { saveActivityScore } from '@/services/storage/activity-progress';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
@@ -275,7 +281,54 @@ export default function QuizNativePage() {
   const [offlineScore,      setOfflineScore]      = React.useState<{ correct: number; total: number } | null>(null);
   const userId = useSelector((s: RootState) => s.auth.user?.id ?? 0);
 
-  // Quand useQuiz échoue → essayer le cache
+  // ─── Sync en attente ────────────────────────────────────────────────────────
+  // Un attempt déjà terminé hors-ligne (quiz_cache.attempt_state ===
+  // 'offline_completed') n'a pas encore été poussé vers Moodle. Si on laissait
+  // useQuiz reprendre ce même attempt en ligne, l'utilisateur pourrait le
+  // re-répondre via le flux online pendant que le sync arrière-plan tente
+  // aussi de le finaliser avec les anciennes réponses → double soumission /
+  // tentative Moodle corrompue. On bloque donc l'écran de quiz tant que ce
+  // sync n'est pas résolu.
+  const [pendingSync,   setPendingSync]   = React.useState<'checking' | 'none' | 'pending'>('checking');
+  const [isSyncingNow,  setIsSyncingNow]  = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const cached = await getQuizOffline(cmid);
+        if (!cancelled) {
+          setPendingSync(cached?.attemptState === 'offline_completed' ? 'pending' : 'none');
+        }
+      } catch {
+        if (!cancelled) setPendingSync('none');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [cmid]);
+
+  const handleSyncNow = async () => {
+    setIsSyncingNow(true);
+    try {
+      await processQueue();
+      const cached = await getQuizOffline(cmid);
+      if (cached?.attemptState === 'synced') {
+        setPendingSync('none');
+        reload();
+      } else {
+        Alert.alert(
+          'Synchronisation impossible',
+          'Vérifie ta connexion et réessaie. Tes réponses restent sauvegardées localement.'
+        );
+      }
+    } finally {
+      setIsSyncingNow(false);
+    }
+  };
+
+  // Quand useQuiz échoue → essayer le cache, et reprendre une éventuelle
+  // progression déjà sauvegardée (autosave) pour ne pas perdre les réponses
+  // données avant un crash / fermeture de l'app.
   React.useEffect(() => {
     if (!error) return;
     (async () => {
@@ -289,10 +342,22 @@ export default function QuizNativePage() {
           setOfflineAttemptId(cached.attemptId);
           setOfflineMode(true);
           if (IS_DEV) console.log(`[QuizNative] Fallback offline — ${parsed.length} questions depuis cache`);
+
+          if (userId) {
+            const progress = await getOfflineQuizProgress(userId, cmid);
+            if (progress && !progress.finishedAt && progress.attemptId === cached.attemptId) {
+              const restored: Record<string, string> = {};
+              progress.answers.forEach(a => { restored[a.name] = a.value; });
+              setOfflineAnswers(restored);
+              const firstUnanswered = parsed.findIndex(q => !restored[q.answerInputName]);
+              setOfflineIdx(firstUnanswered >= 0 ? firstUnanswered : 0);
+              if (IS_DEV) console.log(`[QuizNative] Progression offline restaurée — ${progress.answers.length} réponses`);
+            }
+          }
         }
       } catch {}
     })();
-  }, [error, cmid]);
+  }, [error, cmid, userId]);
 
   // Données actives : online ou offline selon le mode
   const activeQuestions    = offlineMode ? offlineQuestions  : questions;
@@ -309,12 +374,41 @@ export default function QuizNativePage() {
 
   // ─── États de chargement/erreur ─────────────────────────────────────────
 
-  if (isLoading) {
+  if (isLoading || pendingSync === 'checking') {
     return (
       <SafeAreaView style={styles.style_6} edges={['top']}>
         <View style={styles.style_5}>
           <ActivityIndicator size="large" color="#4a90e2" />
           <Text style={styles.mt4_textgray500}>Chargement du quiz…</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (pendingSync === 'pending') {
+    return (
+      <SafeAreaView style={styles.style_4} edges={['top']}>
+        <View style={styles.style_3}>
+          <Feather name="alert-circle" size={48} color="#F59E0B" />
+          <Text style={styles.mt4_textxl_fontbold_textgray90}>Synchronisation en attente</Text>
+          <Text style={styles.mt2_textgray500_textcenter}>
+            Tu as déjà terminé ce quiz hors-ligne. Il doit être synchronisé avec Moodle
+            avant de pouvoir le refaire.
+          </Text>
+          <View style={styles.flexrow_mt6}>
+            <Pressable onPress={() => router.back()} style={styles.bggray200_px6_py3_roundedxl_mr}>
+              <Text style={styles.textgray700_fontbold}>Retour</Text>
+            </Pressable>
+            <Pressable
+              onPress={handleSyncNow}
+              disabled={isSyncingNow}
+              style={[styles.bg4a90e2_px6_py3_roundedxl, isSyncingNow && { opacity: 0.6 }]}
+            >
+              <Text style={styles.textwhite_fontbold}>
+                {isSyncingNow ? 'Synchronisation…' : 'Synchroniser maintenant'}
+              </Text>
+            </Pressable>
+          </View>
         </View>
       </SafeAreaView>
     );
@@ -374,7 +468,21 @@ export default function QuizNativePage() {
   // ─── Actions offline ───────────────────────────────────────────────────────
   const handleOfflineSelect = (value: string) => {
     if (!currentQuestion.answerInputName) return;
-    setOfflineAnswers(prev => ({ ...prev, [currentQuestion.answerInputName]: value }));
+    setOfflineAnswers(prev => {
+      const next = { ...prev, [currentQuestion.answerInputName]: value };
+      if (offlineAttemptId && userId) {
+        const answersArr = Object.entries(next).map(([name, val]) => ({
+          slot: offlineQuestions.findIndex(q => q.answerInputName === name) + 1,
+          name,
+          value: val,
+        }));
+        // Autosave — persiste chaque réponse immédiatement pour survivre à un
+        // crash/fermeture de l'app avant la fin du quiz (voir saveOfflineQuizProgress)
+        saveOfflineQuizProgress(userId, cmid, instanceId, offlineAttemptId, answersArr, startTimeRef.current)
+          .catch(() => {});
+      }
+      return next;
+    });
   };
 
   const handleOfflineFinish = async () => {
@@ -393,7 +501,7 @@ export default function QuizNativePage() {
         name,
         value,
       }));
-      await saveOfflineQuizAttempt(userId, cmid, 0, offlineAttemptId, answers, correct, total, startTimeRef.current)
+      await saveOfflineQuizAttempt(userId, cmid, instanceId, offlineAttemptId, answers, correct, total, startTimeRef.current)
         .catch(() => {});
     }
 

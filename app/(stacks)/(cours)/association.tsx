@@ -201,7 +201,7 @@ export default function AssociationScreen() {
     const pct = (score / totalPairs) * 100;
     if (pct === 100) return '🏆';
     if (pct >= 80)   return '🌟';
-    if (pct >= 60)   return '👏';
+    if (pct >= 50)   return '👏';
     if (pct >= 40)   return '💪';
     return '📚';
   };
@@ -238,7 +238,7 @@ export default function AssociationScreen() {
   // ── Écran résultat ────────────────────────────────────────────────────────
   if (showResult) {
     const percentage = Math.round((score / totalPairs) * 100);
-    const isGood     = percentage >= 60;
+    const isGood     = percentage >= 50;
     const timeSpent  = Math.floor((Date.now() - startTimeRef.current) / 1000);
     const isPerfect  = score === totalPairs && livesLost === 0;
     const earnedXp   = Math.max(0, calculateXP('association', score, totalPairs, {

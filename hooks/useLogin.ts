@@ -123,6 +123,7 @@ export function useLogin() {
       const finalUsername = moodleUser?.username || siteInfo?.username || username;
       const finalFullName = `${finalFirstName} ${finalLastName}`.trim() || finalUsername;
       const finalAvatar = moodleUser?.profileimageurl || siteInfo?.userpictureurl || "";
+      const finalPhone  = moodleUser?.phone1 || moodleUser?.phone2 || undefined;
 
       const getCustomField = (u: any, shortname: string) => {
         return u?.customfields?.find((f: any) => f.shortname === shortname)?.value;
@@ -146,8 +147,9 @@ export function useLogin() {
         coins: parsedCoins,
         lives: parsedLives,
         streak: parsedStreak,
-        badges: parsedBadge ? [parsedBadge] : [],
+        badges: parsedBadge ? parsedBadge.split(',').map((s: string) => s.trim()).filter(Boolean) : [],
         avatar: finalAvatar,
+        phone: finalPhone,
       };
 
       await saveToken(authToken);

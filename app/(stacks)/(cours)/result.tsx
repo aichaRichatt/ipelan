@@ -127,7 +127,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16
   },
   rewardIcon: {
-    fontSize: 20,
+    fontSize: 28,
     marginRight: 8
   },
   text2xl_fontbold_textgray900_m: {
@@ -163,7 +163,7 @@ const styles = StyleSheet.create({
     fontWeight: '700'
   },
   textpurple700_fontbold_textlg: {
-    fontSize: 18,
+    fontSize: 22,
     fontWeight: '700'
   },
   textred700_fontbold_textlg: {
@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
   },
   textyellow700_fontbold_textlg: {
     color: '#A16207',
-    fontSize: 18,
+    fontSize: 22,
     fontWeight: '700'
   },
   w40_h40_roundedfull_itemscente: {
@@ -252,7 +252,7 @@ export default function ResultScreen() {
   const xp = Math.min(Math.max(0, rawXp), maxXP);
   
   const percentage = Math.round((score / Math.max(total, 1)) * 100);
-  const isCompleted = percentage >= 60;
+  const isCompleted = percentage >= 50;
 
   const [earnedCoins, setEarnedCoins] = useState(0);
   const [lostLives, setLostLives] = useState(0);
@@ -314,8 +314,7 @@ export default function ResultScreen() {
       let lLost = 0;
       if (userId) {
         try {
-          const skipLife = activityType === 'association';
-          const { coinsEarned, livesLost } = await processActivityResults(userId, score, total, { skipLifeDeduction: skipLife });
+          const { coinsEarned, livesLost } = await processActivityResults(userId, score, total);
           cEarned = coinsEarned;
           lLost = livesLost;
           if (!isCancelled) {
@@ -392,8 +391,13 @@ export default function ResultScreen() {
             }
           }
 
-          const { triggerGamificationSync } = await import('@/services/gamification/gamificationService');
-          await triggerGamificationSync(userId, token || undefined);
+          // Offline-first : passe par syncQueue (persisté en SQLite gamification_queue,
+          // retry automatique avec backoff) plutôt qu'un appel direct qui serait perdu
+          // silencieusement si hors-ligne au moment de l'appel.
+          if (token) {
+            const { syncQueue } = await import('@/services/sync/syncQueue');
+            syncQueue.syncGamification(userId, token);
+          }
         }
 
         if (IS_DEV) console.log('[Result]  Local save successful');
@@ -473,7 +477,7 @@ export default function ResultScreen() {
   const getGrade = () => {
     if (percentage >= 90) return { text: "Excellent !", color: "#10B981" };
     if (percentage >= 75) return { text: "Bien joué !", color: "#4a90e2" };
-    if (percentage >= 60) return { text: "Continue !", color: "#F59E0B" };
+    if (percentage >= 50) return { text: "Continue !", color: "#F59E0B" };
     return { text: "Persévère !", color: "#EF4444" };
   };
   

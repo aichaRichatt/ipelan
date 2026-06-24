@@ -5,7 +5,7 @@ import {
   cacheActivity,
   downloadActivityAudio,
   getActivityOffline,
-  buildAuthAudioUrl,
+  resolveAudioUrl,
 } from '../services/activities/activityOfflineService';
 
 /** Retire le token d'une URL Moodle authentifiée pour obtenir le rawAudioUrl persistable. */
@@ -187,7 +187,7 @@ export function useActivityContent(
         const cached = await getActivityOffline(cmid);
         if (!isMountedRef.current) return;
         if (cached) {
-          const au = cached.rawAudioUrl ? buildAuthAudioUrl(cached.rawAudioUrl, token) : undefined;
+          const au = resolveAudioUrl(cached, token) ?? undefined;
           if (cached.activityType === 'dictation')   setDictation({ ...(cached.data as DictationData),   audioUrl: au });
           if (cached.activityType === 'listening')   setListening({ ...(cached.data as ListeningData),   audioUrl: au });
           if (cached.activityType === 'association') setAssociation(cached.data as AssociationData);
@@ -526,7 +526,7 @@ async function loadDictationWithRetry(
     const cached = await getActivityOffline(cmid);
     const d = cached?.data as DictationData | undefined;
     if (d?.words !== undefined) {
-      const au = cached!.rawAudioUrl ? buildAuthAudioUrl(cached!.rawAudioUrl, token) : undefined;
+      const au = resolveAudioUrl(cached!, token) ?? undefined;
       setDictation({ ...d, audioUrl: au });
       return;
     }
@@ -642,7 +642,7 @@ async function loadListeningWithRetry(
     const cached = await getActivityOffline(cmid);
     const l = cached?.data as ListeningData | undefined;
     if (l?.options !== undefined) {
-      const au = cached!.rawAudioUrl ? buildAuthAudioUrl(cached!.rawAudioUrl, token) : undefined;
+      const au = resolveAudioUrl(cached!, token) ?? undefined;
       setListening({ ...l, audioUrl: au });
       return;
     }

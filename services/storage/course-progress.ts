@@ -40,12 +40,15 @@ export const saveCourseProgress = async (
         `INSERT INTO course_progress (user_id, course_id, completed_activities, total_activities, total_xp, best_score, last_activity_at, synced_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(user_id, course_id) DO UPDATE SET
-           completed_activities = MAX(excluded.completed_activities, completed_activities),
            total_activities = CASE WHEN excluded.total_activities > 0 THEN excluded.total_activities ELSE total_activities END,
+           completed_activities = MIN(
+             MAX(excluded.completed_activities, completed_activities),
+             CASE WHEN excluded.total_activities > 0 THEN excluded.total_activities ELSE total_activities END
+           ),
            total_xp = MAX(excluded.total_xp, total_xp),
            best_score = MAX(excluded.best_score, best_score),
            last_activity_at = excluded.last_activity_at,
-           synced_at = excluded.synced_at`,
+           synced_at = COALESCE(excluded.synced_at, synced_at)`,
         [
           userId,
           courseId,
@@ -339,13 +342,14 @@ export async function calculateCourseProgress(
     console.warn('[calculateCourseProgress] Failed to read local progress');
   }
 
-  // Fusionner : Priorité Moodle > Local
+  // Fusionner : OR logique (Section 10 CLAUDE.md) — un module complété
+  // localement mais pas encore synchronisé sur Moodle (offline-first) ne doit
+  // jamais "disparaître" simplement parce que Moodle répond encore `false`.
+  // ⚠️ Ne pas remplacer par `??` : `false ?? x` retourne `false`, ce qui
+  // laisserait un `false` Moodle (pas encore synchronisé) écraser un `true` local.
   let completedCount = 0;
   for (const mod of completable) {
-    const isCompleted =
-      moodleMap.get(mod.cmid) ??
-      localMap.get(mod.cmid) ??
-      false;
+    const isCompleted = (moodleMap.get(mod.cmid) ?? false) || (localMap.get(mod.cmid) ?? false);
 
     if (isCompleted) {
       completedCount++;

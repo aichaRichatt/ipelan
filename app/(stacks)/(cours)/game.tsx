@@ -1,6 +1,7 @@
 import { useActivityContent } from "@/hooks/useActivityContent";
 import { moodleCall } from "@/services/api/moodleClient";
 import { RootState } from "@/services/redux/store";
+import { addToSyncQueue } from "@/services/storage/sync-queue";
 import { shuffle } from "@/utils/shuffle";
 import { calculateXP } from "@/utils/xpCalculator";
 import { Feather } from "@expo/vector-icons";
@@ -41,6 +42,7 @@ export default function GameScreen() {
   }>();
 
   const token  = useSelector((state: RootState) => state.auth.token);
+  const userId = useSelector((state: RootState) => state.auth.user?.id);
   const streak = useSelector((state: RootState) => state.auth.user?.streak ?? 0);
   const startTimeRef = useRef(Date.now());
 
@@ -134,7 +136,15 @@ export default function GameScreen() {
     if (token && wordOrderData?.id) {
       try {
         await moodleCall('mod_lesson_finish_attempt', { lessonid: String(wordOrderData.id) }, token);
-      } catch {}
+      } catch {
+        // Hors-ligne ou échec réseau : ne pas perdre l'appel, le mettre en queue (sync_queue générique, retry au retour réseau)
+        await addToSyncQueue(
+          'completion',
+          'mod_lesson_finish_attempt',
+          { wstoken: token, lessonid: String(wordOrderData.id), moodlewsrestformat: 'json' },
+          userId
+        ).catch(() => {});
+      }
     }
     const iid = params.instanceId || params.moduleId || '0';
     const elapsedSeconds = Math.round((Date.now() - startTimeRef.current) / 1000);
@@ -142,7 +152,7 @@ export default function GameScreen() {
       perfectScore: score === sentences.length && sentences.length > 0,
       timeSpent: elapsedSeconds, streak,
     }).totalXP;
-    router.push(
+    router.replace(
       `/(stacks)/(cours)/result?activity=Ordre+des+mots&score=${score}&total=${sentences.length}&xp=${xp}&moduleId=${params.moduleId || ''}&instanceId=${iid}&moduleTitle=${encodeURIComponent(params.moduleTitle || 'Ordre des mots')}&courseId=${params.courseId || ''}&returnRoute=${encodeURIComponent(`/(stacks)/(cours)/${params.courseId || ''}`)}` as any
     );
   };
@@ -157,7 +167,7 @@ export default function GameScreen() {
     const pct = (score / (sentences.length || 1)) * 100;
     if (pct === 100) return '🏆';
     if (pct >= 80)   return '🌟';
-    if (pct >= 60)   return '👏';
+    if (pct >= 50)   return '👏';
     if (pct >= 40)   return '💪';
     return '📚';
   };

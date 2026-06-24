@@ -1,14 +1,4 @@
-/**
- * courseDownloadService — Téléchargement en batch de toutes les activités d'un cours.
- *
- * Principe offline-first :
- *   1. Fetch les données depuis Moodle (1 appel réseau par type si possible)
- *   2. Cache SQLite via cacheActivity()
- *   3. Télécharge les fichiers audio localement via downloadActivityAudio()
- *
- * Appelé depuis [courseId].tsx bouton "Télécharger pour hors-ligne".
- */
-
+ 
 import { moodleCall }                      from '../api/moodleClient';
 import {
   cacheActivity,
@@ -28,6 +18,7 @@ export interface DownloadableActivity {
   type      : ActivityType | 'quiz';
   title     : string;
   courseId  : number;
+  modname?  : string; // modname Moodle réel (glossary | lesson | ...) — désambiguïse 'association'
 }
 
 export interface CourseDownloadProgress {
@@ -71,7 +62,11 @@ export async function downloadCourseActivities(
           await cacheListening(activity, token, courseContents);
           break;
         case 'association':
-          await cacheAssociation(activity, token);
+          if (activity.modname === 'lesson') {
+            await cacheAssociationFromLesson(activity, token);
+          } else {
+            await cacheAssociation(activity, token);
+          }
           break;
         case 'word_order':
           await cacheWordOrder(activity, token);
@@ -231,6 +226,45 @@ async function cacheAssociation(
       translation: stripHtml(e.definition  || ''),
     }))
     .filter((p: any) => p.word && p.translation);
+
+  if (!pairs.length) return;
+
+  await cacheActivity(activity.cmid, 'association', activity.courseId, {
+    id   : activity.instanceId,
+    title: activity.title,
+    pairs: pairs.slice(0, 10),
+  }, null);
+}
+
+/**
+ * Association adossée à un module `lesson` (pas un vrai glossary Moodle).
+ * Même heuristique de parsing que loadLessonWithRetry() côté online
+ * (useActivityContent.ts) : pages séparées par "-"/"–" → paire mot/traduction.
+ */
+async function cacheAssociationFromLesson(
+  activity: DownloadableActivity,
+  token   : string
+): Promise<void> {
+  await moodleCall('mod_lesson_launch_attempt', { lessonid: activity.instanceId }, token)
+    .catch(() => {});
+
+  const result = await moodleCall('mod_lesson_get_pages', {
+    lessonid: activity.instanceId,
+  }, token);
+
+  if (result?.exception || !result?.pages?.length) return;
+
+  const pairs: { word: string; translation: string }[] = [];
+  for (const page of result.pages.slice(0, 10)) {
+    const pageObj = page.page ?? page;
+    const content: string = pageObj?.contents ?? pageObj?.content ?? '';
+    if (!content || !(content.includes('-') || content.includes('–'))) continue;
+
+    const parts = content.split(/[-–]/).map((s: string) => stripHtml(s));
+    if (parts.length === 2 && parts[0] && parts[1]) {
+      pairs.push({ word: parts[0], translation: parts[1] });
+    }
+  }
 
   if (!pairs.length) return;
 

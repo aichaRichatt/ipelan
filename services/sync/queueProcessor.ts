@@ -2,7 +2,7 @@ import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
 import { AppState, AppStateStatus } from 'react-native';
 import { isMoodleOnline, moodleCall } from '../api/moodleClient';
 import { markActivitySynced } from '../storage/activity-progress';
-import { getToken }                 from '../storage/tokenStorage';
+import { getToken, getUserData }    from '../storage/tokenStorage';
 import {
   getPendingItems,
   removeFromQueue,
@@ -13,6 +13,7 @@ import {
   getPendingQuizAttempts,
   syncQuizAttempt,
   markAttemptSyncError,
+  processPendingQuizDownloads,
 } from '../quiz/quizOfflineService';
 import { getDBConnection } from '../storage/db-service';
 
@@ -30,7 +31,7 @@ const isOnline = isMoodleOnline;
 // ─── Traiter un item avec backoff ─────────────────────────────────────────────
 
 async function processItem(
-  item: { id: number; type: string; wsfunction: string; payload: string; retries: number },
+  item: { id: number; type: string; wsfunction: string; payload: string; retries: number; userId?: number },
   token: string
 ): Promise<boolean> {
   if (item.retries > 0) {
@@ -51,8 +52,12 @@ async function processItem(
     if (IS_DEV) console.log('[QueueProcessor] ✅ Traité:', item.wsfunction);
 
     // Après une complétion confirmée par Moodle, marquer l'activité comme synchronisée
+    // — toujours avec le user_id propriétaire de l'item, jamais celui de la session
+    // courante : sur un appareil partagé, les deux peuvent différer (queue traitée
+    // après un changement de compte) et marquer la ligne d'un autre utilisateur
+    // comme synchronisée corromprait sa progression.
     if (item.type === 'completion' && cleanParams.cmid && courseId > 0) {
-      await markActivitySynced(parseInt(cleanParams.cmid as string, 10), courseId).catch(() => {});
+      await markActivitySynced(parseInt(cleanParams.cmid as string, 10), courseId, item.userId).catch(() => {});
     }
 
     return true;
@@ -77,18 +82,38 @@ export async function processQueue(): Promise<{
     return { processed: 0, failed: 0, remaining: 0 };
   }
 
+  // Filtrer la queue par l'utilisateur de la session courante — sur un appareil
+  // partagé, des items laissés par un précédent utilisateur ne doivent jamais
+  // être comptés/traités sous l'identité de la session actuelle (Section 5.2
+  // CLAUDE.md : toujours filtrer par user_id).
+  const userData = await getUserData();
+  const userId: number | undefined = userData?.id;
+
   const online = await isOnline();
   if (!online) {
     if (IS_DEV) console.info('[QueueProcessor] Hors ligne — queue reportée');
-    const remaining = await getPendingCount();
+    const remaining = await getPendingCount(userId);
     return { processed: 0, failed: 0, remaining };
   }
 
-  const items     = await getPendingItems(MAX_RETRIES);
+  // Indépendant du sync_queue (complétions/notes) — toujours exécuté tant
+  // qu'on est en ligne : pousser les pré-téléchargements de quiz en attente
+  // (offline-first, voir queuePendingQuizDownload) et synchroniser les
+  // tentatives de quiz terminées hors-ligne. Avant ce correctif, ces deux
+  // étapes étaient placées après un retour anticipé si sync_queue était vide,
+  // ce qui empêchait la sync des quiz offline tant qu'aucune autre
+  // complétion n'était en attente.
+  await processPendingQuizDownloads(token);
+  await syncPendingQuizAttempts(token);
+
+  const items     = await getPendingItems(MAX_RETRIES, userId);
   let processed   = 0;
   let failed      = 0;
 
-  if (items.length === 0) return { processed: 0, failed: 0, remaining: 0 };
+  if (items.length === 0) {
+    const remaining = await getPendingCount(userId);
+    return { processed: 0, failed: 0, remaining };
+  }
 
   if (IS_DEV) console.log('[QueueProcessor] Traitement de', items.length, 'items...');
 
@@ -98,10 +123,7 @@ export async function processQueue(): Promise<{
     else    failed++;
   }
 
-  // Sync tentatives quiz offline
-  await syncPendingQuizAttempts(token);
-
-  const remaining = await getPendingCount();
+  const remaining = await getPendingCount(userId);
   if (IS_DEV) console.log('[QueueProcessor] Résultat:', { processed, failed, remaining });
 
   return { processed, failed, remaining };

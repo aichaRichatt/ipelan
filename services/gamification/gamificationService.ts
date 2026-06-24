@@ -312,17 +312,15 @@ export const LIFE_COST = 20;
 /**
  * Met à jour les vies et les pièces après une activité.
  *
- * Règles :
- *  - score >= 60% → coins gagnés = floor((percentage/100) * 10), max 10
- *  - score < 60% ET skipLifeDeduction = false → 1 vie perdue (plancher à 0)
- *  - skipLifeDeduction = true → pour les activités qui gèrent elles-mêmes leurs vies (association)
+ * Règles (s'appliquent à toutes les activités interactives, sans exception) :
+ *  - score >= 50% → coins gagnés = floor((percentage/100) * 10), max 10
+ *  - score < 50% → 1 vie perdue (plancher à 0)
  *  - Si on passe de MAX_LIVES à MAX_LIVES-1 → on (re)démarre le timer 6h
  */
 export const processActivityResults = async (
   userId: number,
   score: number,
-  totalScore: number,
-  options?: { skipLifeDeduction?: boolean }
+  totalScore: number
 ): Promise<{ coinsEarned: number; livesLost: number }> => {
   const db = await getDBConnection();
   let coinsEarned = 0;
@@ -330,10 +328,9 @@ export const processActivityResults = async (
 
   const percentage = totalScore > 0 ? (score / totalScore) * 100 : 0;
 
-  if (percentage >= 60) {
+  if (percentage >= 50) {
     coinsEarned = Math.floor((percentage / 100) * 10);
-  } else if (!options?.skipLifeDeduction) {
-    // Déduire une vie uniquement si l'activité ne gère pas ses propres vies
+  } else {
     livesLost = 1;
   }
 
@@ -387,7 +384,7 @@ export const triggerGamificationSync = async (userId: number, userToken?: string
   try {
     const stats = await getGlobalGamificationStats(userId);
 
-    // ✅ Récupérer le timestamp de dernière régénération de vies depuis SQLite
+    //  Récupérer le timestamp de dernière régénération de vies depuis SQLite
     const db = await getDBConnection();
     const userRow = await db.getFirstAsync<{ last_lives_update: string; last_activity: string }>(
       'SELECT last_lives_update, last_activity FROM users WHERE id = ?',
@@ -396,7 +393,35 @@ export const triggerGamificationSync = async (userId: number, userToken?: string
     const lastLivesUpdate = userRow?.last_lives_update || null;
     const lastActivity    = userRow?.last_activity    || null;
 
-    // ✅ Récupérer la progression des cours pour la synchronisation multi-device
+ 
+    let mergedXp     = stats.totalXp;
+    let mergedCoins  = stats.coins;
+    let mergedStreak = stats.streak;
+    let mergedBadgeIds = stats.allBadgeIds;
+
+    if (userToken) {
+      try {
+        const { getUserGamificationFromMoodle } = await import('../api/xpService');
+        const moodleProfile = await getUserGamificationFromMoodle(userToken, userId);
+        mergedXp     = Math.max(stats.totalXp, moodleProfile.xp);
+        mergedCoins  = Math.max(stats.coins, moodleProfile.coins);
+        mergedStreak = Math.max(stats.streak, moodleProfile.streak);
+        mergedBadgeIds = [...new Set([...stats.allBadgeIds, ...moodleProfile.badges])];
+
+        // Garder le cache local cohérent avec la valeur fusionnée pour éviter
+        // de re-pousser une valeur stale au prochain sync.
+        if (mergedXp !== stats.totalXp || mergedCoins !== stats.coins || mergedStreak !== stats.streak) {
+          await db.runAsync(
+            `UPDATE users SET ipelan_xp = ?, coins = ?, streak = ? WHERE id = ?`,
+            [mergedXp, mergedCoins, mergedStreak, userId]
+          );
+        }
+      } catch (e: any) {
+        if (IS_DEV) console.warn('[Gamification] Pre-sync Moodle fetch failed, pushing local stats as-is:', e?.message);
+      }
+    }
+
+    // Récupérer la progression des cours pour la synchronisation multi-device
     const { getAllCourseProgress } = await import('../storage/course-progress');
     const allProgress = await getAllCourseProgress(userId);
     const courseProgressMap: Record<string, { c: number; t: number }> = {};
@@ -407,11 +432,11 @@ export const triggerGamificationSync = async (userId: number, userToken?: string
     }
 
     const success = await syncUserGamificationToMoodle(userId, {
-      totalXp: stats.totalXp,
-      coins: stats.coins,
+      totalXp: mergedXp,
+      coins: mergedCoins,
       lives: stats.lives,
-      streak: stats.streak,
-      allBadgeIds: stats.allBadgeIds,
+      streak: mergedStreak,
+      allBadgeIds: mergedBadgeIds,
       latestBadge: stats.latestBadge,
       lastLivesUpdate,
       lastActivity,
@@ -420,10 +445,10 @@ export const triggerGamificationSync = async (userId: number, userToken?: string
     }, userToken);
 
     // Marquer les badges comme synchronisés en cas de succès
-    if (success && stats.allBadgeIds.length > 0) {
+    if (success && mergedBadgeIds.length > 0) {
       try {
         const { markBadgesAsSynced } = await import('../storage/badge-storage');
-        await markBadgesAsSynced(userId, stats.allBadgeIds);
+        await markBadgesAsSynced(userId, mergedBadgeIds);
       } catch (e: any) {
         if (IS_DEV) console.warn('[Gamification] markBadgesAsSynced failed:', e?.message);
       }

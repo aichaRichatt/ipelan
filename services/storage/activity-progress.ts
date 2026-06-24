@@ -33,7 +33,7 @@ export const saveActivityScore = async (
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const db = await getDBConnection();
-      const isCompleted = score >= total * 0.6;
+      const isCompleted = total > 0 && score >= total * 0.5;
       if (IS_DEV) {
         console.log(`[saveActivityScore] moduleId=${moduleId}, courseId=${courseId}, score=${score}/${total}, isCompleted=${isCompleted}`);
       }

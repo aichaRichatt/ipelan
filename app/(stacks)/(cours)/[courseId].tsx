@@ -4,6 +4,7 @@ import { BuyHeartsModal } from "@/components/BuyHeartsModal";
 import { EmptyState } from "@/components/EmptyState";
 import { ActivityWithProgress, FilterTab, PaginationState } from "@/types/activity";
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
+import NetInfo from "@react-native-community/netinfo";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getOfflineCachedCmids } from "../../../services/activities/activityOfflineService";
@@ -14,14 +15,15 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
 import { useCourseContent } from "../../../hooks/useCourseContent";
 import { useUserStats } from "../../../hooks/useUserStats";
-import { buyLife, triggerGamificationSync } from "../../../services/gamification/gamificationService";
+import { buyLife, LIFE_COST } from "../../../services/gamification/gamificationService";
+import { syncQueue } from "../../../services/sync/syncQueue";
 import { isEpubFile } from "../../../services/contentLoader";
 import { updateUser } from "../../../services/redux/slices/authSlice";
 import { RootState } from "../../../services/redux/store";
 import { getAllScoresForCourse, saveActivityScore } from "../../../services/storage/activity-progress";
 import { saveCourseProgress } from "../../../services/storage/course-progress";
 import { checkInternetConnection, syncAfterActivity, syncCourseProgress } from "../../../services/sync/progressSync";
-import { downloadQuizForOffline, isQuizDownloaded } from "../../../services/quiz/quizOfflineService";
+import { isQuizDownloaded, processPendingQuizDownloads, queuePendingQuizDownload } from "../../../services/quiz/quizOfflineService";
 import { getContentTypeColor, getContentTypeIcon, getContentTypeLabel, MappedContent } from "../../../utils/contentMapper";
 import { ActivityType, XP_CONFIG } from "../../../utils/xpCalculator";
 
@@ -501,10 +503,12 @@ export default function ModuleDetailScreen() {
     getOfflineCachedCmids(cmids).then(setOfflineCachedCmids).catch(() => {});
   }, [activities]);
 
-  // Auto-download silencieux — déclenché une fois dès que les sections sont prêtes
+  // Auto-download silencieux — déclenché dès que les sections sont prêtes.
+  // Si la première tentative tombe hors-ligne, elle est automatiquement
+  // retentée au retour réseau (listener NetInfo ci-dessous) sans que
+  // l'utilisateur ait besoin de quitter/rouvrir l'écran du cours.
   useEffect(() => {
-    if (!sections?.length || !activeToken || hasAutoDownloadedRef.current) return;
-    hasAutoDownloadedRef.current = true;
+    if (!sections?.length || !activeToken) return;
 
     const MODNAME_TO_DL_TYPE: Record<string, DownloadableActivity['type']> = {
       assign  : 'dictation',
@@ -528,40 +532,55 @@ export default function ModuleDetailScreen() {
             type      : dlType,
             title     : mod.name || '',
             courseId,
+            modname   : modnameLow,
           });
         }
       }
     }
     if (!downloadable.length) return;
 
-    (async () => {
-      const online = await isMoodleOnline();
-      if (!online || isDownloadingRef.current) return;
+    const attemptAutoDownload = async () => {
+      if (hasAutoDownloadedRef.current || isDownloadingRef.current) return;
       isDownloadingRef.current = true;
       try {
+        const online = await isMoodleOnline();
+        if (!online) return; // sera retenté par le listener NetInfo au retour réseau
+
+        hasAutoDownloadedRef.current = true;
+
         // Télécharger dictée, écoute, association, word-order
         await downloadCourseActivities(courseId, activeToken, downloadable);
 
-        // Télécharger les quiz non encore mis en cache
+        // Quiz non encore mis en cache : enregistrer l'intention en local D'ABORD
+        // (offline-first — survit à une coupure réseau pendant cet appel), puis
+        // pousser le vrai appel mod_quiz_start_attempt. En cas d'échec réseau,
+        // la ligne reste 'pending' et sera réessayée par queueProcessor.ts
+        // au prochain démarrage / retour au premier plan / reconnexion.
         const quizList = downloadable.filter(d => d.type === 'quiz');
         for (const quiz of quizList) {
-          try {
-            const cached = await isQuizDownloaded(quiz.cmid);
-            if (!cached) {
-              await downloadQuizForOffline(quiz.cmid, quiz.instanceId, courseId, activeToken);
-              if (IS_DEV) console.log(`[ModuleDetail] Quiz cmid ${quiz.cmid} mis en cache offline`);
-            }
-          } catch (e) {
-            if (IS_DEV) console.warn(`[ModuleDetail] Quiz cmid ${quiz.cmid} cache échoué:`, e);
+          const cached = await isQuizDownloaded(quiz.cmid);
+          if (!cached) {
+            await queuePendingQuizDownload(quiz.cmid, quiz.instanceId, courseId);
           }
         }
+        await processPendingQuizDownloads(activeToken);
 
         const cmids = downloadable.map(d => d.cmid);
         getOfflineCachedCmids(cmids).then(setOfflineCachedCmids).catch(() => {});
       } finally {
         isDownloadingRef.current = false;
       }
-    })();
+    };
+
+    attemptAutoDownload();
+
+    const unsubscribe = NetInfo.addEventListener(state => {
+      if (state.isConnected && !hasAutoDownloadedRef.current) {
+        attemptAutoDownload();
+      }
+    });
+
+    return () => unsubscribe();
   }, [sections, activeToken]);
 
   const checkLivesAndProceed = async (onProceed: () => void) => {
@@ -583,7 +602,7 @@ export default function ModuleDetailScreen() {
           lives: result.newLives,
           coins: result.newCoins,
         }));
-        await triggerGamificationSync(reduxUser?.id || 0, activeToken);
+        if (activeToken) syncQueue.syncGamification(reduxUser?.id || 0, activeToken);
         Alert.alert("Succès", "Vous avez récupéré un cœur ! Bonne chance !");
         setIsBuyModalVisible(false);
         if (pendingAction) {
@@ -610,8 +629,7 @@ export default function ModuleDetailScreen() {
 
       switch (activity.type) {
         case 'quiz':
-          // UI native (mod_quiz_*) — plus fiable que la WebView SSO
-          router.push({
+           router.push({
             pathname: '/(stacks)/(cours)/quiz-native',
             params: {
               cmid: String(activity.id),
@@ -639,8 +657,7 @@ export default function ModuleDetailScreen() {
     });
   };
 
-  // Must be before early returns to respect Rules of Hooks
-  const { allLessons, completedCount, completableCompleted, completableTotal } = useMemo(() => {
+   const { allLessons, completedCount, completableCompleted, completableTotal } = useMemo(() => {
     const lessons: Lesson[] = [];
     let completed = 0;
     let compCompleted = 0;
@@ -1139,6 +1156,7 @@ export default function ModuleDetailScreen() {
         lives={stats.lives}
         coins={stats.coins}
         nextHeartTime={stats.nextHeartTime}
+        cost={LIFE_COST}
       />
     </SafeAreaView>
   );

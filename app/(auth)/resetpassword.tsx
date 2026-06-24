@@ -76,6 +76,11 @@ export default function ResetPassword() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <View style={styles.header}>
+        <Pressable onPress={() => router.back()} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color="#002366" />
+        </Pressable>
+      </View>
       <View style={styles.container}>
         {step === 1 && renderStep1()}
         {step === 2 && renderStep2()}
@@ -127,6 +132,15 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#FAF9F6',
+  },
+  header: {
+    paddingHorizontal: 24,
+    paddingTop: 8,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
   },
   container: {
     flex: 1,

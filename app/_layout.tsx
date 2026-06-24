@@ -61,7 +61,7 @@ function BackgroundSyncInitializer() {
         console.warn('[BackgroundSync] Registration failed:', err);
       });
        registerQueueProcessor();
-       syncQueue.restorePersistedJobs(token).catch((err) => {
+       syncQueue.restorePersistedJobs(user.id, token).catch((err) => {
         console.warn('[SyncQueue] Restore failed:', err);
       });
 

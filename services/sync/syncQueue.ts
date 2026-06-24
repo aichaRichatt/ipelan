@@ -216,10 +216,15 @@ class SyncQueue {
    * Appelé au démarrage de l'app (après restauration auth) pour récupérer
    * les jobs gamification qui n'ont pas été traités avant le dernier kill/crash.
    * Le token est passé en paramètre — ne jamais le lire depuis SQLite.
+   *
+   * Filtré par userId : sur un appareil partagé, des jobs laissés par un
+   * précédent utilisateur ne doivent jamais être rejoués avec le token (ou,
+   * en cas de fallback ADMIN_TOKEN dans syncUserGamificationToMoodle, les
+   * droits admin) de la session actuelle — risque de mélange de comptes.
    */
-  async restorePersistedJobs(token: string): Promise<void> {
+  async restorePersistedJobs(userId: number, token: string): Promise<void> {
     try {
-      const pending = await getPendingGamificationJobs();
+      const pending = await getPendingGamificationJobs(userId);
       if (pending.length === 0) return;
 
       let restored = 0;

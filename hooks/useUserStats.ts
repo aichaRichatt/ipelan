@@ -1,7 +1,6 @@
 import { isMoodleOnline } from '@/services/api/moodleClient';
 import {
   getUserProgress,
-  initStreakTable,
   setUserGamificationStats,
 } from '@/services/api/userProgressService';
 import { getUserGamificationFromMoodle } from '@/services/api/xpService';
@@ -79,7 +78,6 @@ export function useUserStats(): UseUserStatsReturn {
   }, []);
 
   useEffect(() => {
-    initStreakTable().catch(console.warn);
     initBadgeTable().catch(console.warn);
   }, []);
 

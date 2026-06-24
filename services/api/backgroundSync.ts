@@ -1,7 +1,7 @@
 import { getToken, getUserData } from '../storage/tokenStorage';
 import { syncQueue } from '../sync/syncQueue';
 import { isMoodleOnline } from './moodleClient';
-import { deletePendingSync, getPendingSync, getUserProgress, submitGradeToMoodle, updatePendingSync } from './userProgressService';
+import { getUserProgress } from './userProgressService';
 
 const TASK_NAME = 'IPELAN_BG_SYNC';
 
@@ -135,45 +135,7 @@ export async function performBackgroundSync(
       syncSuccess = false;
     }
 
-    // 2. Process pending activity sync records
-    try {
-      const pendingRecords = await getPendingSync();
-      if (pendingRecords.length > 0) {
-        if (IS_DEV) console.log(`[BackgroundSync] Processing ${pendingRecords.length} pending sync records`);
-
-        for (const record of pendingRecords) {
-          try {
-            const payload = JSON.parse(record.payload);
-
-            // Submit grade/completion to Moodle
-            const gradeSuccess = await submitGradeToMoodle({
-              userId,
-              courseId: record.course_id,
-              moduleId: record.module_id,
-              score: payload.score || 0,
-              total: payload.total || 100,
-              token: moodleToken,
-            });
-
-            if (gradeSuccess) {
-              await deletePendingSync(record.id);
-              if (IS_DEV) console.log(`[BackgroundSync] Synced and removed pending record ${record.id}`);
-            } else {
-              await updatePendingSync(record.id, 'failed', true);
-              if (IS_DEV) console.warn(`[BackgroundSync] Failed to sync record ${record.id}, will retry`);
-            }
-          } catch (recordErr) {
-            console.warn(`[BackgroundSync] Error processing record ${record.id}:`, recordErr);
-            await updatePendingSync(record.id, 'error', true);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('[BackgroundSync] Pending sync processing failed:', err);
-      syncSuccess = false;
-    }
-
-    // 3. Get local progress for logging/debugging
+    // 2. Get local progress for logging/debugging
     const progress = await getUserProgress(userId);
     if (progress && IS_DEV) {
       console.log('[BackgroundSync] Local progress:', {

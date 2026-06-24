@@ -3,7 +3,7 @@ import { RootState } from "@/services/redux/store";
 import { calculateXP } from "@/utils/xpCalculator";
 import { Feather } from "@expo/vector-icons";
 import { createAudioPlayer } from "expo-audio";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View,
@@ -113,10 +113,23 @@ export default function ListeningScreen() {
     return () => {
       clearInterval(iv);
       clearTimeout(timeout);
+      try { p.pause(); } catch {}
       try { p.remove(); } catch {}
       if (playerRef.current === p) playerRef.current = null;
     };
   }, [exercise?.audioUrl]);
+
+  // Coupe l'audio immédiatement dès que l'écran perd le focus (back, swipe,
+  // navigation vers un autre écran) — plus rapide que d'attendre le démontage
+  // complet du composant, qui peut être retardé par l'animation de transition.
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        try { playerRef.current?.pause(); } catch {}
+        setIsPlaying(false);
+      };
+    }, [])
+  );
 
   const handlePlayPause = useCallback(() => {
     const p = playerRef.current;

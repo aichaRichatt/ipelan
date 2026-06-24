@@ -36,15 +36,20 @@ export async function addToSyncQueue(
 
 // ─── Lire les items en attente ────────────────────────────────────────────────
 
-export async function getPendingItems(maxRetries = 3): Promise<SyncQueueItem[]> {
+export async function getPendingItems(maxRetries = 3, userId?: number): Promise<SyncQueueItem[]> {
   try {
     const db = await getDBConnection();
     const rows = await db.getAllAsync<any>(
-      `SELECT id, type, wsfunction, payload, user_id as userId, created_at as createdAt, retries, last_error as lastError
-       FROM sync_queue
-       WHERE retries < ?
-       ORDER BY created_at ASC`,
-      [maxRetries]
+      userId != null
+        ? `SELECT id, type, wsfunction, payload, user_id as userId, created_at as createdAt, retries, last_error as lastError
+           FROM sync_queue
+           WHERE retries < ? AND user_id = ?
+           ORDER BY created_at ASC`
+        : `SELECT id, type, wsfunction, payload, user_id as userId, created_at as createdAt, retries, last_error as lastError
+           FROM sync_queue
+           WHERE retries < ?
+           ORDER BY created_at ASC`,
+      userId != null ? [maxRetries, userId] : [maxRetries]
     );
     return rows;
   } catch (error) {
@@ -80,11 +85,14 @@ export async function incrementRetry(id: number, error: string): Promise<void> {
 
 // ─── Compter les items en attente ─────────────────────────────────────────────
 
-export async function getPendingCount(): Promise<number> {
+export async function getPendingCount(userId?: number): Promise<number> {
   try {
     const db = await getDBConnection();
     const row = await db.getFirstAsync<{ count: number }>(
-      'SELECT COUNT(*) as count FROM sync_queue WHERE retries < 3'
+      userId != null
+        ? 'SELECT COUNT(*) as count FROM sync_queue WHERE retries < 3 AND user_id = ?'
+        : 'SELECT COUNT(*) as count FROM sync_queue WHERE retries < 3',
+      userId != null ? [userId] : []
     );
     return row?.count ?? 0;
   } catch {
@@ -128,13 +136,16 @@ export async function removePersistedGamificationJob(
   }
 }
 
-export async function getPendingGamificationJobs(): Promise<
+export async function getPendingGamificationJobs(
+  userId: number
+): Promise<
   Array<{ id: number; user_id: number; job_type: string; job_data: string; attempts: number }>
 > {
   try {
     const db = await getDBConnection();
     return await db.getAllAsync<{ id: number; user_id: number; job_type: string; job_data: string; attempts: number }>(
-      'SELECT id, user_id, job_type, job_data, attempts FROM gamification_queue ORDER BY created_at ASC'
+      'SELECT id, user_id, job_type, job_data, attempts FROM gamification_queue WHERE user_id = ? ORDER BY created_at ASC',
+      [userId]
     );
   } catch {
     return [];

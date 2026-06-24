@@ -115,7 +115,7 @@ export default function CoursScreen() {
           try {
             const prog = await getCourseProgress(c.id, userId);
             if (prog && prog.totalActivities > 0) {
-              updates[c.id] = Math.round((prog.completedActivities / prog.totalActivities) * 100);
+              updates[c.id] = Math.min(100, Math.round((prog.completedActivities / prog.totalActivities) * 100));
             }
           } catch { /* non-fatal */ }
         }
@@ -207,7 +207,7 @@ export default function CoursScreen() {
                 }
               } catch { }
               const finalProgress = dbProgress && dbProgress.totalActivities > 0
-                ? Math.round((dbProgress.completedActivities / dbProgress.totalActivities) * 100)
+                ? Math.min(100, Math.round((dbProgress.completedActivities / dbProgress.totalActivities) * 100))
                 : c.progress || 0;
               return {
                 id: c.id,
@@ -340,7 +340,7 @@ export default function CoursScreen() {
             } catch { }
 
             const finalProgress = dbProgress && dbProgress.totalActivities > 0
-              ? Math.round((dbProgress.completedActivities / dbProgress.totalActivities) * 100)
+              ? Math.min(100, Math.round((dbProgress.completedActivities / dbProgress.totalActivities) * 100))
               : c.progress || 0;
 
             return {
@@ -366,6 +366,26 @@ export default function CoursScreen() {
 
         // Sauvegarder les cours pour utilisation offline
         AsyncStorage.setItem(COURSES_CACHE_KEY, JSON.stringify(fetchedCourses)).catch(() => {});
+
+        // Persister aussi en SQLite — redondance avec AsyncStorage (Niveau 1).
+        // Le fallback offline ci-dessus (Niveau 2) lit cette même table `courses` ;
+        // sans cette écriture elle ne serait jamais peuplée si l'utilisateur ouvre
+        // l'onglet Cours avant l'onglet Accueil (qui, lui, l'alimente déjà).
+        try {
+          const { getDBConnection, saveCourses } = await import('../../../services/storage/db-service');
+          const db = await getDBConnection();
+          await saveCourses(db, fetchedCourses.map((c: any) => ({
+            id: c.id, shortname: c.shortname || '', fullname: c.fullname || '',
+            displayname: c.fullname || '', idnumber: c.idnumber || '',
+            categoryid: c.categoryid || c.category || 0, visible: c.visible ? 1 : 0,
+            summary: c.summary || '', summaryformat: c.summaryformat || 0,
+            format: c.format || '', showgrades: c.showgrades ? 1 : 0,
+            lang: c.lang || '', enablecompletion: c.enablecompletion ? 1 : 0,
+            completionhasrules: c.completionhasrules ? 1 : 0,
+          })));
+        } catch (e) {
+          if (IS_DEV) console.warn('[Cours] saveCourses (SQLite) failed:', e);
+        }
 
         // ── Phase 3 : enrichir lessonsCount en arrière-plan ──────────────────
         const enrichedCache = [...fetchedCourses];

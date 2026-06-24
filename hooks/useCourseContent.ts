@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCourseContents } from '../services/api/courseService';
 import { isMoodleOnline } from '../services/api/moodleClient';
+import { getDBConnection, getCourseContentCache, saveCourseContentCache } from '../services/storage/db-service';
 import {
   parseCourseContent,
   parseMoodleSections,
@@ -12,7 +12,6 @@ import { mapModuleToContentType, MappedContent, ParsedModule } from '../utils/co
 import { ActivityType } from '../utils/xpCalculator';
 
 const IS_DEV = process.env.NODE_ENV === "development";
-const courseContentKey = (id: number) => `@ipelan_course_content_${id}`;
 
 export interface UseCourseContentReturn {
   sections: ParsedSection[];
@@ -51,13 +50,14 @@ export function useCourseContent(
     try {
       if (IS_DEV) console.log("[useCourseContent] Fetching content for course:", courseId);
 
+      const db = await getDBConnection();
+
       // Offline-first : si pas de réseau, charger le cache immédiatement sans attendre le timeout API
       const online = await isMoodleOnline();
       if (!online) {
-        const cached = await AsyncStorage.getItem(courseContentKey(courseId)).catch(() => null);
-        if (cached) {
-          const cachedContents = JSON.parse(cached);
-          if (IS_DEV) console.log('[useCourseContent] Offline — cache chargé immédiatement pour:', courseId);
+        const cachedContents = await getCourseContentCache(db, courseId).catch(() => null);
+        if (cachedContents) {
+          if (IS_DEV) console.log('[useCourseContent] Offline — cache SQLite chargé immédiatement pour:', courseId);
           setSections(parseMoodleSections(cachedContents));
           setCourseContent(parseCourseContent(courseId, cachedContents));
           setIsLoading(false);
@@ -71,17 +71,22 @@ export function useCourseContent(
       const rawContents = await getCourseContents(token, courseId);
 
       if (!rawContents || rawContents.length === 0) {
-        // Network returned empty (offline or Moodle unreachable) — try cache first
-        try {
-          const cached = await AsyncStorage.getItem(courseContentKey(courseId));
-          if (cached) {
-            const cachedContents = JSON.parse(cached);
-            if (IS_DEV) console.log('[useCourseContent] Network empty, using AsyncStorage cache for course:', courseId);
+         try {
+          const cachedContents = await getCourseContentCache(db, courseId);
+          if (cachedContents) {
+            if (IS_DEV) console.log('[useCourseContent] Network empty, using SQLite cache for course:', courseId);
             setSections(parseMoodleSections(cachedContents));
             setCourseContent(parseCourseContent(courseId, cachedContents));
             return;
           }
-        } catch {}
+        } catch {
+          if (IS_DEV) console.warn("[useCourseContent] No content and no cache for course:", courseId);
+          setError("Aucun contenu disponible pour ce cours");
+          setSections([]);
+          setCourseContent(null);
+          setIsLoading(false);
+          return;
+        }
         if (IS_DEV) console.warn("[useCourseContent] No content and no cache for course:", courseId);
         setError("Aucun contenu disponible pour ce cours");
         setSections([]);
@@ -103,7 +108,7 @@ export function useCourseContent(
       }
 
       // Persist raw sections for offline use
-      AsyncStorage.setItem(courseContentKey(courseId), JSON.stringify(rawContents)).catch(() => {});
+      saveCourseContentCache(db, courseId, rawContents).catch(() => {});
 
       const parsedSections = parseMoodleSections(rawContents);
       const parsedCourse = parseCourseContent(courseId, rawContents);
@@ -122,11 +127,11 @@ export function useCourseContent(
     } catch (err: any) {
       if (IS_DEV) console.error("[useCourseContent] Error:", err.message);
       try {
-        const cached = await AsyncStorage.getItem(courseContentKey(courseId));
-        if (cached) {
-          const rawContents = JSON.parse(cached);
-          setSections(parseMoodleSections(rawContents));
-          setCourseContent(parseCourseContent(courseId, rawContents));
+        const db = await getDBConnection();
+        const cachedContents = await getCourseContentCache(db, courseId);
+        if (cachedContents) {
+          setSections(parseMoodleSections(cachedContents));
+          setCourseContent(parseCourseContent(courseId, cachedContents));
           if (IS_DEV) console.log('[useCourseContent] Loaded from offline cache:', courseId);
           return;
         }

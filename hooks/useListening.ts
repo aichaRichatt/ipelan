@@ -7,7 +7,7 @@ import {
   cacheActivity,
   downloadActivityAudio,
   getActivityOffline,
-  buildAuthAudioUrl,
+  resolveAudioUrl,
 } from '../services/activities/activityOfflineService';
 
 export interface ListeningExercise {
@@ -68,9 +68,7 @@ const fetchListeningContent = useCallback(async () => {
         if (!isMountedRef.current) return;
         if (cached?.data) {
           const data = cached.data as any;
-          const resolvedAudioUrl = cached.rawAudioUrl
-            ? buildAuthAudioUrl(cached.rawAudioUrl, authToken)
-            : null;
+          const resolvedAudioUrl = resolveAudioUrl(cached, authToken);
           setAudioUrl(resolvedAudioUrl);
           if (data.options?.length > 0) {
             setExercises([{
@@ -248,9 +246,7 @@ const fetchListeningContent = useCallback(async () => {
           const cached = await getActivityOffline(activeCmid);
           if (cached?.data) {
             const data = cached.data as any;
-            const resolvedAudioUrl = cached.rawAudioUrl
-              ? buildAuthAudioUrl(cached.rawAudioUrl, authToken)
-              : null;
+            const resolvedAudioUrl = resolveAudioUrl(cached, authToken);
             setAudioUrl(resolvedAudioUrl);
             if (data.options && Array.isArray(data.options) && data.options.length > 0) {
               setExercises([{
@@ -283,9 +279,7 @@ const fetchListeningContent = useCallback(async () => {
         const cached = await getActivityOffline(activeCmid);
         if (cached?.data) {
           const data = cached.data as any;
-          const resolvedAudioUrl = cached.rawAudioUrl
-            ? buildAuthAudioUrl(cached.rawAudioUrl, authToken)
-            : null;
+          const resolvedAudioUrl = resolveAudioUrl(cached, authToken);
           setAudioUrl(resolvedAudioUrl);
           if (data.options && Array.isArray(data.options) && data.options.length > 0) {
             setExercises([{

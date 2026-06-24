@@ -48,7 +48,7 @@ export const EmailVerificationModal: React.FC<EmailVerificationModalProps> = ({
             </Pressable>
             <Pressable style={[styles.button, styles.primaryButton]} onPress={openEmailApp}>
               <Feather name="external-link" size={15} color="#fff" style={styles.buttonIcon} />
-              <Text style={styles.primaryButtonText}>Ouvrir ma messagerie</Text>
+              <Text style={styles.primaryButtonText}>Gmail</Text>
             </Pressable>
           </View>
         </View>

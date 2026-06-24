@@ -2,8 +2,8 @@ import { RootState } from "@/services/redux/store";
 import { cleanAndAuthUrl } from "@/services/urlAuth";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
@@ -196,6 +196,16 @@ export default function AudioPlayerScreen() {
   
   const player = useAudioPlayer(authUrl || "");
   const status = useAudioPlayerStatus(player);
+
+  // Coupe l'audio immédiatement dès que l'écran perd le focus (back, swipe,
+  // navigation vers un autre écran).
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        try { player.pause(); } catch {}
+      };
+    }, [player])
+  );
 
   useEffect(() => {
     if (IS_DEV) {

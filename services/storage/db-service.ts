@@ -115,8 +115,10 @@ export const getDBConnection = async () => {
  *  v6 : epub_sections (cache offline des sections EPUB — HTML + métadonnées)
  *  v7 : quiz_cache + offline_quiz_attempts (quiz offline — pre-start + sync)
  *  v8 : activity_cache (dictée, écoute, association, jeu de mots — données + audio local)
+ *  v9 : course_content_cache (sections/modules bruts core_course_get_contents — offline détail cours)
+ *  v10: offline_quiz_attempts.retries (cap des tentatives de sync — évite le retry silencieux infini)
  */
-const CURRENT_SCHEMA_VERSION = 8;
+const CURRENT_SCHEMA_VERSION = 10;
 
 async function getUserSchemaVersion(db: SQLiteDatabase): Promise<number> {
   try {
@@ -321,6 +323,36 @@ async function runMigrations(db: SQLiteDatabase): Promise<void> {
     }
   }
 
+  // v9 : course_content_cache — sections/modules bruts (core_course_get_contents)
+  //      par cours, pour rendre le détail du cours (sections + activités) disponible
+  //      hors ligne dès qu'il a été ouvert une première fois en ligne.
+  if (fromVersion < 9) {
+    try {
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS course_content_cache (
+          course_id  INTEGER PRIMARY KEY,
+          raw_json   TEXT NOT NULL DEFAULT '[]',
+          cached_at  INTEGER
+        );
+      `);
+      console.log('[DB] v9: course_content_cache créé');
+    } catch (e) {
+      console.warn('[DB] v9: migration error:', e);
+    }
+  }
+
+  // v10 : offline_quiz_attempts.retries — cap des tentatives de sync (évite le
+  //       retry silencieux infini quand un attempt ne peut plus jamais être
+  //       synchronisé, ex: attempt déjà clôturé côté Moodle par ailleurs)
+  if (fromVersion < 10) {
+    try {
+      await db.execAsync('ALTER TABLE offline_quiz_attempts ADD COLUMN retries INTEGER DEFAULT 0;');
+      console.log('[DB] v10: offline_quiz_attempts.retries ajouté');
+    } catch {
+      // Colonne déjà présente
+    }
+  }
+
   await setUserSchemaVersion(db, CURRENT_SCHEMA_VERSION);
   console.log(`[DB] Schema migré vers v${CURRENT_SCHEMA_VERSION}`);
 }
@@ -440,22 +472,6 @@ export const createTables = async (db: SQLiteDatabase) => {
         downloaded_at INTEGER,
         UNIQUE(book_id, section_index)
     );
-    CREATE TABLE IF NOT EXISTS activity_scores(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        module_id INTEGER,
-        course_id INTEGER,
-        activity_type TEXT,
-        score INTEGER DEFAULT 0,
-        total_score INTEGER DEFAULT 0,
-        xp_earned INTEGER DEFAULT 0,
-        is_completed INTEGER DEFAULT 0,
-        attempts_count INTEGER DEFAULT 0,
-        last_attempt INTEGER,
-        created_at INTEGER DEFAULT (strftime('%s', 'now')),
-        updated_at INTEGER DEFAULT (strftime('%s', 'now')),
-        UNIQUE(user_id, module_id) ON CONFLICT REPLACE
-    );
     CREATE TABLE IF NOT EXISTS activity_progress(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
@@ -483,17 +499,6 @@ export const createTables = async (db: SQLiteDatabase) => {
         last_activity_at TEXT,
         synced_at TEXT,
         UNIQUE(user_id, course_id)
-    );
-    CREATE TABLE IF NOT EXISTS pending_sync(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        activity_type TEXT NOT NULL,
-        module_id INTEGER NOT NULL,
-        course_id INTEGER NOT NULL,
-        payload TEXT NOT NULL,
-        created_at TEXT DEFAULT (datetime('now')),
-        retries INTEGER DEFAULT 0,
-        last_attempt TEXT,
-        status TEXT DEFAULT 'pending'
     );
     CREATE TABLE IF NOT EXISTS user_streaks (
         user_id            INTEGER PRIMARY KEY,
@@ -557,6 +562,7 @@ export const createTables = async (db: SQLiteDatabase) => {
         finished_at  INTEGER,
         synced       INTEGER DEFAULT 0,
         sync_error   TEXT,
+        retries      INTEGER DEFAULT 0,
         UNIQUE(user_id, attempt_id)
     );
     CREATE TABLE IF NOT EXISTS activity_cache (
@@ -569,6 +575,11 @@ export const createTables = async (db: SQLiteDatabase) => {
         local_audio_path TEXT,
         audio_downloaded INTEGER DEFAULT 0,
         cached_at        INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS course_content_cache (
+        course_id  INTEGER PRIMARY KEY,
+        raw_json   TEXT NOT NULL DEFAULT '[]',
+        cached_at  INTEGER
     );
   `);
 
@@ -667,8 +678,6 @@ export const getAllEPUBBooks = async (db: SQLiteDatabase): Promise<EPUBBookDB[]>
 };
 
 export const saveUser = async (db: SQLiteDatabase, user: UserDB) => {
-  await db.runAsync(`DELETE FROM users`);
-
   // token colonne conservée pour compatibilité schéma mais jamais peuplée avec
   // le vrai token — celui-ci est stocké exclusivement dans expo-secure-store.
   const query = `INSERT OR REPLACE INTO users(id, username, email, firstname, lastname, fullname, ipelan_xp, coins, lives, streak, last_activity, badges, token)
@@ -784,6 +793,25 @@ export const saveModuleContents = async (db: SQLiteDatabase, contents: ModuleCon
 
 export const getModuleContentsByModule = async (db: SQLiteDatabase, moduleid: number): Promise<ModuleContent[]> => {
   return await db.getAllAsync<ModuleContent>(`SELECT * FROM module_contents WHERE moduleid = ? ORDER BY sortorder ASC`, [moduleid]);
+};
+
+export const saveCourseContentCache = async (db: SQLiteDatabase, courseId: number, rawContents: unknown): Promise<void> => {
+  await db.runAsync(
+    `INSERT OR REPLACE INTO course_content_cache(course_id, raw_json, cached_at) VALUES (?, ?, ?)`,
+    [courseId, JSON.stringify(rawContents), Date.now()]
+  );
+};
+
+export const getCourseContentCache = async (db: SQLiteDatabase, courseId: number): Promise<any[] | null> => {
+  const row = await db.getFirstAsync<{ raw_json: string }>(
+    `SELECT raw_json FROM course_content_cache WHERE course_id = ?`, [courseId]
+  );
+  if (!row) return null;
+  try {
+    return JSON.parse(row.raw_json);
+  } catch {
+    return null;
+  }
 };
 
 export const deleteUser = async (db: SQLiteDatabase, id: number) => {

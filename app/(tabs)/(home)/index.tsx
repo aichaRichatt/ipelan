@@ -15,6 +15,7 @@ import { getAllScoresForCourse } from "../../../services/storage/activity-progre
 import { calculateCourseProgress, getAllCourseProgress, saveCourseProgress } from "../../../services/storage/course-progress";
 const IS_DEV = process.env.NODE_ENV === 'development';
 const PREFERENCES_KEY = '@ipelan_preferences';
+const COURSES_CACHE_KEY = '@ipelan_courses_cache';
 
 interface ModuleData {
   id: string;
@@ -115,10 +116,29 @@ function useActiveCourse(activeToken: string, userId?: number, refreshKey = 0) {
           }
         }
       } else {
-        if (IS_DEV) console.log('[useActiveCourse] Offline — skip API, go directly to SQLite');
+        if (IS_DEV) console.log('[useActiveCourse] Offline — skip API, go directly to cache');
       }
 
-      // Tentative 3 (ou direct si offline) : SQLite cache + filtre texte
+      // Tentative 3 (ou direct si offline) : cache AsyncStorage partagé avec l'onglet Cours.
+      // Déjà filtré langue+grade lors de sa dernière écriture en ligne (voir [courseId] tab) —
+      // plus fiable que le filtre texte ci-dessous, qui ne dispose pas du nom de catégorie
+      // Moodle en SQLite (seul categoryid numérique y est stocké).
+      if (allGradeCourses.length === 0) {
+        try {
+          const cachedJson = await AsyncStorage.getItem(COURSES_CACHE_KEY);
+          if (cachedJson) {
+            const parsedCache = JSON.parse(cachedJson);
+            if (Array.isArray(parsedCache) && parsedCache.length > 0) {
+              allGradeCourses = parsedCache;
+              if (IS_DEV) console.log('[useActiveCourse] AsyncStorage cache:', allGradeCourses.length);
+            }
+          }
+        } catch (e) {
+          if (IS_DEV) console.warn('[useActiveCourse] AsyncStorage cache fallback failed:', e);
+        }
+      }
+
+      // Tentative 4 (dernier recours) : SQLite cache + filtre texte
       if (allGradeCourses.length === 0) {
         try {
           const { getDBConnection, getCourses } = await import('../../../services/storage/db-service');
@@ -375,9 +395,7 @@ export default function HomeScreen() {
     loadProgress();
   }, [course, activeToken, stats.xp]);
 
-  const handleSettingsPress = () => {
-    router.push("/(settings)/index" as any);
-  };
+ 
 
   const handleCoursePress = (courseId: number) => {
     router.push(`/(stacks)/(cours)/${courseId}` as any);
@@ -521,9 +539,7 @@ export default function HomeScreen() {
                 <Text style={styles.statPillEmoji}>🔥</Text>
                 <Text style={styles.streakText}>{stats.streak}</Text>
               </View>
-              <Pressable onPress={handleSettingsPress} style={styles.settingsPill}>
-                <Feather name="settings" size={18} color="#374151" />
-              </Pressable>
+             
               {isAutoSyncing && (
                 <View style={styles.syncDot} />
               )}

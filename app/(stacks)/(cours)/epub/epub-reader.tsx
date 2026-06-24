@@ -11,7 +11,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Feather, Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -228,6 +228,13 @@ export default function EpubReaderScreen() {
       var _REMOVE_RE     = /^(\\d+|ipelan|[eé]coutez|L\\d+-W\\d+)$/i;
       var _PUNCT_ONLY_RE = /^[?!\\-\\u2013\\u2014:,;.«»]+$/;
 
+      // ── Gating silence (détection live, voir bindAudio/Web Audio API) ──
+      // Valeurs de départ raisonnables, NON calibrées sur de vrais enregistrements —
+      // à ajuster après test sur les 3 langues (niveaux d'enregistrement variables).
+      var _SILENCE_RMS_THRESHOLD = 0.02;  // RMS normalisé 0–1 ; en dessous = silence
+      var _SILENCE_HOLDOFF_MS    = 220;   // durée de silence continu avant de figer
+      var _SPEECH_HOLDOFF_MS     = 80;    // durée de parole continue avant de reprendre
+
       var fileToUrl        = {}; // "10.opus"   → URL complète serveur
       var fileToManifestId = {}; // "11.1.opus" → "p11"
       var fileToTimings    = {}; // "10.opus"   → [{word,start,end}] ou []
@@ -248,6 +255,19 @@ export default function EpubReaderScreen() {
       var trackByManifest = {};
       var trackByFile     = {};
       var _trackCounter   = 0;
+
+      // AudioContext partagé (lazy) pour le gating silence — un seul par page,
+      // réutilisé par chaque <audio> via createMediaElementSource.
+      var _sharedAudioCtx = null;
+      function _getAudioCtx() {
+        if (_sharedAudioCtx) return _sharedAudioCtx;
+        try {
+          var Ctx = window.AudioContext || window.webkitAudioContext;
+          if (!Ctx) return null;
+          _sharedAudioCtx = new Ctx();
+        } catch (e) { _sharedAudioCtx = null; }
+        return _sharedAudioCtx;
+      }
 
       // ── 4. Wrap text nodes in-place dans un élément DOM ──
       // Remplace chaque nœud texte par des <span class="ipelan-word"> pour chaque mot.
@@ -415,6 +435,61 @@ export default function EpubReaderScreen() {
 
         var _lastIdx = -1;
 
+        // ── Gating silence (Web Audio API) ──
+        // Détection live de silence/parole, indépendante de la langue (pas de
+        // transcription) — gèle le mode proportionnel pendant les pauses.
+        // Défensif : si la Web Audio API échoue, _isSpeaking reste true et le
+        // comportement est identique à avant ce correctif (pas de régression).
+        var _isSpeaking       = true;
+        var _silenceTimerStart = null;
+        var _speechTimerStart  = null;
+        var _analyser  = null;
+        var _sampleBuf = null;
+        var _rafId     = null;
+
+        (function setupSilenceGate() {
+          try {
+            var ctx = _getAudioCtx();
+            if (!ctx) return;
+            var source = ctx.createMediaElementSource(audioEl);
+            var analyser = ctx.createAnalyser();
+            analyser.fftSize = 1024;
+            source.connect(analyser);
+            analyser.connect(ctx.destination); // CRITIQUE : sinon plus aucun son
+            _analyser  = analyser;
+            _sampleBuf = new Uint8Array(analyser.frequencyBinCount);
+          } catch (e) { _analyser = null; }
+        })();
+
+        function _sampleAmplitude() {
+          if (!_analyser || !_sampleBuf) return null;
+          _analyser.getByteTimeDomainData(_sampleBuf);
+          var sumSq = 0;
+          for (var _si = 0; _si < _sampleBuf.length; _si++) {
+            var d = _sampleBuf[_si] - 128;
+            sumSq += d * d;
+          }
+          return Math.sqrt(sumSq / _sampleBuf.length) / 128;
+        }
+
+        function _silenceGateTick() {
+          if (audioEl.paused || audioEl.ended) { _rafId = null; return; }
+          var rms = _sampleAmplitude();
+          if (rms !== null) {
+            var now = Date.now();
+            if (rms < _SILENCE_RMS_THRESHOLD) {
+              _speechTimerStart = null;
+              if (_silenceTimerStart === null) _silenceTimerStart = now;
+              if (_isSpeaking && (now - _silenceTimerStart) >= _SILENCE_HOLDOFF_MS) _isSpeaking = false;
+            } else {
+              _silenceTimerStart = null;
+              if (_speechTimerStart === null) _speechTimerStart = now;
+              if (!_isSpeaking && (now - _speechTimerStart) >= _SPEECH_HOLDOFF_MS) _isSpeaking = true;
+            }
+          }
+          _rafId = requestAnimationFrame(_silenceGateTick);
+        }
+
         audioEl.ontimeupdate = function() {
           if (!wordSpans.length) return;
           var t = this.currentTime;
@@ -468,8 +543,9 @@ export default function EpubReaderScreen() {
               idx = Math.min(Math.floor(progress * wordSpans.length), wordSpans.length - 1);
             }
           } else {
-            // ── Mode proportionnel simple (Whisper non activé) ───────────
+            // ── Mode proportionnel simple + gating silence (analyse audio live) ──
             if (!this.duration) return;
+            if (!_isSpeaking) return; // silence détecté → on gèle l'index courant (mot figé)
             idx = Math.min(Math.floor(t / this.duration * wordSpans.length), wordSpans.length - 1);
           }
 
@@ -491,15 +567,29 @@ export default function EpubReaderScreen() {
           window.ReactNativeWebView && window.ReactNativeWebView.postMessage(
             JSON.stringify({ type: 'audioStarted', sectionId: trackId })
           );
+
+          // Gating silence : reset propre à chaque lecture + reprise du contexte
+          // audio s'il était suspendu (politique autoplay) + (re)démarrage de la
+          // boucle d'échantillonnage.
+          _isSpeaking = true;
+          _silenceTimerStart = null;
+          _speechTimerStart  = null;
+          try {
+            var _ctx = _getAudioCtx();
+            if (_ctx && _ctx.state === 'suspended') _ctx.resume().catch(function(){});
+          } catch (e) {}
+          if (_analyser && _rafId === null) _rafId = requestAnimationFrame(_silenceGateTick);
         };
 
         audioEl.onpause = function() {
           window.ReactNativeWebView && window.ReactNativeWebView.postMessage(
             JSON.stringify({ type: 'audioPaused', sectionId: trackId })
           );
+          if (_rafId !== null) { cancelAnimationFrame(_rafId); _rafId = null; }
         };
 
         audioEl.onended = function() {
+          if (_rafId !== null) { cancelAnimationFrame(_rafId); _rafId = null; }
           for (var j = 0; j < wordSpans.length; j++) {
             wordSpans[j].classList.remove('current');
             wordSpans[j].classList.add('done');
@@ -764,7 +854,7 @@ export default function EpubReaderScreen() {
       const sid            = currentSection.id ?? '';
       const firstAudioFile = (currentSection.audioFiles?.[0] ?? '').split('/').pop();
       // Délai pour laisser le scroll se terminer avant de lancer l'audio
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (sid) {
           webviewRef.current?.injectJavaScript(
             `window.__ipelanPlaySection && window.__ipelanPlaySection('${sid}'); true;`
@@ -775,8 +865,26 @@ export default function EpubReaderScreen() {
           );
         }
       }, 350);
+      return () => clearTimeout(timer);
     }
   }, [currentSectionIndex, webviewReady]);
+
+  // ── Coupe l'audio dès que l'écran perd le focus ──
+  // L'audio vit dans le DOM de la WebView (balises <audio>), pas dans un
+  // player natif — démonter le composant ne suffit pas toujours à l'arrêter
+  // immédiatement (session audio WebView qui peut survivre brièvement côté
+  // natif). On le met en pause explicitement dès le blur, plus rapide et
+  // plus fiable que d'attendre le démontage complet.
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        webviewRef.current?.injectJavaScript(
+          `document.querySelectorAll('audio').forEach(function(a){ a.pause(); }); true;`
+        );
+        setWebviewPlaying(false);
+      };
+    }, [])
+  );
 
   // ── Alignement WhisperX en arrière-plan ──
   // Déclenché à chaque changement de section ET quand la WebView est prête.

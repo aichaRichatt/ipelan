@@ -310,7 +310,7 @@ export async function syncCourseProgress(
     for (const section of sections) {
       if (Array.isArray(section.modules)) {
         for (const mod of section.modules) {
-          if (mod.id && mod.completiondata?.completionstate === 1) {
+          if (mod.id && mod.completiondata?.state === 1) {
             // Only sync modules already marked complete locally
             cmids.push(mod.id);
           }

@@ -1,7 +1,13 @@
 import { getDBConnection } from '../storage/db-service';
 import { moodleCall } from '../api/moodleClient';
+import { getUserAttempts } from '../api/quizService';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
+
+// Au-delà de ce nombre d'échecs, on arrête de réessayer automatiquement la
+// sync d'un attempt — évite le retry silencieux infini d'une tentative qui
+// ne pourra plus jamais être synchronisée (ex: déjà clôturée côté Moodle).
+const MAX_SYNC_RETRIES = 5;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,9 +48,11 @@ export interface OfflineQuizAttempt {
   score      : number;
   maxScore   : number;
   startedAt  : number;
-  finishedAt : number;
+  /** null = autosave en cours (quiz pas encore terminé) */
+  finishedAt : number | null;
   synced     : boolean;
   syncError  : string | null;
+  retries    : number;
 }
 
 // ─── Download (online) ────────────────────────────────────────────────────────
@@ -60,14 +68,36 @@ export async function downloadQuizForOffline(
   courseId: number,
   token   : string
 ): Promise<void> {
-  // 1. Démarrer une tentative côté Moodle
-  const startData = await moodleCall('mod_quiz_start_attempt', { quizid: quizId }, token) as any;
-  if (startData.exception) throw new Error(startData.message || 'Impossible de démarrer la tentative');
+  // 1. Réutiliser une tentative en cours si elle existe — Moodle refuse
+  // mod_quiz_start_attempt avec l'exception "Tentative encore en cours"
+  // sinon (ex: tentative démarrée précédemment en ligne et jamais finalisée).
+  // Même logique que quizService.ts getOrCreateAttempt.
+  const existingAttempts = await getUserAttempts(token, quizId);
+  const resumable = existingAttempts.find(a => a.state === 'inprogress' || a.state === 'overdue');
 
-  const attempt   = startData.attempt;
-  const attemptId = attempt.id as number;
-  const quizName  = attempt.quiz ?? '';
-  const timeLimit = attempt.timecheckstate ?? 0;
+  let attemptId : number;
+  let quizName  = '';
+  let timeLimit = 0;
+
+  if (resumable) {
+    attemptId = resumable.id;
+    if (IS_DEV) console.log(`[QuizOffline] Reprise tentative ${attemptId} pour cmid ${cmid}`);
+  } else {
+    // ⚠️ preflightdata[confirmdatasaved] obligatoire — sans lui Moodle renvoie
+    // l'exception "Veuillez vérifier et confirmer que vous n'avez pas de
+    // données non enregistrées"
+    const startData = await moodleCall('mod_quiz_start_attempt', {
+      quizid: quizId,
+      'preflightdata[0][name]': 'confirmdatasaved',
+      'preflightdata[0][value]': '1',
+    }, token) as any;
+    if (startData.exception) throw new Error(startData.message || 'Impossible de démarrer la tentative');
+
+    const attempt = startData.attempt;
+    attemptId = attempt.id as number;
+    quizName  = attempt.quiz ?? '';
+    timeLimit = attempt.timecheckstate ?? 0;
+  }
 
   // 2. Récupérer toutes les pages (-1 = current page ; on itère jusqu'à la fin)
   const allQuestions: QuizQuestion[] = [];
@@ -77,6 +107,8 @@ export async function downloadQuizForOffline(
     const pageData = await moodleCall('mod_quiz_get_attempt_data', {
       attemptid: attemptId,
       page,
+      'preflightdata[0][name]': 'confirmdatasaved',
+      'preflightdata[0][value]': '1',
     }, token) as any;
 
     if (pageData.exception) break;
@@ -106,6 +138,59 @@ export async function downloadQuizForOffline(
      VALUES (?, ?, ?, ?, ?, ?, ?, 'prestarted', ?)`,
     [cmid, quizId, courseId, attemptId, quizName, timeLimit, JSON.stringify(allQuestions), Date.now()]
   );
+}
+
+// ─── Queue locale (offline-first) ─────────────────────────────────────────────
+//
+// Le pré-téléchargement d'un quiz exige mod_quiz_start_attempt, qui consomme
+// une vraie tentative côté Moodle. On ne veut pas perdre cette intention si
+// l'appel réseau échoue (coupure pendant l'ouverture du cours) : on enregistre
+// d'abord l'intention en local (aucun appel réseau), puis on "push" l'appel
+// réel séparément — avec retry automatique au prochain retour réseau via
+// queueProcessor.ts, plutôt qu'un échec silencieux à usage unique.
+
+/**
+ * Marque un quiz comme "à télécharger pour offline" en local — aucun appel réseau.
+ * Idempotent : n'écrase pas un cache déjà téléchargé (prestarted/offline_completed/synced).
+ */
+export async function queuePendingQuizDownload(
+  cmid    : number,
+  quizId  : number,
+  courseId: number
+): Promise<void> {
+  const db = await getDBConnection();
+  await db.runAsync(
+    `INSERT INTO quiz_cache (cmid, quiz_id, course_id, attempt_state, cached_at)
+     VALUES (?, ?, ?, 'pending', ?)
+     ON CONFLICT(cmid) DO NOTHING`,
+    [cmid, quizId, courseId, Date.now()]
+  );
+}
+
+/**
+ * Exécute (pousse vers Moodle) tous les pré-téléchargements de quiz encore en
+ * attente. Appelé depuis queueProcessor.ts au démarrage, au retour au premier
+ * plan et à la reconnexion réseau — un échec réseau ponctuel sera réessayé
+ * automatiquement au prochain déclencheur, la ligne restant en 'pending'.
+ */
+export async function processPendingQuizDownloads(token: string): Promise<void> {
+  try {
+    const db   = await getDBConnection();
+    const rows = await db.getAllAsync<{ cmid: number; quiz_id: number; course_id: number }>(
+      "SELECT cmid, quiz_id, course_id FROM quiz_cache WHERE attempt_state = 'pending'"
+    );
+
+    for (const row of rows) {
+      try {
+        await downloadQuizForOffline(row.cmid, row.quiz_id, row.course_id, token);
+        if (IS_DEV) console.log(`[QuizOffline] Pending download résolu pour cmid ${row.cmid}`);
+      } catch (e: any) {
+        if (IS_DEV) console.warn(`[QuizOffline] Pending download échoué pour cmid ${row.cmid}:`, e.message);
+      }
+    }
+  } catch (e) {
+    if (IS_DEV) console.warn('[QuizOffline] processPendingQuizDownloads error:', e);
+  }
 }
 
 // ─── Read (offline) ───────────────────────────────────────────────────────────
@@ -140,7 +225,7 @@ export async function isQuizDownloaded(cmid: number): Promise<boolean> {
   try {
     const db  = await getDBConnection();
     const row = await db.getFirstAsync<{ attempt_state: string }>(
-      "SELECT attempt_state FROM quiz_cache WHERE cmid = ? AND attempt_state != 'notstarted'",
+      "SELECT attempt_state FROM quiz_cache WHERE cmid = ? AND attempt_state NOT IN ('notstarted', 'pending')",
       [cmid]
     );
     return !!row;
@@ -183,14 +268,68 @@ export async function saveOfflineQuizAttempt(
   if (IS_DEV) console.log(`[QuizOffline] Attempt ${attemptId} sauvegardé offline pour cmid ${cmid}`);
 }
 
+/**
+ * Autosave des réponses en cours, AVANT la fin du quiz (finished_at = NULL).
+ * Appelé après chaque réponse sélectionnée — contrairement à saveOfflineQuizAttempt
+ * (appelé une seule fois à la fin), ceci garantit qu'un crash/fermeture de l'app
+ * en plein quiz offline ne perd pas les réponses déjà données.
+ * Ne touche PAS quiz_cache.attempt_state (le quiz n'est pas terminé).
+ */
+export async function saveOfflineQuizProgress(
+  userId   : number,
+  cmid     : number,
+  quizId   : number,
+  attemptId: number,
+  answers  : OfflineAnswer[],
+  startedAt: number
+): Promise<void> {
+  const db = await getDBConnection();
+  await db.runAsync(
+    `INSERT OR REPLACE INTO offline_quiz_attempts
+       (user_id, cmid, quiz_id, attempt_id, answers_json, score, max_score, started_at, finished_at, synced, retries)
+     VALUES (?, ?, ?, ?, ?, 0, 0, ?, NULL, 0, 0)`,
+    [userId, cmid, quizId, attemptId, JSON.stringify(answers), startedAt]
+  );
+}
+
+/**
+ * Récupère la progression offline non synchronisée pour un cmid donné
+ * (autosave en cours OU attempt déjà terminé en attente de sync).
+ * Utilisé au montage de l'écran quiz pour reprendre où l'utilisateur s'était
+ * arrêté plutôt que de repartir de zéro après un crash.
+ */
+export async function getOfflineQuizProgress(
+  userId: number,
+  cmid  : number
+): Promise<OfflineQuizAttempt | null> {
+  try {
+    const db  = await getDBConnection();
+    const row = await db.getFirstAsync<any>(
+      'SELECT * FROM offline_quiz_attempts WHERE user_id = ? AND cmid = ? AND synced = 0 ORDER BY id DESC LIMIT 1',
+      [userId, cmid]
+    );
+    return row ? rowToAttempt(row) : null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Sync (back online) ───────────────────────────────────────────────────────
 
+/**
+ * Tentatives terminées offline, pas encore synchronisées, qui n'ont pas
+ * dépassé MAX_SYNC_RETRIES. Les autosaves en cours (finished_at IS NULL,
+ * voir saveOfflineQuizProgress) ne sont jamais poussées vers Moodle ici —
+ * seul un quiz réellement terminé (saveOfflineQuizAttempt) doit être synchronisé.
+ */
 export async function getPendingQuizAttempts(userId: number): Promise<OfflineQuizAttempt[]> {
   try {
     const db   = await getDBConnection();
     const rows = await db.getAllAsync<any>(
-      'SELECT * FROM offline_quiz_attempts WHERE user_id = ? AND synced = 0 ORDER BY finished_at ASC',
-      [userId]
+      `SELECT * FROM offline_quiz_attempts
+       WHERE user_id = ? AND synced = 0 AND finished_at IS NOT NULL AND retries < ?
+       ORDER BY finished_at ASC`,
+      [userId, MAX_SYNC_RETRIES]
     );
     return rows.map(rowToAttempt);
   } catch {
@@ -246,7 +385,7 @@ export async function markAttemptSyncError(attemptId: number, error: string): Pr
   try {
     const db = await getDBConnection();
     await db.runAsync(
-      'UPDATE offline_quiz_attempts SET sync_error = ? WHERE id = ?',
+      'UPDATE offline_quiz_attempts SET sync_error = ?, retries = retries + 1 WHERE id = ?',
       [error, attemptId]
     );
   } catch {}
@@ -275,9 +414,10 @@ function rowToAttempt(row: any): OfflineQuizAttempt {
     score     : row.score,
     maxScore  : row.max_score,
     startedAt : row.started_at,
-    finishedAt: row.finished_at,
+    finishedAt: row.finished_at ?? null,
     synced    : row.synced === 1,
     syncError : row.sync_error ?? null,
+    retries   : row.retries ?? 0,
   };
 }
 

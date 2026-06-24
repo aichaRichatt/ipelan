@@ -12,10 +12,22 @@
       "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_MOODLE_API_URL": "https://moodle.richatt.com",
+        "EXPO_PUBLIC_EPUB_BASE_URL": "https://moodle.richatt.com",
+        "EXPO_PUBLIC_AUDIO_BASE_URL": "https://moodle.richatt.com",
+        "EXPO_PUBLIC_MOODLE_LANGUAGE_CATEGORY_ID": "18"
+      }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+        "ios": {
+      "appleId": "mohamed.elvogani@richatt.com",
+      "ascAppId": "6780934346",
+      "appleTeamId": "6FVWLNHMGZ"
+    }
+    }
   }
 }

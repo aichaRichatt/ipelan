@@ -1,6 +1,6 @@
  
 
-import { getDBConnection } from './db-service';
+import { getDBConnection, withTransaction } from './db-service';
 import { BadgeDefinition, BADGE_DEFINITIONS } from '@/constants/badges';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
@@ -53,7 +53,7 @@ export async function saveBadge(userId: number, badgeId: string): Promise<void> 
     const earnedAt = new Date().toISOString();
     
     await db.runAsync(
-      `INSERT OR REPLACE INTO user_badges (id, user_id, badge_id, earned_at, synced_at)
+      `INSERT OR IGNORE INTO user_badges (id, user_id, badge_id, earned_at, synced_at)
        VALUES (?, ?, ?, ?, NULL)`,
       [id, userId, badgeId, earnedAt]
     );
@@ -113,14 +113,16 @@ export async function markBadgesAsSynced(userId: number, badgeIds: string[]): Pr
   try {
     const db = await getDBConnection();
     const syncedAt = new Date().toISOString();
-    
-    for (const badgeId of badgeIds) {
-      await db.runAsync(
-        'UPDATE user_badges SET synced_at = ? WHERE user_id = ? AND badge_id = ?',
-        [syncedAt, userId, badgeId]
-      );
-    }
-    
+
+    await withTransaction(db, async () => {
+      for (const badgeId of badgeIds) {
+        await db.runAsync(
+          'UPDATE user_badges SET synced_at = ? WHERE user_id = ? AND badge_id = ?',
+          [syncedAt, userId, badgeId]
+        );
+      }
+    });
+
     if (IS_DEV) {
       console.log(`[badgeStorage] Badges marked as synced: ${badgeIds.join(', ')}`);
     }

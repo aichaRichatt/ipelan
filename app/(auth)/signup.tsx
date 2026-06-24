@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -11,6 +12,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -110,6 +112,7 @@ export default function SignUp() {
   };
 
   return (
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
         style={styles.flex1}
@@ -241,6 +244,7 @@ export default function SignUp() {
         }}
       />
     </SafeAreaView>
+    </TouchableWithoutFeedback>
   );
 }
 

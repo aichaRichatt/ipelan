@@ -5,7 +5,6 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
 import { moodleFetch } from "../../services/api/moodleClient";
-import { getAuthToken } from "../../services/contentLoader";
 import { loginSuccess } from "../../services/redux/slices/authSlice";
 import { RootState } from "../../services/redux/store";
 import { saveUserData } from "../../services/storage/tokenStorage";
@@ -140,6 +139,11 @@ const styles = StyleSheet.create({
   },
 });
 
+// core_user_update_users exige le token admin — moodle/user:update n'est pas
+// accordé au token d'un utilisateur authentifié pour son propre profil (à la
+// différence de moodle/user:editownprofile côté interface web Moodle).
+const ADMIN_TOKEN = process.env.EXPO_PUBLIC_MOODLE_ADMIN_TOKEN;
+
 export default function EditProfileScreen() {
   const router = useRouter();
   const dispatch = useDispatch();
@@ -187,11 +191,10 @@ export default function EditProfileScreen() {
       await saveUserData(updatedUser);
       dispatch(loginSuccess({ user: updatedUser, token: token || '' }));
 
-      if (user?.id && token) {
+      if (user?.id && ADMIN_TOKEN) {
         try {
-          const moodleToken = getAuthToken(token);
           const moodlePayload: Record<string, any> = {
-            wstoken: moodleToken,
+            wstoken: ADMIN_TOKEN,
             wsfunction: 'core_user_update_users',
             moodlewsrestformat: 'json',
             'users[0][id]': user.id,
