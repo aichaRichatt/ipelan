@@ -1255,11 +1255,7 @@ export default function EpubReaderScreen() {
         setWebviewPlaying(false);
         setWebviewActiveSectionId(null);
 
-        if (hasNextSectionRef.current) {
-          // Auto-avance vers la section suivante
-          autoPlayNextRef.current = true;
-          nextSectionRef.current();
-        } else if (!completionFiredRef.current) {
+         if (!completionFiredRef.current && !hasNextSectionRef.current) {
           // Dernière section — déclencher la completion une seule fois
           completionFiredRef.current = true;
           const cmidNum = cmid ? Number(cmid) : 0;
