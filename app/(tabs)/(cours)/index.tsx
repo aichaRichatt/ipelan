@@ -9,6 +9,7 @@ import { useSelector } from "react-redux";
 import ENV from "../../../constants/env";
 import { useLives } from "../../../hooks/useLives";
 import { filterByPreferences, getAllCoursesFromLanguageCategory, getCourseContents, getCoursesForLanguageAndGrade, getCoursesByCategoryFromEnrollments, getEnrolledCoursesByTimeline, getUserCourses, LANG_KEYWORDS } from "../../../services/api/courseService";
+import { runCatalogSync } from "../../../services/sync/catalogSyncService";
 // LANG_KEYWORDS used in Attempt 4 language fallback filter
 import { isMoodleOnline } from "../../../services/api/moodleClient";
 import { RootState } from "../../../services/redux/store";
@@ -389,9 +390,13 @@ export default function CoursScreen() {
 
         // ── Phase 3 : enrichir lessonsCount en arrière-plan ──────────────────
         const enrichedCache = [...fetchedCourses];
+        const courseContentsMap = new Map<number, any[]>();
         for (const c of fetchedCourses) {
           try {
             const sections = await getCourseContents(token, c.id);
+            if (Array.isArray(sections) && sections.length > 0) {
+              courseContentsMap.set(c.id, sections);
+            }
             let lessonsCount = 0;
             if (Array.isArray(sections)) {
               sections.forEach(sec => { if (sec.modules) lessonsCount += sec.modules.length; });
@@ -405,6 +410,9 @@ export default function CoursScreen() {
         }
         // Mettre à jour le cache avec lessonsCount enrichi
         AsyncStorage.setItem(COURSES_CACHE_KEY, JSON.stringify(enrichedCache)).catch(() => {});
+
+        // Sync arrière-plan : réutilise les contenus déjà fetchés, évite les doubles appels API
+        runCatalogSync(enrichedCache, token!, courseContentsMap).catch(() => {});
 
       } catch (err: any) {
         if (IS_DEV) console.error("Failed to fetch courses:", err);

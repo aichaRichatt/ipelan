@@ -10,10 +10,14 @@ import {
 import {
   fetchManifestMoodle,
   fetchSectionHtmlMoodle,
+  fetchHighlightsMoodle,
   buildAudioDownloadUrl,
   cacheManifest,
   getManifestOffline,
+  getHighlightsOffline,
   invalidateStaleSections,
+  HighlightsData,
+  HighlightSegment,
 } from '../services/epub/epubDownloadService';
 import {
   getSectionOffline,
@@ -49,6 +53,7 @@ export interface UseEpubReaderReturn {
   getAudioUrl       : (audioFilePath: string) => string;
   token             : string;
   refetch           : () => void;
+  sectionSegments   : Record<string, HighlightSegment[]>;
   // Rétrocompat — null en mode Moodle WS
   serverUrl         : string;
   mainHtmlUrl       : string | null;
@@ -68,6 +73,7 @@ export function useEpubReader(
   const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
   const [currentSectionHtml, setCurrentSectionHtml]   = useState<string | null>(null);
   const [isSectionLoading, setIsSectionLoading]       = useState(false);
+  const [sectionSegments, setSectionSegments]         = useState<Record<string, HighlightSegment[]>>({});
   const [fetchTrigger, setFetchTrigger]     = useState(0);
 
   const cmidNum = cmid != null ? Number(cmid) : null;
@@ -103,6 +109,20 @@ export function useEpubReader(
         }
 
         if (IS_DEV) console.log('[useEpubReader] Ready:', m.metadata?.title, '|', m.readingSections?.length, 'sections');
+
+        // Charger les highlights JSON (offline d'abord, puis réseau)
+        getHighlightsOffline(bookId).then(offline => {
+          if (!cancelled && offline?.sectionSegments) {
+            setSectionSegments(offline.sectionSegments);
+            if (IS_DEV) console.log('[useEpubReader] Segments from offline cache');
+          }
+        });
+        fetchHighlightsMoodle(cmidNum, token, bookId).then(h => {
+          if (!cancelled && h?.sectionSegments) {
+            setSectionSegments(h.sectionSegments);
+            if (IS_DEV) console.log('[useEpubReader] Segments loaded:', Object.keys(h.sectionSegments).length, 'sections');
+          }
+        });
       } catch (err: any) {
         // Ignorer les erreurs d'un effet annulé
         if (cancelled || abortCtrl.signal.aborted) return;
@@ -115,6 +135,12 @@ export function useEpubReader(
             setFileBaseUrl(offline.fileBaseUrl);
             setLoadingState('ready');
             if (IS_DEV) console.log('[useEpubReader] Offline manifest loaded');
+            // Charger les highlights offline
+            getHighlightsOffline(bookId).then(h => {
+              if (!cancelled && h?.sectionSegments) {
+                setSectionSegments(h.sectionSegments);
+              }
+            });
             return;
           }
         } catch {}
@@ -226,6 +252,7 @@ export function useEpubReader(
     getAudioUrl,
     token,
     refetch  : () => setFetchTrigger(n => n + 1),
+    sectionSegments,
     serverUrl: '',        // rétrocompat
     mainHtmlUrl       : null,   // rétrocompat
     currentSectionPageUrl: null, // rétrocompat

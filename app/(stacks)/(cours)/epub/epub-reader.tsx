@@ -1,5 +1,5 @@
  // ─────────────────────────────────────────────────────────────────────────────
-// Lecteur EPUB — connecté au serveur EpubPlugin (Node.js)
+// Lecteur EPUB Plugin
 //
 // Architecture (identique à test-reader.html) :
 //   1. Fetch manifest depuis le serveur → readingSections [{id, text, audioFiles}]
@@ -40,6 +40,7 @@ import {
   EpubWordTiming,
   fetchAlignment,
 } from '../../../../services/epub/epubServerService';
+import { HighlightSegment } from '../../../../services/epub/epubDownloadService';
 import { syncAfterActivity } from '../../../../services/sync/progressSync';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
@@ -57,6 +58,9 @@ export default function EpubReaderScreen() {
   const [showToc, setShowToc]           = useState(false);
   const [webviewReady, setWebviewReady] = useState(false);
   const [webviewError, setWebviewError] = useState<string | null>(null);
+  const [debugWordCount, setDebugWordCount] = useState<number | null>(null);
+  const [debugInfo, setDebugInfo] = useState<string | null>(null);
+  const debugTapCount = useRef(0);
   const completionFiredRef              = useRef(false);
 
   // État audio piloté par les messages de la WebView
@@ -98,6 +102,7 @@ export default function EpubReaderScreen() {
     getAudioUrl,
     token,
     refetch,
+    sectionSegments,
   } = useEpubReader(cmid ?? null, epubUrl ?? null);
 
   // Maintenir les refs synchronisées
@@ -122,7 +127,7 @@ export default function EpubReaderScreen() {
     let cancelled = false;
 
     (async () => {
-      // 1. Mettre en cache la section suivante si pas déjà présente
+      //  Mettre en cache la section suivante si pas déjà présente
       const cached = await getSectionOffline(bookId, nextIdx);
       if (!cancelled && !cached?.htmlPage) {
         try {
@@ -137,7 +142,7 @@ export default function EpubReaderScreen() {
         } catch {}
       }
 
-      // 2. Télécharger l'audio de la section courante pour offline
+      //  Télécharger l'audio de la section courante pour offline
       if (!cancelled && currentSection?.audioFiles?.length) {
         await downloadAudioForSection(bookId, currentSection.audioFiles, getAudioUrl);
       }
@@ -146,16 +151,72 @@ export default function EpubReaderScreen() {
     return () => { cancelled = true; };
   }, [currentSectionIndex, manifest, cmid, token]);
 
-  // ── Sections audio : données injectées dans le JS de la WebView ──
-  // Scopé à la section COURANTE uniquement (mode section-par-section) :
-  //   • Le WebView ne contient qu'une section → 1 audio max dans le DOM
-  //   • Payload JS minimal = chargement plus rapide + moins de mémoire
-  // Une entrée par fichier audio pour couvrir les pages multi-audio (p11.1, p11.2…)
+
   const audioSections = (currentSection?.audioFiles ?? []).map(af => ({
     id      : currentSection?.id ?? '',
     audioUrl: getAudioUrl(af),
     timings : currentSection?.wordTimings?.[af] ?? [],
   }));
+
+  // Segments desktop par section (JSON uploadé depuis SYNCBOOK Studio)
+  const sectionSegmentsForJS: Record<string, Array<{start: number; end: number; wordStart: number; wordEnd: number; text: string}>> = {};
+  for (const [secId, segs] of Object.entries(sectionSegments)) {
+    sectionSegmentsForJS[secId] = segs.map(s => ({
+      start: s.start,
+      end: s.end,
+      wordStart: s.wordStart,
+      wordEnd: s.wordEnd,
+      text: s.text,
+    }));
+  }
+  // Cross-reference segments desktop → manifest.
+  // Le desktop sélectionne les sections via querySelectorAll('[id]') tandis que
+  // le serveur utilise div[class*="page"]. Ces sélecteurs différents donnent
+  // des indices de section différents (ex: "section-9" sur desktop vs "section-7"
+  // sur serveur pour la même page).
+  //
+  // Solution: ignorer les IDs, matcher par NUMÉRO DE FICHIER AUDIO.
+  // Pour chaque section desktop (ex: "section-9-0"), on essaie de trouver
+  // une section manifest dont le fichier audio a le bon numéro de page.
+  if (manifest?.readingSections) {
+    // Index: tout fichier audio du manifest → info section
+    const afIndex: Array<{ name: string; num: number; sub: string }> = [];
+    for (const mSec of manifest.readingSections) {
+      for (const af of mSec.audioFiles) {
+        const name = af.split('/').pop()?.split('?')[0] || '';
+        const num = parseInt(name, 10);
+        const sub = name.match(/\.(\d+)\./)?.[1] ?? '';
+        if (name && !isNaN(num)) afIndex.push({ name, num, sub });
+      }
+    }
+    // Pour chaque groupe de segments desktop, trouver le fichier audio qui matche
+    for (const [dId, segs] of Object.entries(sectionSegments)) {
+      const dNum = parseInt(dId.match(/\d+/)?.[0] || '0', 10);
+      if (isNaN(dNum)) continue;
+      const dSub = dId.match(/-(\d+)$/)?.[1] ?? '';
+      // Essayer dNum, dNum+1, dNum-1 comme numéro de page possible
+      for (const pageNum of [dNum, dNum + 1, dNum - 1]) {
+        if (pageNum <= 0) continue;
+        let matched = false;
+        for (const entry of afIndex) {
+          if (entry.num !== pageNum) continue;
+          // Le sub "0" du desktop correspond au fichier sans sub-audio
+          const subMatch = (dSub === '0' && entry.sub === '') || (dSub !== '0' && dSub === entry.sub);
+          if (!subMatch) continue;
+          const mapped = segs.map(s => ({
+            start: s.start, end: s.end,
+            wordStart: s.wordStart, wordEnd: s.wordEnd,
+            text: s.text,
+          }));
+          if (!sectionSegmentsForJS[entry.name]) sectionSegmentsForJS[entry.name] = mapped;
+          if (IS_DEV) console.log(`[EpubReader] Matched "${dId}" → audio ${entry.name} (page ${pageNum})`);
+          matched = true;
+          break;
+        }
+        if (matched) break;
+      }
+    }
+  }
 
   // ── CSS injecté ──
   // Principe : ne PAS écraser les styles de l'EPUB original.
@@ -187,8 +248,9 @@ export default function EpubReaderScreen() {
       padding: 0 1px;
       transition: background 0.08s, color 0.08s;
     }
-    .ipelan-word.current { background: #F59E0B; color: #fff !important; }
-    .ipelan-word.done    { opacity: 0.55; }
+    .ipelan-word.current   { background: #3B82F6; color: #fff !important; }
+    .ipelan-word.hl-playing { background: rgba(59, 130, 246, 0.2); }
+    .ipelan-word.done       { background: rgba(0,0,0,0.06); }
     /* Ponctuation : visible, jamais surlignée */
     .ipelan-punct { display: inline; }
   `;
@@ -220,13 +282,8 @@ export default function EpubReaderScreen() {
 
       // ── 2. Manifest data ──
       var AUDIO_SECTIONS = ${JSON.stringify(audioSections)};
-
-      // Mots à garder visibles mais JAMAIS surlignés :
-      // • chiffres seuls (numéros de page)
-      // • "IPELAN", "Écoutez"
-      // • codes de leçon : L1-W1, L2-W3, L10-W12…
-      var _REMOVE_RE     = /^(\\d+|ipelan|[eé]coutez|L\\d+-W\\d+)$/i;
-      var _PUNCT_ONLY_RE = /^[?!\\-\\u2013\\u2014:,;.«»]+$/;
+      window.__IPELAN_SEGMENTS = ${JSON.stringify(sectionSegmentsForJS)};
+      var SEGMENTS_BY_SECTION = window.__IPELAN_SEGMENTS;
 
       // ── Gating silence (détection live, voir bindAudio/Web Audio API) ──
       // Valeurs de départ raisonnables, NON calibrées sur de vrais enregistrements —
@@ -238,6 +295,7 @@ export default function EpubReaderScreen() {
       var fileToUrl        = {}; // "10.opus"   → URL complète serveur
       var fileToManifestId = {}; // "11.1.opus" → "p11"
       var fileToTimings    = {}; // "10.opus"   → [{word,start,end}] ou []
+      var fileToSegments   = {}; // "11.1.opus" → [{start,end,wordStart,wordEnd}]
       for (var _i = 0; _i < AUDIO_SECTIONS.length; _i++) {
         var _s = AUDIO_SECTIONS[_i];
         if (_s.audioUrl) {
@@ -246,8 +304,38 @@ export default function EpubReaderScreen() {
           fileToUrl[_f]     = _s.audioUrl;
           fileToTimings[_f] = _s.timings || [];
           if (_s.id) fileToManifestId[_f] = _s.id;
+          // Segments : essayer section ID puis filename
+          var _segData = (_s.id && SEGMENTS_BY_SECTION[_s.id]) || SEGMENTS_BY_SECTION[_f];
+          if (_segData) {
+            fileToSegments[_f] = _segData;
+          }
         }
       }
+      // Fallback initial : même logique que __ipelanSetSegments
+      (function() {
+        var _found0 = Object.keys(fileToSegments).length;
+        if (_found0 < AUDIO_SECTIONS.length) {
+          function _matchNum(idStr) {
+            var m = (idStr || '').match(/(\d+(?:\.\d+)?)(?:-(\d+))?$/);
+            return m ? m[1] + '|' + (m[2] || '') : null;
+          }
+          var _segByNum = {};
+          for (var _sk in SEGMENTS_BY_SECTION) {
+            var _nk = _matchNum(_sk);
+            if (_nk) _segByNum[_nk] = SEGMENTS_BY_SECTION[_sk];
+          }
+          for (var _fi = 0; _fi < AUDIO_SECTIONS.length; _fi++) {
+            var _as = AUDIO_SECTIONS[_fi];
+            if (!_as.audioUrl) continue;
+            var _af = _as.audioUrl.split('/').pop().split('?')[0];
+            if (fileToSegments[_af]) continue;
+            var _mk = _matchNum(_as.id);
+            if (_mk && _segByNum[_mk]) {
+              fileToSegments[_af] = _segByNum[_mk];
+            }
+          }
+        }
+      })();
 
       // ── 3. État ──
       var currentAudio    = null;
@@ -255,6 +343,16 @@ export default function EpubReaderScreen() {
       var trackByManifest = {};
       var trackByFile     = {};
       var _trackCounter   = 0;
+
+      // Ratio temps-de-parole/durée observé par fichier (EMA), pour estimer
+      // la durée totale de parole en mode proportionnel sans VAD précomputé.
+      // "10.opus" → ratio observé entre 0 et 1.
+      var _fileSpeechRatio = {};
+
+      // Durée réelle observée pour les fichiers en streaming (Infinity).
+      // Stockée depuis onended → réutilisée dès la lecture suivante du même
+      // fichier pour un highlight proportionnel précis.
+      var _fileDuration = {};
 
       // AudioContext partagé (lazy) pour le gating silence — un seul par page,
       // réutilisé par chaque <audio> via createMediaElementSource.
@@ -272,6 +370,13 @@ export default function EpubReaderScreen() {
       // ── 4. Wrap text nodes in-place dans un élément DOM ──
       // Remplace chaque nœud texte par des <span class="ipelan-word"> pour chaque mot.
       // Ne crée AUCUN élément conteneur — le style EPUB original est entièrement préservé.
+      //
+      // IMPORTANT : les classes filtrées et la ponctuation isolée DOIVENT correspondre
+      // exactement à ce que fait le desktop dans prepareHtmlForHighlight() et extractText(),
+      // sinon les indices wordStart/wordEnd des segments JSON ne correspondent pas.
+      var _MOBILE_SKIP_CLASSES = /illustration|caption|figcaption|label|no-highlight|decorative|nav-bar|footer-bar|sgc-nav|bottom-text/i;
+      var _MOBILE_AUDIO_LABEL_RE = /^(écoutez|écouter|audio|listen|play|replay)[\s:;!]*$/i;
+      var _MOBILE_PUNCT_RE = /^[?.!,:;—–-]+$/;
       function wrapTextNodes(el, wordSpans) {
         if (!el || el.dataset.ipelanWrapped) return;
         el.dataset.ipelanWrapped = '1';
@@ -282,19 +387,23 @@ export default function EpubReaderScreen() {
         var node;
         while ((node = walker.nextNode()) !== null) {
           if (!node.textContent.trim()) continue;
-          // Ignorer les nœuds à l'intérieur de <audio>, <script>, <style>
-          // et ceux déjà dans un span ipelan
           var p = node.parentElement;
           var skip = false;
           while (p && p !== el) {
             var tag = (p.tagName || '').toUpperCase();
-            if (tag === 'AUDIO' || tag === 'SCRIPT' || tag === 'STYLE') { skip = true; break; }
+            if (tag === 'AUDIO' || tag === 'SCRIPT' || tag === 'STYLE' || tag === 'VIDEO' || tag === 'FIGURE' || tag === 'FIGCAPTION') { skip = true; break; }
             if (p.classList &&
                 (p.classList.contains('ipelan-word') || p.classList.contains('ipelan-punct'))) {
               skip = true; break;
             }
+            // Filtrer les classes que le desktop exclut (label, decorative, etc.)
+            if (p.className && _MOBILE_SKIP_CLASSES.test(p.className)) { skip = true; break; }
+            // Filtrer les éléments masqués (role="presentation", aria-hidden)
+            if (p.getAttribute && (p.getAttribute('role') === 'presentation' || p.getAttribute('aria-hidden') === 'true')) { skip = true; break; }
             p = p.parentElement;
           }
+          // Filtrer les labels audio (Écoutez :, écouter, listen, etc.)
+          if (!skip && _MOBILE_AUDIO_LABEL_RE.test(node.textContent.trim())) skip = true;
           if (!skip) textNodes.push(node);
         }
 
@@ -305,108 +414,77 @@ export default function EpubReaderScreen() {
           var raw = tn.textContent;
           if (!raw.trim()) continue;
 
-          // Découpe en tokens : mots ET espaces conservés pour recomposer le texte
-          // Note : on traite même les nœuds à un seul mot (suppression du garde parts.length <= 1)
           var parts = raw.split(/(\\s+)/);
-
-          // ── Détection nom de locuteur dans ce nœud texte ─────────────────
-          // "Hammadi : Jam waali ?" → speakerIdx pointe sur "Hammadi"
-          // Un locuteur = premier mot de lettres uniquement, pas ALL-CAPS, suivi de ":"
-          var speakerIdx = -1;
-          var firstWordIdx = -1;
-          for (var _fi = 0; _fi < parts.length; _fi++) {
-            if (!parts[_fi] || /^\\s+$/.test(parts[_fi])) continue;
-            firstWordIdx = _fi; break;
-          }
-          if (firstWordIdx !== -1) {
-            var fw = parts[firstWordIdx];
-            var nextTok = '';
-            for (var _ni = firstWordIdx + 1; _ni < parts.length; _ni++) {
-              if (!parts[_ni] || /^\\s+$/.test(parts[_ni])) continue;
-              nextTok = parts[_ni]; break;
-            }
-            if ((nextTok === ':' || nextTok === ':') &&
-                /^[A-Za-z\\u00C0-\\u024F]+$/.test(fw) &&
-                fw !== fw.toUpperCase()) {
-              speakerIdx = firstWordIdx;
-            }
-          }
-          // ─────────────────────────────────────────────────────────────────
 
           var frag = document.createDocumentFragment();
           var wrappedAny = false;
           for (var j = 0; j < parts.length; j++) {
             var part = parts[j];
             if (part === '') continue;
-            // Conserver les espaces tels quels
-            if (/^\\s+$/.test(part)) {
+            if (/^\s+$/.test(part)) {
               frag.appendChild(document.createTextNode(part));
               continue;
             }
-            // Nom de locuteur, mot filtré ou ponctuation seule → texte brut ou span non-hl
-            if (j === speakerIdx || _REMOVE_RE.test(part)) {
-              frag.appendChild(document.createTextNode(part));
+            // Ponctuation isolée → span .ipelan-punct, PAS dans wordSpans
+            if (_MOBILE_PUNCT_RE.test(part)) {
+              var punctSpan = document.createElement('span');
+              punctSpan.textContent = part;
+              punctSpan.className = 'ipelan-punct';
+              frag.appendChild(punctSpan);
               continue;
             }
             var span = document.createElement('span');
             span.textContent = part;
-            if (_PUNCT_ONLY_RE.test(part)) {
-              span.className = 'ipelan-punct';
-            } else {
-              span.className = 'ipelan-word';
-              wordSpans.push(span);
-              wrappedAny = true;
-            }
+            span.className = 'ipelan-word';
+            wordSpans.push(span);
+            wrappedAny = true;
             frag.appendChild(span);
           }
-          // Remplacer le nœud texte par le fragment même si un seul mot wrappé
           if (wrappedAny) tn.parentNode.replaceChild(frag, tn);
         }
       }
 
-      // ── 5. Éléments de texte d'un audio ───────────────────────────────────
-      // Stratégie :
-      //   1. Remonter jusqu'au wrapper de section (section, .page-container, body)
-      //   2. Trouver l'enfant DIRECT de ce wrapper qui contient l'audio
-      //   3. Collecter tous les siblings SUIVANTS jusqu'au prochain audio (ou fin)
-      //
-      // Pourquoi remonter jusqu'à la section et pas juste au <p> parent ?
-      // Le EPUB peut avoir : <section> > <div.block> > <p>Écoutez <audio/></p>
-      //                                             > <div>dialogue</div>
-      //                      > <p>résumé</p>   ← sibling de div.block, PAS de <p>
-      // En restant au niveau <p>, on rate le <p>résumé</p>.
-      function getTextElsForAudio(audioEl) {
-        // Remonter jusqu'à la section / page-container / body
-        var section = audioEl.parentElement;
-        while (section) {
-          var tag = (section.tagName || '').toUpperCase();
-          var cls = section.className || '';
-          if (tag === 'SECTION' || tag === 'BODY' || tag === 'HTML') break;
-          if (cls.indexOf('page-container') !== -1 || cls.indexOf('chapter-wrapper') !== -1) break;
-          section = section.parentElement;
+      // ── 4bis. Pondération des mots par longueur de caractères ─────────────
+      // Un mot de 10 lettres prend plus de temps à prononcer qu'un mot de 2 —
+      // remplace la répartition uniforme (1 mot = 1 fraction égale de temps)
+      // par une répartition proportionnelle à la longueur. cumWeights[i] est
+      // la borne supérieure normalisée (0..1) du mot i ; cumWeights[n-1] === 1.
+      function buildCumulativeWeights(wordSpans) {
+        var n = wordSpans.length;
+        var weights = new Array(n);
+        var total = 0;
+        for (var i = 0; i < n; i++) {
+          weights[i] = Math.max(1, (wordSpans[i].textContent || '').length);
+          total += weights[i];
         }
-        if (!section) return [];
-
-        // Enfant direct de la section qui contient l'audio
-        var audioBlock = audioEl;
-        while (audioBlock.parentElement && audioBlock.parentElement !== section) {
-          audioBlock = audioBlock.parentElement;
+        var cum = new Array(n);
+        var acc = 0;
+        for (var j = 0; j < n; j++) {
+          acc += weights[j];
+          cum[j] = acc / total;
         }
-
-        // Collecter tous les siblings de audioBlock jusqu'au prochain audio
-        var result = [];
-        var cur = audioBlock.nextElementSibling;
-        while (cur) {
-          if ((cur.tagName || '').toUpperCase() === 'AUDIO') break;
-          if (cur.querySelector && cur.querySelector('audio')) break;
-          result.push(cur);
-          cur = cur.nextElementSibling;
-        }
-        return result;
+        return cum;
       }
 
+      // Recherche binaire : index du mot dont l'intervalle [cum[i-1], cum[i]]
+      // contient progress (0..1).
+      function indexFromProgress(cumWeights, progress) {
+        var lo = 0, hi = cumWeights.length - 1;
+        while (lo < hi) {
+          var mid = (lo + hi) >> 1;
+          if (cumWeights[mid] < progress) lo = mid + 1; else hi = mid;
+        }
+        return lo;
+      }
+
+      // ── 5. getTextElsForAudio — SUPPRIMÉ ───────────────────────────────────
+      // Cette fonction collectait les éléments de texte autour de chaque audio.
+      // Remplacée par le body-wide wrap dans setupAudio (section 9) pour que
+      // tous les audios partagent le même wordSpans couvrant le texte complet
+      // de la section. Voir #9 pour la justification.
+
       // ── 8. Fixer la source audio et attacher les listeners ──
-      function bindAudio(audioEl, trackId, wordSpans) {
+      function bindAudio(audioEl, trackId, wordSpans, cumWeights) {
         audioEl.dataset.trackId = trackId;
 
         // Mise à jour de la source : on écrit le bon URL du serveur dans <source src>.
@@ -434,6 +512,12 @@ export default function EpubReaderScreen() {
         }
 
         var _lastIdx = -1;
+        var _lastSegIdx = -1;
+        var _lastSegStateKey = null;
+
+        // Durée de repli pour le streaming mobile où duration = Infinity.
+        // Mise à jour à chaque ontimeupdate avec le max de currentTime observé.
+        var _maxStreamTime = 0;
 
         // ── Gating silence (Web Audio API) ──
         // Détection live de silence/parole, indépendante de la langue (pas de
@@ -446,6 +530,22 @@ export default function EpubReaderScreen() {
         var _analyser  = null;
         var _sampleBuf = null;
         var _rafId     = null;
+
+        // ── Horloge de temps de parole effectif (mode proportionnel) ──
+        // Voir ontimeupdate : _speechElapsed n'avance que pendant la parole,
+        // ce qui évite le saut en avant au retour d'un silence.
+        var _speechElapsed  = 0;
+        var _lastTickTime   = null;
+        var _speechRatioEMA = _fileSpeechRatio[srcFile] || 1.0;
+
+        // ── Calibration adaptative du seuil de silence (par fichier) ──
+        var _calibSamples    = [];
+        var _calibDeadlineMs = null;
+        var _CALIB_WINDOW_MS = 400;
+        var _localThreshold  = _SILENCE_RMS_THRESHOLD;
+
+        // ── Anti-flicker (throttle des mises à jour DOM) ──
+        var _lastDomUpdateMs = null;
 
         (function setupSilenceGate() {
           try {
@@ -477,7 +577,31 @@ export default function EpubReaderScreen() {
           var rms = _sampleAmplitude();
           if (rms !== null) {
             var now = Date.now();
-            if (rms < _SILENCE_RMS_THRESHOLD) {
+
+            // ── Phase de calibration (bruit de fond de CET enregistrement,
+            // mesuré sur les premières _CALIB_WINDOW_MS de chaque lecture) ──
+            if (_calibDeadlineMs !== null) {
+              _calibSamples.push(rms);
+              if (now >= _calibDeadlineMs) {
+                if (_calibSamples.length >= 5) {
+                  _calibSamples.sort(function(a, b) { return a - b; });
+                  var noiseFloor = _calibSamples[Math.floor(_calibSamples.length * 0.05)];
+                  // Plafond appliqué au RÉSULTAT final (pas à un seul terme) :
+                  // si l'audio démarre directement sur de la parole (pas de
+                  // silence initial), noiseFloor est mesuré pendant la parole
+                  // et peut être élevé — sans ce plafond, noiseFloor*2.5 peut
+                  // dépasser 0.05 et classer toute la suite comme silence,
+                  // gelant le highlight quasi immédiatement après la calibration.
+                  _localThreshold = Math.min(Math.max(noiseFloor * 2.5, 0.008), 0.05);
+                }
+                _calibDeadlineMs = null;
+              }
+              // Pendant la calibration : ne pas geler le mot (comportement "parole" par défaut)
+              _rafId = requestAnimationFrame(_silenceGateTick);
+              return;
+            }
+
+            if (rms < _localThreshold) {
               _speechTimerStart = null;
               if (_silenceTimerStart === null) _silenceTimerStart = now;
               if (_isSpeaking && (now - _silenceTimerStart) >= _SILENCE_HOLDOFF_MS) _isSpeaking = false;
@@ -497,59 +621,180 @@ export default function EpubReaderScreen() {
 
           // Lookup dynamique à chaque tick : permet à __ipelanSetTimings()
           // de mettre à jour fileToTimings après que bindAudio() a été appelé.
-          // (si capturé à la liaison, les mises à jour WhisperX n'auraient aucun effet)
-          var _timings = fileToTimings[srcFile] || [];
+          var _timings  = fileToTimings[srcFile]  || [];
+          var _segments = fileToSegments[srcFile] || [];
 
-          if (_timings.length > 0) {
-            // ── Mode segments Whisper ─────────────────────────────────────
-            // _timings = [{start, end}] — segments d'activité vocale détectés.
-            // Whisper ne transcrit pas le Pulaar correctement mais détecte
-            // précisément QUAND il y a de la parole (VAD).
+          if (_segments.length > 0) {
+            // ── Mode 1 : segments JSON (priorité exclusive) ─────────────────
+            // Les plages de mots (_ws, _we) sont précalculées par _computeWordRanges()
+            // d'après le texte de chaque segment. Les wordStart/wordEnd du desktop
+            // sont ignorés (indices desktop ≠ mobile).
             //
-            // Algorithme :
-            // 1. Trouver dans quel segment on est (t entre start et end)
-            // 2. Calculer la progression DANS ce segment (0.0 → 1.0)
-            // 3. Mapper : portion du segment → portion des wordSpans
+            //   hl-playing : mots de _ws à idxInSeg (phrase en cours)
+            //   current    : mot exact à la position courante
 
-            // Calculer la durée totale de parole (somme des durées de segments)
-            var totalSpeech = 0;
-            for (var _ts = 0; _ts < _timings.length; _ts++) {
-              totalSpeech += Math.max(0, _timings[_ts].end - _timings[_ts].start);
+            var currentSeg = null;
+            var _activeSegIdx = -1;
+            for (var _si = 0; _si < _segments.length; _si++) {
+              var _seg = _segments[_si];
+              if (t >= _seg.start && t <= _seg.end) { currentSeg = _seg; _activeSegIdx = _si; break; }
             }
-            if (totalSpeech <= 0) {
-              // Fallback proportionnel si pas de segments
-              if (!this.duration) return;
-              idx = Math.min(Math.floor(t / this.duration * wordSpans.length), wordSpans.length - 1);
-            } else {
-              // Calculer combien de "temps de parole" s'est écoulé jusqu'à t
-              var spokenSoFar = 0;
-              var inSegment = false;
-              for (var _ti = 0; _ti < _timings.length; _ti++) {
-                var seg = _timings[_ti];
-                if (t < seg.start) break; // pas encore arrivé
-                if (t <= seg.end) {
-                  // Dans ce segment — ajouter la portion de ce segment
-                  spokenSoFar += (t - seg.start);
-                  inSegment = true;
-                  break;
-                }
-                // Segment entièrement passé
-                spokenSoFar += (seg.end - seg.start);
+
+            var _lastSegIdxLocal = _segments.length - 1;
+
+            // ── Après le dernier segment → geler sur le dernier mot ──
+            if (!currentSeg && t > _segments[_lastSegIdxLocal].end) {
+              if (_lastIdx < 0) {
+                _lastIdx = wordSpans.length - 1;
+                _lastSegIdx = -1;
               }
-              if (!inSegment && t > (_timings[_timings.length - 1] || {}).end) {
-                spokenSoFar = totalSpeech; // après le dernier segment
-              }
-              var progress = Math.min(spokenSoFar / totalSpeech, 1);
-              idx = Math.min(Math.floor(progress * wordSpans.length), wordSpans.length - 1);
+              return;
             }
-          } else {
-            // ── Mode proportionnel simple + gating silence (analyse audio live) ──
-            if (!this.duration) return;
-            if (!_isSpeaking) return; // silence détecté → on gèle l'index courant (mot figé)
-            idx = Math.min(Math.floor(t / this.duration * wordSpans.length), wordSpans.length - 1);
+
+            // ── Entre deux segments → geler l'état actuel (silence) ──
+            if (!currentSeg && _lastSegIdx >= 0) {
+              return;
+            }
+
+            // ── Avant le premier segment → aucun highlight ──
+            if (!currentSeg) {
+              for (var _clr = 0; _clr < wordSpans.length; _clr++) {
+                wordSpans[_clr].classList.remove('current', 'hl-playing');
+              }
+              _lastIdx = -1;
+              _lastSegIdx = -1;
+              _lastDomUpdateMs = null;
+              return;
+            }
+
+            // Anti-flicker (changement de segment)
+            if (_activeSegIdx !== _lastSegIdx) {
+              _lastIdx = -1;
+              _lastSegIdx = _activeSegIdx;
+              _lastDomUpdateMs = null;
+            }
+
+            // ── Position dans la phrase ──
+            var idxInSeg = -1;
+            var _phraseStart = -1;
+            if (currentSeg && currentSeg._ws >= 0 && currentSeg._we >= currentSeg._ws) {
+              var segDuration = Math.max(currentSeg.end - currentSeg.start, 0.001);
+              var segProgress = Math.min(Math.max((t - currentSeg.start) / segDuration, 0), 1);
+              var spanCount  = currentSeg._we - currentSeg._ws;
+              idxInSeg = Math.round(currentSeg._ws + segProgress * spanCount);
+              if (idxInSeg > currentSeg._we) idxInSeg = currentSeg._we;
+              if (idxInSeg >= wordSpans.length) idxInSeg = wordSpans.length - 1;
+              _phraseStart = currentSeg._ws;
+            } else if (currentSeg) {
+              // Fallback : time-proportionnel si le text matching a echoue
+              var _totalTime = 0;
+              for (var _si2 = 0; _si2 < _segments.length; _si2++) {
+                _totalTime += Math.max(0.001, _segments[_si2].end - _segments[_si2].start);
+              }
+              var _elapsed = 0;
+              for (var _si2 = 0; _si2 < _activeSegIdx; _si2++) {
+                _elapsed += Math.max(0, _segments[_si2].end - _segments[_si2].start);
+              }
+              _elapsed += Math.max(0, t - currentSeg.start);
+              var progress = Math.min(Math.max(_elapsed / _totalTime, 0), 1);
+              idxInSeg = indexFromProgress(cumWeights, progress);
+              if (idxInSeg >= wordSpans.length) idxInSeg = wordSpans.length - 1;
+              // Phrase approx : debut du segment proportionnel
+              var _elapsedBefore = 0;
+              for (var _si2 = 0; _si2 < _activeSegIdx; _si2++) {
+                _elapsedBefore += Math.max(0, _segments[_si2].end - _segments[_si2].start);
+              }
+              _phraseStart = indexFromProgress(cumWeights, Math.min(Math.max(_elapsedBefore / _totalTime, 0), 1));
+            }
+
+            // Anti-flicker
+            if (idxInSeg >= 0 && idxInSeg < _lastIdx) idxInSeg = _lastIdx;
+            if (idxInSeg >= 0 && idxInSeg === _lastIdx) return;
+            var _nowMs = Date.now();
+            if (_lastDomUpdateMs !== null && (_nowMs - _lastDomUpdateMs) < 40) return;
+            _lastDomUpdateMs = _nowMs;
+            if (idxInSeg >= 0) _lastIdx = idxInSeg;
+
+            for (var j = 0; j < wordSpans.length; j++) {
+              var inPhrase = (_phraseStart >= 0 && j >= _phraseStart && j <= idxInSeg);
+              if (inPhrase) {
+                wordSpans[j].classList.toggle('current', j === idxInSeg && idxInSeg >= 0);
+                wordSpans[j].classList.toggle('hl-playing', j !== idxInSeg);
+                wordSpans[j].classList.remove('done');
+              } else {
+                wordSpans[j].classList.remove('current', 'hl-playing', 'done');
+              }
+            }
+            return;
           }
 
+          // ── Mode 2/3 désactivé — highlight UNIQUEMENT via les segments JSON ──
+          // Le code des modes 2 (Whisper VAD) et 3 (proportionnel) ci-dessous
+          // est conservé dans la fonction mais N'EST JAMAIS ATTEINT.
+          return;
+
+          if (idx < 0) {
+            if (_timings.length > 0) {
+              // ── Mode 2 : segments Whisper VAD ────────────────────────────
+              // _timings = [{start, end}] — segments d'activité vocale.
+
+              var totalSpeech = 0;
+              for (var _ts = 0; _ts < _timings.length; _ts++) {
+                totalSpeech += Math.max(0, _timings[_ts].end - _timings[_ts].start);
+              }
+              if (totalSpeech <= 0) {
+                if (!this.duration) return;
+                idx = indexFromProgress(cumWeights, t / this.duration);
+              } else {
+                var spokenSoFar = 0;
+                var inSegment = false;
+                for (var _ti = 0; _ti < _timings.length; _ti++) {
+                  var seg = _timings[_ti];
+                  if (t < seg.start) break;
+                  if (t <= seg.end) {
+                    spokenSoFar += (t - seg.start);
+                    inSegment = true;
+                    break;
+                  }
+                  spokenSoFar += (seg.end - seg.start);
+                }
+                if (!inSegment && t > (_timings[_timings.length - 1] || {}).end) {
+                  spokenSoFar = totalSpeech;
+                }
+                var progress = Math.min(spokenSoFar / totalSpeech, 1);
+                idx = indexFromProgress(cumWeights, progress);
+              }
+            } else {
+              // ── Mode 3 : proportionnel simple ────────────────────────────
+              // PAS de blocage silence (_isSpeaking) — AnalyserNode Web Audio
+              // = 0 RMS sur mobile (contexte suspendu). _speechElapsed avance
+              // sans condition.
+              var _dur = this.duration;
+              if (!_dur || !isFinite(_dur)) {
+                if (t > _maxStreamTime) _maxStreamTime = t;
+                _dur = _fileDuration[srcFile] || 90;
+              }
+              if (_dur <= 0) return;
+
+              var _dt = (_lastTickTime === null) ? 0 : (t - _lastTickTime);
+              _lastTickTime = t;
+              if (_dt < 0 || _dt > 1.5) _dt = 0;
+
+              _speechElapsed += _dt;
+
+              var _estTotalSpeech = _dur * _speechRatioEMA;
+              var _spProgress = Math.min(_speechElapsed / Math.max(_estTotalSpeech, 0.001), 1);
+              idx = indexFromProgress(cumWeights, _spProgress);
+            }
+          }
+
+          // ── Anti-flicker : jamais de retour en arrière, throttle DOM ~25fps ──
+          if (idx < _lastIdx) idx = _lastIdx;
           if (idx < 0 || idx === _lastIdx) return;
+          var _nowMs = Date.now();
+          if (_lastDomUpdateMs !== null && (_nowMs - _lastDomUpdateMs) < 40) return;
+          _lastDomUpdateMs = _nowMs;
+
           _lastIdx = idx;
           for (var j = 0; j < wordSpans.length; j++) {
             wordSpans[j].classList.toggle('current', j === idx);
@@ -559,6 +804,10 @@ export default function EpubReaderScreen() {
 
         audioEl.onplay = function() {
           currentAudio = audioEl;
+          _lastIdx = -1;
+          _lastSegIdx = -1;
+          _lastSegStateKey = null;
+          _lastDomUpdateMs = null;
           // Mettre en pause tous les autres audios
           var allAudios = document.querySelectorAll('audio');
           for (var i = 0; i < allAudios.length; i++) {
@@ -574,6 +823,18 @@ export default function EpubReaderScreen() {
           _isSpeaking = true;
           _silenceTimerStart = null;
           _speechTimerStart  = null;
+
+          // Reset de l'horloge de temps de parole + nouvelle fenêtre de calibration
+          // du seuil de silence pour CETTE lecture (bruit de fond propre au fichier).
+          // Recharge aussi _speechRatioEMA : si l'utilisateur réécoute la même
+          // section sans recharger la page, onended a pu mettre à jour
+          // _fileSpeechRatio[srcFile] depuis la lecture précédente.
+          _speechElapsed   = 0;
+          _lastTickTime    = null;
+          _speechRatioEMA  = _fileSpeechRatio[srcFile] || _speechRatioEMA;
+          _calibSamples    = [];
+          _calibDeadlineMs = Date.now() + _CALIB_WINDOW_MS;
+
           try {
             var _ctx = _getAudioCtx();
             if (_ctx && _ctx.state === 'suspended') _ctx.resume().catch(function(){});
@@ -590,18 +851,38 @@ export default function EpubReaderScreen() {
 
         audioEl.onended = function() {
           if (_rafId !== null) { cancelAnimationFrame(_rafId); _rafId = null; }
+
+          // Mémoriser le ratio temps-de-parole/durée observé sur cette lecture
+          // (EMA par fichier) — affine l'estimation du mode proportionnel dès
+          // la prochaine écoute du même fichier (fréquent : réécoute pédagogique).
+          if (this.duration > 0 && _speechElapsed > 0) {
+            var _observedRatio = Math.min(_speechElapsed / this.duration, 1);
+            var _prevRatio = _fileSpeechRatio[srcFile];
+            _fileSpeechRatio[srcFile] = (_prevRatio === undefined)
+              ? _observedRatio
+              : (0.3 * _observedRatio + 0.7 * _prevRatio);
+          }
+
+          // Pour le streaming mobile (duration = Infinity), mémoriser la durée
+          // réelle observée (= max de currentTime atteint) pour le prochain
+          // highlight proportionnel du même fichier.
+          if (_maxStreamTime > 0 && !_fileDuration[srcFile]) {
+            _fileDuration[srcFile] = _maxStreamTime;
+          }
+
           for (var j = 0; j < wordSpans.length; j++) {
-            wordSpans[j].classList.remove('current');
-            wordSpans[j].classList.add('done');
+            wordSpans[j].classList.remove('current', 'hl-playing', 'done');
           }
           window.ReactNativeWebView && window.ReactNativeWebView.postMessage(
             JSON.stringify({ type: 'audioEnded', sectionId: trackId })
           );
           setTimeout(function() {
             for (var k = 0; k < wordSpans.length; k++) {
-              wordSpans[k].classList.remove('current', 'done');
+              wordSpans[k].classList.remove('current', 'hl-playing', 'done');
             }
             _lastIdx = -1;
+            _lastSegIdx = -1;
+            _lastDomUpdateMs = null;
           }, 600);
         };
 
@@ -615,10 +896,43 @@ export default function EpubReaderScreen() {
         };
       }
 
-      // ── 9. Setup principal : un audio à la fois, sans logique de section ──
+      // ── 9. Setup principal : wordSpans PARTAGÉ entre tous les audios ──
+      // CRITIQUE : segments.wordStart/wordEnd sont relatifs au texte COMPLET
+      // de la section, pas au texte autour d'un audio spécifique.
+      // getTextElsForAudio() collectait par audio => sur pages multi-audio,
+      // wordSpans ne couvrait qu'une partie → décalage d'index.
+      // On wrappe maintenant tout le <body> une seule fois, tous les audios
+      // partagent le même wordSpans.
+      var _ipelanWordSpans = null;
+      var _ipelanCumWeights = null;
       function setupAudio() {
         var allAudios = document.querySelectorAll('audio');
         if (!allAudios.length) return;
+
+        // Wrapper tout le texte de la section UNE SEULE FOIS
+        if (!_ipelanWordSpans) {
+          _ipelanWordSpans = [];
+          var pageRoot = document.body || document.documentElement;
+          wrapTextNodes(pageRoot, _ipelanWordSpans);
+          _ipelanCumWeights = buildCumulativeWeights(_ipelanWordSpans);
+
+          // DEBUG
+          if (_ipelanWordSpans.length > 0 && window.ReactNativeWebView) {
+            var debugWords = [];
+            for (var _dw = 0; _dw < Math.min(_ipelanWordSpans.length, 5); _dw++) {
+              debugWords.push(_ipelanWordSpans[_dw].textContent);
+            }
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'debugWordSpans',
+              wordCount: _ipelanWordSpans.length,
+              srcFile: 'shared',
+              firstWords: debugWords,
+            }));
+          }
+        }
+
+        var wordSpans = _ipelanWordSpans;
+        var cumWeights = _ipelanCumWeights || [];
 
         for (var idx = 0; idx < allAudios.length; idx++) {
           var audioEl = allAudios[idx];
@@ -637,16 +951,28 @@ export default function EpubReaderScreen() {
           var mId = fileToManifestId[srcFile];
           if (mId && !trackByManifest[mId]) trackByManifest[mId] = trackId;
 
-          // Éléments de texte : siblings qui suivent l'audio jusqu'au prochain audio
-          var textEls = getTextElsForAudio(audioEl);
-          var wordSpans = [];
-          for (var ti = 0; ti < textEls.length; ti++) {
-            wrapTextNodes(textEls[ti], wordSpans);
-          }
-
-          bindAudio(audioEl, trackId, wordSpans);
+          bindAudio(audioEl, trackId, wordSpans, cumWeights);
         }
       }
+
+      // ── 9bis. Debug : inspecter le highlight ──
+      window.__debugHighlight = function() {
+        var allSpans = document.querySelectorAll('.ipelan-word');
+        var info = {
+          totalAudio: document.querySelectorAll('audio').length,
+          wordSpanCount: allSpans.length,
+          currentWords: [],
+          audioSections: typeof AUDIO_SECTIONS !== 'undefined' ? AUDIO_SECTIONS.length : 0,
+        };
+        for (var _dh = 0; _dh < Math.min(allSpans.length, 10); _dh++) {
+          var _s = allSpans[_dh];
+          info.currentWords.push((_s.textContent || '').substring(0, 20) + (_s.classList.contains('current') ? ' ←CURRENT' : '') + (_s.classList.contains('done') ? ' ←DONE' : ''));
+        }
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'debugHighlight', info: info }));
+        }
+        return JSON.stringify(info, null, 2);
+      };
 
       // ── 10. Navigation API ──
       var _pageWrappers = null;
@@ -744,6 +1070,113 @@ export default function EpubReaderScreen() {
         fileToTimings[filename] = timings;
       };
 
+      // ── Re-indexation des plages de mots par segment ──
+      // Le desktop stocke wordStart/wordEnd (indices du desktop) qui ne
+      // correspondent pas aux wordSpans du mobile. On recalcule ces plages
+      // en CHERCHANT le TEXTE de chaque segment dans les wordSpans reels.
+      // Approche: on concatene TOUS les wordSpans nettoyes en une seule
+      // chaine, puis on y cherche le texte du segment (nettoye lui aussi).
+      // Cela fonctionne meme si les limites de mots different (ex: segment
+      // "ALKULAL AA" → 2 mots, mais wordSpans ["ALKULAL","A","A"] → 3 mots).
+      function _cleanWord(t) {
+        return (t || '').toLowerCase().replace(/[^a-z0-9\u00C0-\u02AF\u0300-\u036F\u0400-\u04FF]+/g, '');
+      }
+      function _computeWordRanges() {
+        var wordEls = document.querySelectorAll('.ipelan-word');
+        if (!wordEls.length) return;
+        var wordCleans = [];
+        for (var _wi = 0; _wi < wordEls.length; _wi++) {
+          wordCleans.push(_cleanWord(wordEls[_wi].textContent || ''));
+        }
+        var allClean = wordCleans.join('');
+        // Index: position caractere → index mot
+        var charToWord = [];
+        for (var _wi = 0; _wi < wordCleans.length; _wi++) {
+          for (var _c = 0; _c < wordCleans[_wi].length; _c++) {
+            charToWord.push(_wi);
+          }
+        }
+        for (var _f in fileToSegments) {
+          var segs = fileToSegments[_f];
+          if (!segs || !segs.length) continue;
+          for (var _si = 0; _si < segs.length; _si++) {
+            var seg = segs[_si];
+            if (!seg.text) { seg._ws = -1; seg._we = -1; continue; }
+            var segClean = _cleanWord(seg.text);
+            if (!segClean) { seg._ws = -1; seg._we = -1; continue; }
+            var pos = allClean.indexOf(segClean);
+            if (pos >= 0 && charToWord.length > 0) {
+              var endPos = Math.min(pos + segClean.length - 1, charToWord.length - 1);
+              seg._ws = charToWord[pos];
+              seg._we = charToWord[endPos];
+            } else {
+              seg._ws = -1; seg._we = -1;
+            }
+          }
+        }
+      }
+
+      // ── API segments JSON (desktop Word highlights) ──
+      // Même principe que __ipelanSetTimings : la fonction capture
+      // fileToSegments + AUDIO_SECTIONS par closure, donc même quand
+      // les segments arrivent asynchronement de RN (re-injection),
+      // on met à jour la variable dans la portée IIFE.
+      function _matchNum(idStr) {
+        var m = (idStr || '').match(/(\d+(?:\.\d+)?)(?:-(\d+))?$/);
+        return m ? m[1] + '|' + (m[2] || '') : null;
+      }
+      window.__ipelanSetSegments = function(segmentsBySection) {
+        window.__IPELAN_SEGMENTS = segmentsBySection;
+        var _s, _f, _found = 0;
+        for (var _i = 0; _i < AUDIO_SECTIONS.length; _i++) {
+          _s = AUDIO_SECTIONS[_i];
+          if (_s.audioUrl) {
+            _f = _s.audioUrl.split('/').pop().split('?')[0];
+            // Essayer par section ID puis par filename (Stratégie 2)
+            var _segData = segmentsBySection[_s.id] || segmentsBySection[_f];
+            if (_segData) {
+              fileToSegments[_f] = _segData;
+              _found++;
+            }
+          }
+        }
+        // Fallback par extraction numérique : IDs "section-9-0" → "9|0"
+        if (_found < AUDIO_SECTIONS.length) {
+          var _segByNum = {};
+          for (var _sk in segmentsBySection) {
+            var _nk = _matchNum(_sk);
+            if (_nk) _segByNum[_nk] = segmentsBySection[_sk];
+          }
+          for (var _fi = 0; _fi < AUDIO_SECTIONS.length; _fi++) {
+            _s = AUDIO_SECTIONS[_fi];
+            if (!_s.audioUrl) continue;
+            _f = _s.audioUrl.split('/').pop().split('?')[0];
+            if (fileToSegments[_f]) continue;
+            var _mk = _matchNum(_s.id);
+            if (_mk && _segByNum[_mk]) {
+              fileToSegments[_f] = _segByNum[_mk];
+              _found++;
+            }
+          }
+        }
+        _computeWordRanges();
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'debugState',
+          state: { injected: true, matchedSectionIds: _found, audioSectionIds: AUDIO_SECTIONS.map(function(s){return s.id;}), segmentsKeys: Object.keys(segmentsBySection), ts: Date.now() }
+        }));
+      };
+      window.__ipelanDebugState = function() {
+        var _keys = Object.keys(fileToSegments);
+        var _ids  = AUDIO_SECTIONS.map(function(s) { return s.id; });
+        var _segKeys = Object.keys(window.__IPELAN_SEGMENTS || {});
+        return { fileToSegmentsKeys: _keys, manifestIds: _ids, segmentsKeys: _segKeys, ts: Date.now() };
+      };
+      // Post initial state immediately on page load
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'debugState',
+        state: { initial: true, fileToSegmentsKeys: Object.keys(fileToSegments), manifestIds: AUDIO_SECTIONS.map(function(s){return s.id;}), segmentsKeys: Object.keys(window.__IPELAN_SEGMENTS || {}) }
+      }));
+
       // ── 12. Images/sources Moodle : ajouter token sur les URLs pluginfile ──
       // Le <base href> PHP résout les URLs relatives en webservice/pluginfile.php.
       // Le WebView n'a pas de cookie Moodle → toute URL pluginfile sans token est bloquée.
@@ -789,6 +1222,8 @@ export default function EpubReaderScreen() {
 
       // ── 13. Init ──
       setupAudio();
+      // Re-indexer les plages de mots après la création des wordSpans
+      _computeWordRanges();
       new MutationObserver(function() { setupAudio(); })
         .observe(document.documentElement, { childList: true, subtree: true });
 
@@ -839,6 +1274,17 @@ export default function EpubReaderScreen() {
         if (IS_DEV) console.warn('[EpubReader] Audio error in WebView for section:', data.sectionId);
         setWebviewPlaying(false);
         setWebviewActiveSectionId(null);
+
+      } else if (data.type === 'debugWordSpans') {
+        setDebugWordCount(data.wordCount);
+        if (IS_DEV) console.log('[EpubReader] Debug wordSpans:', data);
+
+      } else if (data.type === 'debugHighlightResult') {
+        setDebugInfo(data.result);
+        if (IS_DEV) console.log('[EpubReader] Debug highlight result:', data.result);
+
+      } else if (data.type === 'debugState') {
+        if (IS_DEV) console.log('[EpubReader] WebView state:', JSON.stringify(data.state));
       }
     } catch {}
   }, [cmid, courseId, addXP, addCoins]); // cmid/courseId/addXP/addCoins stables — refs pour le reste
@@ -868,6 +1314,25 @@ export default function EpubReaderScreen() {
       return () => clearTimeout(timer);
     }
   }, [currentSectionIndex, webviewReady]);
+
+  // ── Injecter les segments JSON dans la WebView ──
+  // CRITIQUE : la WebView RELOAD complètement à chaque changement de section
+  // (source={{ html }}). À chaque pageReady il faut ré-injecter les segments
+  // dans la nouvelle IIFE — même si sectionSegmentsForJS n'a pas changé.
+  // Sans ça, la nouvelle WebView ne reçoit jamais les segments.
+  // On utilise __ipelanSetSegments (closure sur fileToSegments de l'IIFE) —
+  // contrairement à du raw injectJavaScript qui s'exécute en scope global.
+  const segmentsJson = JSON.stringify(sectionSegmentsForJS);
+  useEffect(() => {
+    if (!webviewReady) return;
+    if (segmentsJson === '{}') return; // pas encore chargés
+    const _segKeys = Object.keys(sectionSegmentsForJS);
+    if (IS_DEV) console.log('[EpubReader] Injecting segments for sections:', _segKeys);
+    webviewRef.current?.injectJavaScript(
+      `window.__ipelanSetSegments(${segmentsJson}); true;`
+    );
+    if (IS_DEV) console.log('[EpubReader] Segments injected into WebView');
+  }, [segmentsJson, webviewReady]);
 
   // ── Coupe l'audio dès que l'écran perd le focus ──
   // L'audio vit dans le DOM de la WebView (balises <audio>), pas dans un
@@ -1065,7 +1530,17 @@ export default function EpubReaderScreen() {
           <Feather name="arrow-left" size={24} color="black" />
         </Pressable>
         <View style={styles.headerContent}>
-          <Text style={styles.headerTitle} numberOfLines={1}>
+          <Text style={styles.headerTitle} numberOfLines={1}
+            onPress={() => {
+              debugTapCount.current++;
+              if (debugTapCount.current >= 5) {
+                debugTapCount.current = 0;
+                webviewRef.current?.injectJavaScript(
+                  'window.ReactNativeWebView.postMessage(JSON.stringify({type:"debugHighlightResult", result:__debugHighlight()})); true;'
+                );
+              }
+            }}
+          >
             {displayTitle}
           </Text>
           <Text style={styles.headerSub}>
@@ -1091,6 +1566,13 @@ export default function EpubReaderScreen() {
       <View style={styles.progressTrack}>
         <View style={[styles.progressFill, { width: `${progress}%` }]} />
       </View>
+
+      {(debugWordCount !== null || debugInfo) && (
+        <View style={{ position:'absolute', top: 100, right: 10, backgroundColor:'rgba(0,0,0,0.7)', padding: 6, borderRadius: 6, zIndex: 999 }}>
+          {debugWordCount !== null && <Text style={{ color: '#fff', fontSize: 11 }}>Mots: {debugWordCount}</Text>}
+          {debugInfo !== null && <Text style={{ color: '#ff0', fontSize: 9, maxWidth: 280 }}>{debugInfo}</Text>}
+        </View>
+      )}
 
       {/* WebView — charge la section courante via HTML inline (Moodle WS) */}
       <View style={styles.webviewContainer}>

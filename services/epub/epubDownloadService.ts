@@ -7,8 +7,37 @@ import type { EpubManifest, EpubReadingSection } from './epubServerService';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
 
- const BATCH_SIZE  = 3;
- const PRIORITY_N  = 5;
+const BATCH_SIZE  = 3;
+const PRIORITY_N  = 5;
+
+export interface HighlightSegment {
+  id: string;
+  type: string;
+  text: string;
+  start: number;
+  end: number;
+  chapterId: string;
+  wordStart: number;
+  wordEnd: number;
+  sectionId: string;
+}
+
+export interface HighlightsData {
+  bookId: string | null;
+  title: string;
+  author: string;
+  language: string;
+  version: string;
+  exportedAt: string;
+  chapters: Array<{
+    id: string;
+    title: string;
+    order: number;
+    audioFile: string;
+    segments: HighlightSegment[];
+  }>;
+  sectionSegments: Record<string, HighlightSegment[]>;
+}
 
  
 export interface DownloadProgress {
@@ -113,6 +142,42 @@ export async function fetchManifestMoodle(
 }
 
 
+export async function fetchHighlightsMoodle(
+  cmid: number,
+  token: string,
+  bookId?: string
+): Promise<HighlightsData | null> {
+  try {
+    const data = await moodleCall('local_ipelan_epub_get_highlighting', { cmid }, token) as any;
+    if (data?.exception) return null;
+    if (!data?.highlighting_json) return null;
+
+    const parsed: HighlightsData = JSON.parse(data.highlighting_json);
+    if (!parsed?.chapters) return null;
+
+    // Build section → segments map
+    const sectionSegments: Record<string, HighlightSegment[]> = {};
+    for (const ch of parsed.chapters) {
+      if (!ch.segments) continue;
+      for (const seg of ch.segments) {
+        if (!seg.sectionId) continue;
+        if (!sectionSegments[seg.sectionId]) sectionSegments[seg.sectionId] = [];
+        sectionSegments[seg.sectionId].push(seg);
+      }
+    }
+    parsed.sectionSegments = sectionSegments;
+
+    // Cache offline
+    if (bookId) cacheHighlightsOffline(bookId, parsed).catch(() => {});
+
+    if (IS_DEV) console.log(`[EpubDownload] Highlights loaded: ${Object.keys(sectionSegments).length} sections`, Object.keys(sectionSegments));
+    return parsed;
+  } catch (e) {
+    if (IS_DEV) console.warn('[EpubDownload] fetchHighlightsMoodle failed:', e);
+    return null;
+  }
+}
+
 export async function fetchSectionHtmlMoodle(
   cmid         : number,
   sectionIndex : number,
@@ -213,6 +278,50 @@ export async function downloadBook(
 }
 
  
+const HIGHLIGHT_KEY = (bookId: string) => `@epub_highlight_${bookId}`;
+
+export async function cacheHighlightsOffline(
+  bookId: string,
+  data: HighlightsData
+): Promise<void> {
+  try {
+    await AsyncStorage.setItem(HIGHLIGHT_KEY(bookId), JSON.stringify({ data, cachedAt: Date.now() }));
+  } catch (e) {
+    if (IS_DEV) console.warn('[EpubDownload] cacheHighlightsOffline failed:', e);
+  }
+}
+
+export async function getHighlightsOffline(
+  bookId: string
+): Promise<HighlightsData | null> {
+  try {
+    const raw = await AsyncStorage.getItem(HIGHLIGHT_KEY(bookId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.data?.chapters) return null;
+    // Reconstruire sectionSegments au cas où ce serait une version plus ancienne
+    const sectionSegments: Record<string, HighlightSegment[]> = {};
+    for (const ch of parsed.data.chapters) {
+      if (!ch.segments) continue;
+      for (const seg of ch.segments) {
+        if (!seg.sectionId) continue;
+        if (!sectionSegments[seg.sectionId]) sectionSegments[seg.sectionId] = [];
+        sectionSegments[seg.sectionId].push(seg);
+      }
+    }
+    parsed.data.sectionSegments = sectionSegments;
+    return parsed.data as HighlightsData;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearHighlightsCache(bookId: string): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(HIGHLIGHT_KEY(bookId));
+  } catch {}
+}
+
 const MANIFEST_KEY = (bookId: string) => `@epub_manifest_${bookId}`;
 
 export async function cacheManifest(
